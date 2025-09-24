@@ -1,4 +1,4 @@
-import contant
+from . import contant
 
 
 def gen_random_string(length=10):
