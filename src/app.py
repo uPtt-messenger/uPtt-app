@@ -42,34 +42,51 @@ async def demo_message_generator(log_func):
     它模擬週期性事件，並使用傳入的 log_func 來發送訊息。
     """
 
+    first_round = True
+
     while True:
         await asyncio.sleep(5)
 
-        cur_mail_idx = ptt_service.call('get_newest_index', {'index_type': PyPtt.NewIndex.MAIL})
+        del_mail_idx = ptt_service.call('get_newest_index', {'index_type': PyPtt.NewIndex.MAIL})
         # log_func(f"目前信件數量: {cur_mail_idx}")
 
-        if cur_mail_idx == 0:
+        if del_mail_idx == 0:
             continue
 
-        try:
-            mail_info = ptt_service.call('get_mail', {'index': cur_mail_idx})
-        except PyPtt.exceptions.Error:
-            continue
+        del_mail_list = []
 
-        if PyPtt.MailField.title not in mail_info:
-            continue
+        lookback_limit = 10
+        if first_round:
+            first_round = False
+            lookback_limit = 100
 
-        if mail_info[PyPtt.MailField.title] != contant.PTT_MSG_TITLE:
-            continue
+        for mail_idx in range(max(1, del_mail_idx - lookback_limit), del_mail_idx + 1):
+            try:
+                mail_info = ptt_service.call('get_mail', {'index': mail_idx})
+            except PyPtt.exceptions.Error:
+                continue
 
-        ptt_service.call('del_mail', {'index': cur_mail_idx})
+            if PyPtt.MailField.title not in mail_info:
+                continue
 
-        cur_context = mail_info[PyPtt.MailField.content]
-        cur_context = cur_context[cur_context.find(
-            contant.PTT_MSG_DIVISION_LINE) + len(contant.PTT_MSG_DIVISION_LINE):].strip()
-        cur_context = cur_context[:cur_context.rfind(contant.PTT_MSG_DIVISION_LINE)].strip()
+            if mail_info[PyPtt.MailField.title] != contant.PTT_MSG_TITLE:
+                continue
 
-        log_func(cur_context)
+            if target.lower() not in mail_info[PyPtt.MailField.author].lower():
+                continue
+
+            cur_context = mail_info[PyPtt.MailField.content]
+            cur_context = cur_context[cur_context.find(
+                contant.PTT_MSG_DIVISION_LINE) + len(contant.PTT_MSG_DIVISION_LINE):].strip()
+            cur_context = cur_context[:cur_context.rfind(contant.PTT_MSG_DIVISION_LINE)].strip()
+
+            log_func(cur_context)
+
+            del_mail_list.append(mail_idx)
+
+        del_mail_list.reverse()
+        for del_mail_idx in del_mail_list:
+            ptt_service.call('del_mail', {'index': del_mail_idx})
 
 
 async def main():
