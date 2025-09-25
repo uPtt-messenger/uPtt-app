@@ -192,7 +192,7 @@ class UPttApp:
                 FormattedTextControl(
                     lambda: [('fg:red', f"錯誤：{self.error_message}")] if self.error_message else []
                 ),
-                height=0 if not self.error_message else 1,
+                height=lambda: 0 if not self.error_message else 1,
                 align=WindowAlign.CENTER
             ),
             Window(height=D(weight=1)),
@@ -337,6 +337,7 @@ class UPttApp:
 
             self.ptt_service.call('logout')
             self.ptt_service.close()
+            await asyncio.sleep(1)
             print("程式已終止。")
             print(contant.DIVISION_TYPE * os.get_terminal_size().columns)
             goodbye_message = f"由衷感謝您使用 {pkg_name}！"
