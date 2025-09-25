@@ -5,6 +5,16 @@
 
 這是一個使用 Python 開發的終端機介面（TUI）應用程式，讓使用者可以只透過批踢踢伺服器與另一位使用者進行**即時聊天**。
 
+## 實際畫面
+
+### 登入視窗
+<img width="410" height="735" alt="image" src="https://github.com/user-attachments/assets/33cb8055-66cd-4a96-8198-5607c1319c0b" />
+
+### 對話視窗
+<img width="360" height="574" alt="image" src="https://github.com/user-attachments/assets/4b1063bd-cf0f-4c6c-b9eb-c80c8c409fea" />
+
+
+
 ## 需求
 
 - Python 3.8 ~ 3.12
