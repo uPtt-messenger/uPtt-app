@@ -5,6 +5,7 @@ import sys
 import PyPtt
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
+from prompt_toolkit.filters import Condition
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import Layout
 from prompt_toolkit.layout.containers import (
@@ -12,19 +13,17 @@ from prompt_toolkit.layout.containers import (
     Float,
     FloatContainer,
     HSplit,
-    VSplit,
     Window,
     WindowAlign,
 )
 from prompt_toolkit.layout.controls import FormattedTextControl, BufferControl
-from prompt_toolkit.filters import Condition
-from prompt_toolkit.widgets import Frame
 from prompt_toolkit.layout.dimension import Dimension as D
 from prompt_toolkit.layout.processors import PasswordProcessor
+from prompt_toolkit.widgets import Frame
 from wcwidth import wcswidth
 
-from . import config, contant, utils, __author__
 from . import __name__ as pkg_name, __version__
+from . import config, contant, utils
 
 
 class UPttApp:
@@ -118,6 +117,7 @@ class UPttApp:
 
     def _setup_key_bindings(self):
         """設定全域按鍵綁定。"""
+
         @self.bindings.add('c-c')
         def _(event):
             """Ctrl+C: 離開程式。"""
@@ -194,6 +194,7 @@ class UPttApp:
 
     def _get_select_target_windows(self) -> list:
         """產生選擇對話對象畫面的視窗元件。"""
+
         def get_centered_text(text):
             return lambda: ' ' * max(0, (os.get_terminal_size().columns - 2 - wcswidth(text)) // 2) + text
 
@@ -215,6 +216,7 @@ class UPttApp:
 
     def _get_chat_windows(self) -> list:
         """產生聊天畫面的視窗元件。"""
+
         def get_display_text():
             terminal_lines = os.get_terminal_size().lines
             # 限制訊息數量，避免過多佔用記憶體
@@ -309,6 +311,7 @@ class UPttApp:
     async def run(self):
         """執行應用程式主迴圈並處理資源清理。"""
         print(f"歡迎使用 {pkg_name} v{__version__}")
+        sys.stdout.write(f"\x1b]2;{pkg_name} v{__version__}\x07")
         self._update_layout()
         try:
             await self.app.run_async()
