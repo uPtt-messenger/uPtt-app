@@ -54,6 +54,7 @@ class UPttApp:
         self.target_buffer = Buffer(name="target_buffer")
         self.input_buffer = Buffer(multiline=False, name="input_buffer")
         self.id_window = None
+        self.pw_window = None
 
         # --- 初始化 UI ---
         self.bindings = KeyBindings()
@@ -128,7 +129,7 @@ class UPttApp:
             """Enter: 根據當前狀態執行不同操作。"""
             if self.state == 'LOGIN':
                 if event.app.layout.current_buffer == self.id_buffer:
-                    event.app.layout.focus(self.pw_buffer)
+                    event.app.layout.focus(self.pw_window)
                 elif event.app.layout.current_buffer == self.pw_buffer:
                     self.login()
             elif self.state == 'SELECT_TARGET':
@@ -171,6 +172,12 @@ class UPttApp:
             align=WindowAlign.CENTER
         )
 
+        self.pw_window = Window(
+            content=BufferControl(buffer=self.pw_buffer, input_processors=[PasswordProcessor()]),
+            height=1,
+            align=WindowAlign.CENTER
+        )
+
         return [
             Window(height=D(weight=1)),
             Window(FormattedTextControl(get_centered_logo)),
@@ -179,15 +186,14 @@ class UPttApp:
             self.id_window,
             Window(height=1),
             Window(FormattedTextControl(get_centered_text("批踢踢密碼")), height=1),
-            Window(
-                content=BufferControl(buffer=self.pw_buffer, input_processors=[PasswordProcessor()]),
-                height=1,
-                align=WindowAlign.CENTER
-            ),
+            self.pw_window,
             Window(height=1),
             Window(
-                FormattedTextControl(get_centered_text(self.error_message)),
+                FormattedTextControl(
+                    lambda: [('fg:red', f"錯誤：{self.error_message}")] if self.error_message else []
+                ),
                 height=0 if not self.error_message else 1,
+                align=WindowAlign.CENTER
             ),
             Window(height=D(weight=1)),
         ]
@@ -252,6 +258,13 @@ class UPttApp:
 
     # --- 公開方法: 核心邏輯 ---
 
+    def _handle_login_failure(self, message: str):
+        """處理登入失敗的通用邏輯。"""
+        self._set_error(message)
+        self.id_buffer.reset()
+        self.pw_buffer.reset()
+        self.app.layout.focus(self.id_buffer)
+
     def login(self):
         """處理登入邏輯。"""
         self.ptt_id = self.id_buffer.text
@@ -261,13 +274,13 @@ class UPttApp:
             self.ptt_service.call('login', {'ptt_id': self.ptt_id, 'ptt_pw': ptt_pw, 'kick_other_session': True})
             self._set_state('SELECT_TARGET')
         except PyPtt.exceptions.WrongIDorPassword:
-            self._set_error('帳號密碼錯誤')
+            self._handle_login_failure('帳號密碼錯誤')
         except PyPtt.exceptions.OnlySecureConnection:
-            self._set_error('只能使用安全連線')
+            self._handle_login_failure('只能使用安全連線')
         except PyPtt.exceptions.ResetYourContactEmail:
-            self._set_error('請先至信箱設定連絡信箱')
+            self._handle_login_failure('請先至信箱設定連絡信箱')
         except PyPtt.exceptions.LoginError as e:
-            self._set_error(f'登入失敗: {e}')
+            self._handle_login_failure(f'登入失敗: {e}')
 
     def select_target(self):
         """處理選擇對話對象的邏輯。"""
