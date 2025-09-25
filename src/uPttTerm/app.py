@@ -111,9 +111,9 @@ class UPttApp:
         """產生登入畫面的視窗元件。"""
         return [
             Window(height=1),
-            Window(FormattedTextControl("請輸入您的 PTT ID:"), height=1),
+            Window(FormattedTextControl("請輸入您的批踢踢帳號:"), height=1),
             Window(content=BufferControl(buffer=self.id_buffer), height=1),
-            Window(FormattedTextControl("請輸入您的 PTT 密碼:"), height=1),
+            Window(FormattedTextControl("請輸入您的批踢踢密碼:"), height=1),
             Window(content=BufferControl(buffer=self.pw_buffer, input_processors=[PasswordProcessor()]), height=1),
             Window(height=1),
             Window(FormattedTextControl(self.error_message, style='class:error'),
@@ -140,8 +140,10 @@ class UPttApp:
                 self.messages.pop(0)
 
             lines = []
+            # 可用行數 = 總行數 - 頂部保留行 - 底部保留行
+            available_lines = terminal_lines - 3 - 2
             # 只顯示終端機可容納的最新訊息
-            for msg_type, msg in self.messages[-(terminal_lines - 1):]:
+            for msg_type, msg in self.messages[-available_lines:]:
                 if msg_type == contant.SYSTEM_MSG:
                     if msg == contant.DIVISION_LINE:
                         lines.append(contant.DIVISION_TYPE * os.get_terminal_size().columns)
@@ -156,7 +158,11 @@ class UPttApp:
             return '\n'.join(lines)
 
         return [
+            Window(FormattedTextControl(f"[系統] 這是與 {self.target} 的對話視窗。"), height=1),
+            Window(FormattedTextControl(f"[系統] 輸入 '{contant.CMD_EXIT}' 來離開。"), height=1),
+            Window(FormattedTextControl(lambda: contant.DIVISION_TYPE * os.get_terminal_size().columns), height=1),
             Window(content=FormattedTextControl(get_display_text), height=D(weight=1), wrap_lines=True),
+            Window(FormattedTextControl(lambda: contant.DIVISION_TYPE * os.get_terminal_size().columns), height=1),
             Window(content=BufferControl(buffer=self.input_buffer), height=D.exact(1), wrap_lines=False)
         ]
 
@@ -198,7 +204,7 @@ class UPttApp:
             return
 
         self.input_buffer.reset()
-        if text.lower() == 'exit':
+        if text.lower() == contant.CMD_EXIT:
             self.app.exit()
             return
 
@@ -212,13 +218,6 @@ class UPttApp:
     def start_chat(self):
         """初始化聊天視窗並啟動背景任務。"""
         sys.stdout.write(f"\x1b]2;與 {self.target} 的對話視窗\x07")
-        initial_msgs = [
-            f"這是與 {self.target} 的對話視窗。",
-            "輸入 'exit' 來離開。",
-            contant.DIVISION_LINE
-        ]
-        for msg in initial_msgs:
-            self.messages.append((contant.SYSTEM_MSG, msg))
 
         # 建立並啟動背景任務
         printer = self.app.create_background_task(self._message_printer_task())
@@ -238,11 +237,16 @@ class UPttApp:
             if self.background_tasks:
                 await asyncio.gather(*self.background_tasks, return_exceptions=True)
 
-            if self.ptt_service.is_online():
-                print('登出中...')
-                self.ptt_service.call('logout')
+            self.ptt_service.call('logout')
             self.ptt_service.close()
             print("程式已終止。")
+            print(contant.DIVISION_TYPE * os.get_terminal_size().columns)
+            goodbye_message = f"由衷感謝您使用 {pkg_name}！"
+            terminal_width = os.get_terminal_size().columns
+            message_width = wcswidth(goodbye_message)
+            padding = max(0, (terminal_width - message_width) // 2)
+            print(' ' * padding + goodbye_message)
+            print(contant.DIVISION_TYPE * os.get_terminal_size().columns)
 
     # --- 私有方法: 背景任務 ---
 

@@ -9,3 +9,5 @@ DIVISION_TYPE = '='  # 用於分隔線的訊息類型
 
 PTT_MSG_TITLE = f"使用 {pkg_name} 傳送的訊息"
 PTT_MSG_DIVISION_LINE = DIVISION_TYPE * 20
+
+CMD_EXIT = "/exit"
