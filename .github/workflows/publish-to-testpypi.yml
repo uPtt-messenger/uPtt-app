@@ -4,6 +4,12 @@ on:
   push:
     branches-ignore:
       - 'main'
+    paths:
+      - 'src/**'
+      - 'setup.py'
+      - 'requirements.txt'
+      - 'MANIFEST.in'
+      - '.github/workflows/publish-to-testpypi.yml'
 
 jobs:
   pypi-publish:
