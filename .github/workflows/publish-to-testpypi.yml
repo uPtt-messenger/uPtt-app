@@ -33,7 +33,7 @@ jobs:
 
       - name: Update version in __init__.py
         run: |
-          sed -i "s/__version__ = .*/__version__ = \"${{ steps.version.outputs.version }}\"" src/uPttTerm/__init__.py
+          sed -i 's/__version__ = .*/__version__ = "${{ steps.version.outputs.version }}"/' src/uPttTerm/__init__.py
           echo "Updated src/uPttTerm/__init__.py to version ${{ steps.version.outputs.version }}"
           cat src/uPttTerm/__init__.py
 
