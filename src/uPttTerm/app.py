@@ -323,8 +323,8 @@ class UPttApp:
 
     async def run(self):
         """執行應用程式主迴圈並處理資源清理。"""
-        print(f"歡迎使用 {pkg_name} v{__version__}")
-        sys.stdout.write(f"\x1b]2;{pkg_name} v{__version__}\x07")
+        print(f"歡迎使用 {pkg_name}v{__version__}")
+        sys.stdout.write(f"\x1b]2;{pkg_name}v{__version__}\x07")
         self._update_layout()
         try:
             await self.app.run_async()
@@ -336,8 +336,8 @@ class UPttApp:
                 await asyncio.gather(*self.background_tasks, return_exceptions=True)
 
             self.ptt_service.call('logout')
-            self.ptt_service.close()
-            await asyncio.sleep(1)
+            # self.ptt_service.close()
+
             print("程式已終止。")
             print(contant.DIVISION_TYPE * os.get_terminal_size().columns)
             goodbye_message = f"由衷感謝您使用 {pkg_name}！"
