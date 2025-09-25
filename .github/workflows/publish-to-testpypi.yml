@@ -1,9 +1,7 @@
-name: Publish Python Package to TestPyPI
+name: Publish Python Package to PyPI
 
 on:
   push:
-    branches-ignore:
-      - 'main'
     paths:
       - 'src/**'
       - 'setup.py'
@@ -12,12 +10,9 @@ on:
       - '.github/workflows/publish-to-testpypi.yml'
 
 jobs:
-  pypi-publish:
-    name: Upload release to TestPyPI
+  test:
+    name: Run Tests
     runs-on: ubuntu-latest
-    permissions:
-      # This permission is needed for trusted publishing
-      id-token: write
 
     steps:
       - name: Checkout repository
@@ -34,6 +29,24 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
           pytest
+
+  deploy:
+    name: Publish to TestPyPI
+    if: github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      # This permission is needed for trusted publishing
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
 
       - name: Generate development version
         id: version

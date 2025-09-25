@@ -1,5 +1,11 @@
+import os
+import sys
+
 import pytest
 import string
+
+sys.path.append(os.getcwd())
+
 from src.uPttTerm.utils import gen_random_string, msg_to_mail
 from src.uPttTerm import contant
 

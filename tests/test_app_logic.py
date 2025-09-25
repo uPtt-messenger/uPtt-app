@@ -1,7 +1,13 @@
+import os
+import sys
+
 import pytest
 from unittest.mock import MagicMock, patch
 import PyPtt
 from prompt_toolkit.buffer import Buffer # Added import for Buffer
+
+sys.path.append(os.getcwd())
+
 from src.uPttTerm.app import UPttApp
 from src.uPttTerm import contant
 
