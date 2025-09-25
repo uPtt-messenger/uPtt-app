@@ -7,13 +7,23 @@ from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import Layout
-from prompt_toolkit.layout.containers import HSplit, Window
+from prompt_toolkit.layout.containers import (
+    ConditionalContainer,
+    Float,
+    FloatContainer,
+    HSplit,
+    VSplit,
+    Window,
+    WindowAlign,
+)
 from prompt_toolkit.layout.controls import FormattedTextControl, BufferControl
+from prompt_toolkit.filters import Condition
+from prompt_toolkit.widgets import Frame
 from prompt_toolkit.layout.dimension import Dimension as D
 from prompt_toolkit.layout.processors import PasswordProcessor
 from wcwidth import wcswidth
 
-from . import config, contant, utils
+from . import config, contant, utils, __author__
 from . import __name__ as pkg_name, __version__
 
 
@@ -44,12 +54,33 @@ class UPttApp:
         self.pw_buffer = Buffer(name="pw_buffer")
         self.target_buffer = Buffer(name="target_buffer")
         self.input_buffer = Buffer(multiline=False, name="input_buffer")
+        self.id_window = None
 
         # --- 初始化 UI ---
         self.bindings = KeyBindings()
         self._setup_key_bindings()
         self.container = HSplit(self._get_login_windows())
-        self.layout = Layout(container=self.container)
+        self.framed_container = Frame(body=self.container)
+        self.layout = Layout(
+            container=FloatContainer(
+                content=self.framed_container,
+                floats=[
+                    Float(
+                        content=ConditionalContainer(
+                            content=Window(
+                                FormattedTextControl(f'v{__version__}'),
+                                height=1,
+                                width=len(f'v{__version__}')
+                            ),
+                            filter=Condition(lambda: self.state == 'LOGIN')
+                        ),
+                        bottom=1,
+                        right=2,
+                    )
+                ]
+            ),
+            focused_element=self.id_window
+        )
         self.app = Application(
             layout=self.layout,
             key_bindings=self.bindings,
@@ -109,26 +140,77 @@ class UPttApp:
 
     def _get_login_windows(self) -> list:
         """產生登入畫面的視窗元件。"""
+        LOGO = r'''██╗   ██╗██████╗ ████████╗████████╗ 
+██║   ██║██╔══██╗╚══██╔══╝╚══██╔══╝ 
+██║   ██║██████╔╝   ██║      ██║    
+██║   ██║██╔═══╝    ██║      ██║    
+╚██████╔╝██║        ██║      ██║    
+ ╚═════╝ ╚═╝        ╚═╝      ╚═╝    
+                                    
+████████╗███████╗██████╗ ███╗   ███╗
+╚══██╔══╝██╔════╝██╔══██╗████╗ ████║
+   ██║   █████╗  ██████╔╝██╔████╔██║
+   ██║   ██╔══╝  ██╔══██╗██║╚██╔╝██║
+   ██║   ███████╗██║  ██║██║ ╚═╝ ██║
+   ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝'''
+
+        def get_centered_logo():
+            terminal_width = os.get_terminal_size().columns
+            padded_lines = []
+            for line in LOGO.split('\n'):
+                padding = ' ' * max(0, (terminal_width - wcswidth(line)) // 2)
+                padded_lines.append(padding + line)
+            return '\n'.join(padded_lines)
+
+        def get_centered_text(text):
+            return lambda: ' ' * max(0, (os.get_terminal_size().columns - 2 - wcswidth(text)) // 2) + text
+
+        self.id_window = Window(
+            content=BufferControl(buffer=self.id_buffer),
+            height=1,
+            align=WindowAlign.CENTER
+        )
+
         return [
+            Window(height=D(weight=1)),
+            Window(FormattedTextControl(get_centered_logo)),
+            Window(height=2),
+            Window(FormattedTextControl(get_centered_text("批踢踢帳號")), height=1),
+            self.id_window,
             Window(height=1),
-            Window(FormattedTextControl("請輸入您的批踢踢帳號:"), height=1),
-            Window(content=BufferControl(buffer=self.id_buffer), height=1),
-            Window(FormattedTextControl("請輸入您的批踢踢密碼:"), height=1),
-            Window(content=BufferControl(buffer=self.pw_buffer, input_processors=[PasswordProcessor()]), height=1),
+            Window(FormattedTextControl(get_centered_text("批踢踢密碼")), height=1),
+            Window(
+                content=BufferControl(buffer=self.pw_buffer, input_processors=[PasswordProcessor()]),
+                height=1,
+                align=WindowAlign.CENTER
+            ),
             Window(height=1),
-            Window(FormattedTextControl(self.error_message, style='class:error'),
-                   height=1 if self.error_message else 0),
+            Window(
+                FormattedTextControl(get_centered_text(self.error_message)),
+                height=0 if not self.error_message else 1,
+            ),
+            Window(height=D(weight=1)),
         ]
 
     def _get_select_target_windows(self) -> list:
         """產生選擇對話對象畫面的視窗元件。"""
+        def get_centered_text(text):
+            return lambda: ' ' * max(0, (os.get_terminal_size().columns - 2 - wcswidth(text)) // 2) + text
+
         return [
+            Window(height=D(weight=1)),
+            Window(FormattedTextControl(get_centered_text("請輸入你要對話的使用者")), height=1),
+            Window(
+                content=BufferControl(buffer=self.target_buffer),
+                height=1,
+                align=WindowAlign.CENTER
+            ),
             Window(height=1),
-            Window(FormattedTextControl("請輸入你要對話的使用者:"), height=1),
-            Window(content=BufferControl(buffer=self.target_buffer), height=1),
-            Window(height=1),
-            Window(FormattedTextControl(self.error_message, style='class:error'),
-                   height=1 if self.error_message else 0),
+            Window(
+                FormattedTextControl(get_centered_text(self.error_message)),
+                height=0 if not self.error_message else 1,
+            ),
+            Window(height=D(weight=1)),
         ]
 
     def _get_chat_windows(self) -> list:
