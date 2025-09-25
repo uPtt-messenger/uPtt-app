@@ -1,7 +1,6 @@
 import asyncio
 import os
 import sys
-from getpass import getpass
 
 import PyPtt
 from prompt_toolkit.application import Application
@@ -11,273 +10,302 @@ from prompt_toolkit.layout import Layout
 from prompt_toolkit.layout.containers import HSplit, Window
 from prompt_toolkit.layout.controls import FormattedTextControl, BufferControl
 from prompt_toolkit.layout.dimension import Dimension as D
+from prompt_toolkit.layout.processors import PasswordProcessor
 from wcwidth import wcswidth
 
-from . import config
-from . import contant
-
-from . import utils
+from . import config, contant, utils
 from . import __name__ as pkg_name, __version__
 
-# 初始化 PTT 服務
-ptt_service = PyPtt.Service({'log_level': PyPtt.log.SILENT})
 
-
-# 負責從佇列中取出訊息並附加到 UI 的任務
-async def message_printer_task(message_queue: asyncio.Queue, messages: list, app: Application):
+class UPttApp:
     """
-    這是一個訊息消費者 (Consumer)。
-    它會持續等待佇列中出現新訊息，一旦有新訊息就將它附加到訊息列表，並觸發 UI 更新。
-    """
-    while True:
-        message = await message_queue.get()
-        messages.append((contant.TARGET_MSG, message))  # 將訊息存為 (類型, 內容) 的元組
-        # 觸發 UI 重新繪製
-        app.invalidate()
-        message_queue.task_done()
+    一個使用 prompt_toolkit 的 PTT 終端聊天應用程式。
 
-
-# 訊息產生器，模擬週期性事件
-async def demo_message_generator(log_func):
-    """
-    這是一個訊息生產者 (Producer) 的範例。
-    它會定期檢查 PTT 信箱，尋找特定標題的信件，並使用傳入的 log_func 將信件內容發送到訊息佇列。
+    這個類別封裝了所有 UI、狀態管理（登入、選擇對象、聊天）以及
+    與 PTT 服務的互動邏輯。
     """
 
-    first_round = True
+    def __init__(self, ptt_service: PyPtt.Service):
+        # --- 核心屬性 ---
+        self.ptt_service = ptt_service
+        self.app = None
+        self.background_tasks = []
 
-    while True:
+        # --- 狀態管理 ---
+        self.state = 'LOGIN'  # 可為: LOGIN, SELECT_TARGET, CHATTING
+        self.ptt_id = ''
+        self.target = ''
+        self.messages = []
+        self.error_message = ''
 
-        # 每 CHECK_PTT_MAIL_INTERVAL 秒檢查一次 PTT 信箱
-        await asyncio.sleep(config.CHECK_PTT_MAIL_INTERVAL)
+        # --- UI 元件 ---
+        self.message_queue = asyncio.Queue()
+        self.id_buffer = Buffer(name="id_buffer")
+        self.pw_buffer = Buffer(name="pw_buffer")
+        self.target_buffer = Buffer(name="target_buffer")
+        self.input_buffer = Buffer(multiline=False, name="input_buffer")
 
-        cur_mail_idx = ptt_service.call('get_newest_index', {'index_type': PyPtt.NewIndex.MAIL})
+        # --- 初始化 UI ---
+        self.bindings = KeyBindings()
+        self._setup_key_bindings()
+        self.container = HSplit(self._get_login_windows())
+        self.layout = Layout(container=self.container)
+        self.app = Application(
+            layout=self.layout,
+            key_bindings=self.bindings,
+            full_screen=True,
+            mouse_support=False
+        )
 
-        if cur_mail_idx == 0:
-            continue
+    # --- 私有方法: 狀態與 UI 管理 ---
 
-        del_mail_list = []
+    def _set_state(self, new_state: str):
+        """設定應用程式狀態，並更新 UI 和焦點。"""
+        self.state = new_state
+        self._update_layout()
 
-        lookback_limit = 10
-        if first_round:
-            # 首次執行時，掃描較多的信件
-            first_round = False
-            lookback_limit = 50
+        # 根據新狀態設定焦點
+        if self.state == 'SELECT_TARGET':
+            self.app.layout.focus(self.target_buffer)
+        elif self.state == 'CHATTING':
+            self.app.layout.focus(self.input_buffer)
 
-        for mail_idx in range(max(1, cur_mail_idx - lookback_limit), cur_mail_idx + 1):
-            try:
-                mail_info = ptt_service.call('get_mail', {'index': mail_idx})
-            except PyPtt.exceptions.Error:
-                continue
+    def _set_error(self, message: str):
+        """設定錯誤訊息並觸發 UI 重繪。"""
+        self.error_message = message
+        self.app.invalidate()
 
-            if PyPtt.MailField.title not in mail_info:
-                continue
+    def _update_layout(self):
+        """根據當前狀態更新顯示的視窗。"""
+        if self.state == 'LOGIN':
+            self.container.children = self._get_login_windows()
+        elif self.state == 'SELECT_TARGET':
+            self.container.children = self._get_select_target_windows()
+        elif self.state == 'CHATTING':
+            self.container.children = self._get_chat_windows()
+        self.app.invalidate()
 
-            # 過濾信件標題與作者
-            if mail_info[PyPtt.MailField.title] != contant.PTT_MSG_TITLE:
-                continue
+    def _setup_key_bindings(self):
+        """設定全域按鍵綁定。"""
+        @self.bindings.add('c-c')
+        def _(event):
+            """Ctrl+C: 離開程式。"""
+            event.app.exit()
 
-            if not mail_info[PyPtt.MailField.author].lower().startswith(target.lower()):
-                continue
+        @self.bindings.add('enter')
+        def _(event):
+            """Enter: 根據當前狀態執行不同操作。"""
+            if self.state == 'LOGIN':
+                if event.app.layout.current_buffer == self.id_buffer:
+                    event.app.layout.focus(self.pw_buffer)
+                elif event.app.layout.current_buffer == self.pw_buffer:
+                    self.login()
+            elif self.state == 'SELECT_TARGET':
+                self.select_target()
+            elif self.state == 'CHATTING':
+                self.send_message()
 
-            # 解析信件內容
-            cur_context = mail_info[PyPtt.MailField.content]
-            cur_context = cur_context[cur_context.find(
-                contant.PTT_MSG_DIVISION_LINE) + len(contant.PTT_MSG_DIVISION_LINE):].strip()
-            cur_context = cur_context[:cur_context.rfind(contant.PTT_MSG_DIVISION_LINE)].strip()
+    # --- 私有方法: 視窗產生器 ---
 
-            log_func(cur_context)
+    def _get_login_windows(self) -> list:
+        """產生登入畫面的視窗元件。"""
+        return [
+            Window(height=1),
+            Window(FormattedTextControl("請輸入您的 PTT ID:"), height=1),
+            Window(content=BufferControl(buffer=self.id_buffer), height=1),
+            Window(FormattedTextControl("請輸入您的 PTT 密碼:"), height=1),
+            Window(content=BufferControl(buffer=self.pw_buffer, input_processors=[PasswordProcessor()]), height=1),
+            Window(height=1),
+            Window(FormattedTextControl(self.error_message, style='class:error'),
+                   height=1 if self.error_message else 0),
+        ]
 
-            del_mail_list.append(mail_idx)
+    def _get_select_target_windows(self) -> list:
+        """產生選擇對話對象畫面的視窗元件。"""
+        return [
+            Window(height=1),
+            Window(FormattedTextControl("請輸入你要對話的使用者:"), height=1),
+            Window(content=BufferControl(buffer=self.target_buffer), height=1),
+            Window(height=1),
+            Window(FormattedTextControl(self.error_message, style='class:error'),
+                   height=1 if self.error_message else 0),
+        ]
 
-        # 刪除已處理的信件，從後往前刪以避免索引錯亂
-        del_mail_list.sort(reverse=True)
-        for cur_mail_idx in del_mail_list:
-            ptt_service.call('del_mail', {'index': cur_mail_idx})
+    def _get_chat_windows(self) -> list:
+        """產生聊天畫面的視窗元件。"""
+        def get_display_text():
+            terminal_lines = os.get_terminal_size().lines
+            # 限制訊息數量，避免過多佔用記憶體
+            while len(self.messages) > config.MAX_MESSAGES:
+                self.messages.pop(0)
 
-
-async def main_async():
-    """
-    主函式，負責設定 UI、事件處理及非同步任務。
-    """
-    # 訊息列表，用來儲存對話紀錄
-    messages = []
-
-    # 輸入緩衝區，設定為單行模式
-    input_buffer = Buffer(multiline=False)
-
-    # 建立 asyncio 佇列，用於在不同任務間安全地傳遞訊息
-    message_queue = asyncio.Queue()
-
-    # 定義日誌函式，將訊息放入佇列
-    def log_to_queue(msg: str):
-        message_queue.put_nowait(msg)
-
-    # 記錄使用者輸入的函式
-    def log_user_input(text: str, app: Application):
-        messages.append((contant.USER_MSG, text))
-        app.invalidate()
-
-    # 建立顯示佈局
-    def get_display():
-
-        terminal_lines = os.get_terminal_size().lines
-
-        # 限制訊息數量，避免過多佔用記憶體
-        while len(messages) > config.MAX_MESSAGES:
-            messages.pop(0)
-
-        lines = []
-        # 只顯示終端機可容納的最新訊息
-        for msg_type, msg in messages[-(terminal_lines - 1):]:
-            if msg_type == contant.SYSTEM_MSG:
-                # 系統訊息
-                match msg:
-                    case contant.DIVISION_LINE:
-                        # 分隔線
-                        msg = contant.DIVISION_TYPE * (os.get_terminal_size().columns)
-                        lines.append(msg)
-                    case _:
+            lines = []
+            # 只顯示終端機可容納的最新訊息
+            for msg_type, msg in self.messages[-(terminal_lines - 1):]:
+                if msg_type == contant.SYSTEM_MSG:
+                    if msg == contant.DIVISION_LINE:
+                        lines.append(contant.DIVISION_TYPE * os.get_terminal_size().columns)
+                    else:
                         lines.append(f"{contant.SYSTEM_MSG} {msg}")
+                elif msg_type == contant.TARGET_MSG:
+                    lines.append(f"{self.target}: {msg}")
+                elif msg_type == contant.USER_MSG:
+                    terminal_width = os.get_terminal_size().columns - 2
+                    padding = max(0, terminal_width - wcswidth(msg))
+                    lines.append(f"{' ' * padding}{msg}")
+            return '\n'.join(lines)
 
-            elif msg_type == contant.TARGET_MSG:
-                # 對方訊息靠左對齊
-                lines.append(f"{target}: {msg}")
+        return [
+            Window(content=FormattedTextControl(get_display_text), height=D(weight=1), wrap_lines=True),
+            Window(content=BufferControl(buffer=self.input_buffer), height=D.exact(1), wrap_lines=False)
+        ]
 
-            elif msg_type == contant.USER_MSG:
-                # 使用者訊息靠右對齊
-                terminal_width = os.get_terminal_size().columns - 2  # 減 2 留邊距
-                user_header = ""
-                padding = max(0, terminal_width - len(user_header) - wcswidth(msg))
-                lines.append(f"{user_header}{' ' * padding}{msg}")
+    # --- 公開方法: 核心邏輯 ---
 
-        return '\n'.join(lines)
+    def login(self):
+        """處理登入邏輯。"""
+        self.ptt_id = self.id_buffer.text
+        ptt_pw = self.pw_buffer.text
+        self.error_message = ''
+        try:
+            self.ptt_service.call('login', {'ptt_id': self.ptt_id, 'ptt_pw': ptt_pw, 'kick_other_session': True})
+            self._set_state('SELECT_TARGET')
+        except PyPtt.exceptions.WrongIDorPassword:
+            self._set_error('帳號密碼錯誤')
+        except PyPtt.exceptions.OnlySecureConnection:
+            self._set_error('只能使用安全連線')
+        except PyPtt.exceptions.ResetYourContactEmail:
+            self._set_error('請先至信箱設定連絡信箱')
+        except PyPtt.exceptions.LoginError as e:
+            self._set_error(f'登入失敗: {e}')
 
-    # 輸入視窗
-    input_window = Window(
-        content=BufferControl(buffer=input_buffer),
-        height=D.exact(1),
-        wrap_lines=False
-    )
+    def select_target(self):
+        """處理選擇對話對象的邏輯。"""
+        target_id = self.target_buffer.text
+        self.error_message = ''
+        try:
+            target_info = self.ptt_service.call('get_user', {'user_id': target_id})
+            self.target = target_info['ptt_id'].split(' ')[0]
+            self._set_state('CHATTING')
+            self.start_chat()
+        except PyPtt.exceptions.NoSuchUser:
+            self._set_error('查無此人')
 
-    # 組合訊息歷史視窗與輸入視窗
-    container = HSplit([
-        # 訊息歷史視窗
-        Window(
-            content=FormattedTextControl(get_display),
-            height=D(weight=1),
-            wrap_lines=True
-        ),
-        # 輸入視窗
-        input_window
-    ])
+    def send_message(self):
+        """處理傳送訊息的邏輯。"""
+        text = self.input_buffer.text.strip()
+        if not text:
+            return
 
-    # 設定鍵盤綁定
-    bindings = KeyBindings()
+        self.input_buffer.reset()
+        if text.lower() == 'exit':
+            self.app.exit()
+            return
 
-    @bindings.add('c-c')  # Ctrl+C: 離開程式
-    def exit_app(event):
-        event.app.exit()
+        ptt_msg = utils.msg_to_mail(pkg_name, self.ptt_id, text)
+        self.ptt_service.call('mail',
+                              {'ptt_id': self.target, 'title': contant.PTT_MSG_TITLE, 'content': ptt_msg,
+                               'backup': False})
+        self.messages.append((contant.USER_MSG, text))
+        self.app.invalidate()
 
-    @bindings.add('enter')  # Enter: 處理輸入
-    def process_input(event):
-        text = input_buffer.text.strip()
-        if text:
-            input_buffer.reset()  # 清空輸入框
+    def start_chat(self):
+        """初始化聊天視窗並啟動背景任務。"""
+        sys.stdout.write(f"\x1b]2;與 {self.target} 的對話視窗\x07")
+        initial_msgs = [
+            f"這是與 {self.target} 的對話視窗。",
+            "輸入 'exit' 來離開。",
+            contant.DIVISION_LINE
+        ]
+        for msg in initial_msgs:
+            self.messages.append((contant.SYSTEM_MSG, msg))
 
-            if text.lower() == 'exit':
-                event.app.exit()
-                return
+        # 建立並啟動背景任務
+        printer = self.app.create_background_task(self._message_printer_task())
+        generator = self.app.create_background_task(self._message_generator_task())
+        self.background_tasks.extend([printer, generator])
 
-            # 將使用者輸入轉換為 PTT 信件格式並寄出
-            ptt_msg = utils.msg_to_mail(pkg_name, ptt_id, text)
-            ptt_service.call('mail',
-                             {'ptt_id': target, 'title': contant.PTT_MSG_TITLE, 'content': ptt_msg, 'backup': False})
+    async def run(self):
+        """執行應用程式主迴圈並處理資源清理。"""
+        print(f"歡迎使用 {pkg_name} v{__version__}")
+        self._update_layout()
+        try:
+            await self.app.run_async()
+        finally:
+            print("正在離開程式...")
+            for task in self.background_tasks:
+                task.cancel()
+            if self.background_tasks:
+                await asyncio.gather(*self.background_tasks, return_exceptions=True)
 
-            # 將使用者輸入顯示在畫面上
-            log_user_input(text, event.app)
+            if self.ptt_service.is_online():
+                print('登出中...')
+                self.ptt_service.call('logout')
+            self.ptt_service.close()
+            print("程式已終止。")
 
-    # 建立應用程式實例
-    app = Application(
-        layout=Layout(container=container),
-        key_bindings=bindings,
-        full_screen=True,
-        mouse_support=False
-    )
+    # --- 私有方法: 背景任務 ---
 
-    # 顯示對話視窗初始訊息
-    initial_msgs = [
-        f"這是與 {target} 的對話視窗。",
-        "輸入 'exit' 來離開。",
-        contant.DIVISION_LINE
-    ]
-    for msg in initial_msgs:
-        messages.append((contant.SYSTEM_MSG, msg))
-    app.invalidate()
+    async def _message_printer_task(self):
+        """從佇列中取出訊息並附加到 UI。"""
+        while True:
+            message = await self.message_queue.get()
+            self.messages.append((contant.TARGET_MSG, message))
+            self.app.invalidate()
+            self.message_queue.task_done()
 
-    # 建立並啟動背景任務
-    printer = app.create_background_task(message_printer_task(message_queue, messages, app))
-    generator = app.create_background_task(demo_message_generator(log_to_queue))
+    async def _message_generator_task(self):
+        """定期檢查 PTT 信箱並將新訊息放入佇列。"""
+        first_round = True
+        while True:
+            await asyncio.sleep(config.CHECK_PTT_MAIL_INTERVAL)
 
-    try:
-        # 執行應用程式
-        await app.run_async()
-    finally:
-        # 結束時確保取消背景任務
-        generator.cancel()
-        printer.cancel()
-        await asyncio.gather(generator, printer, return_exceptions=True)
-        print("正在離開程式...")
+            if not self.target:
+                continue
+
+            try:
+                cur_mail_idx = self.ptt_service.call('get_newest_index', {'index_type': PyPtt.NewIndex.MAIL})
+                if cur_mail_idx == 0:
+                    continue
+
+                del_mail_list = []
+                lookback_limit = 10 if not first_round else 50
+                first_round = False
+
+                for mail_idx in range(max(1, cur_mail_idx - lookback_limit), cur_mail_idx + 1):
+                    try:
+                        mail_info = self.ptt_service.call('get_mail', {'index': mail_idx})
+                        if (PyPtt.MailField.title in mail_info and
+                                mail_info[PyPtt.MailField.title] == contant.PTT_MSG_TITLE and
+                                mail_info[PyPtt.MailField.author].lower().startswith(self.target.lower())):
+                            content = mail_info[PyPtt.MailField.content]
+                            start = content.find(contant.PTT_MSG_DIVISION_LINE) + len(
+                                contant.PTT_MSG_DIVISION_LINE)
+                            end = content.rfind(contant.PTT_MSG_DIVISION_LINE)
+                            self.message_queue.put_nowait(content[start:end].strip())
+                            del_mail_list.append(mail_idx)
+                    except PyPtt.exceptions.Error:
+                        continue
+
+                # 從後往前刪除已處理的信件
+                for cur_mail_idx in sorted(del_mail_list, reverse=True):
+                    self.ptt_service.call('del_mail', {'index': cur_mail_idx})
+
+            except PyPtt.exceptions.Error:
+                # 在檢查信箱的過程中可能發生任何 PTT 錯誤 (例如斷線)，忽略並等待下一輪
+                continue
 
 
 def main():
-    print(f"歡迎使用 {pkg_name} v{__version__}")
-
-    global ptt_id, target
-
-    # 登入 PTT
-    while True:
-        ptt_id = input("請輸入您的 PTT ID: ")
-        ptt_pw = getpass("請輸入您的 PTT 密碼: ")
-
-        try:
-            ptt_service.call('login',
-                             {'ptt_id': ptt_id, 'ptt_pw': ptt_pw, 'kick_other_session': True})
-            break
-        except PyPtt.LoginError:
-            print('登入失敗')
-        except PyPtt.WrongIDorPassword:
-            print('帳號密碼錯誤')
-        except PyPtt.OnlySecureConnection:
-            print('只能使用安全連線')
-        except PyPtt.ResetYourContactEmail:
-            print('請先至信箱設定連絡信箱')
-
-    # 設定對話對象
-    while True:
-        target = input("請輸入你要對話的使用者: ")
-
-        try:
-            target_info = ptt_service.call('get_user', {'user_id': target})
-            target = target_info['ptt_id'].split(' ')[0]
-            break
-        except PyPtt.exceptions.NoSuchUser:
-            print('查無此人')
-            continue
-
-    # 設定終端機標題
-    sys.stdout.write(f"\x1b]2;與 {target} 的對話視窗\x07")
-
+    """應用程式進入點。"""
+    ptt_service = PyPtt.Service({'log_level': PyPtt.log.SILENT})
+    app = UPttApp(ptt_service)
     try:
-        asyncio.run(main_async())
-    except (KeyboardInterrupt, Exception) as e:
-        print("\n程式已終止。")
-        raise e
-    finally:
-        # 登出 PTT
-        print('登出中...')
-        ptt_service.call('logout')
-        ptt_service.close()
+        asyncio.run(app.run())
+    except (KeyboardInterrupt, Exception):
+        # 錯誤已在 app.run() 方法的 finally 區塊中處理
+        pass
+
 
 if __name__ == '__main__':
     main()
