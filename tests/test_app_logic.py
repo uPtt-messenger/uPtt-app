@@ -2,7 +2,7 @@ import os
 import sys
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, ANY
 import PyPtt
 from prompt_toolkit.buffer import Buffer
 
@@ -218,5 +218,5 @@ def test_send_message_success(app_instance):
             'mail',
             {'ptt_id': target, 'title': contant.PTT_MSG_TITLE, 'content': "formatted_mail_content", 'backup': False}
         )
-        assert (MsgType.USER, message_text) in app_instance.messages
+        assert (MsgType.USER, ANY, message_text) in app_instance.messages
         app_instance.app.invalidate.assert_called_once()
