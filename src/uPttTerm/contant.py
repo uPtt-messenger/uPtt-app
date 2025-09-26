@@ -1,5 +1,3 @@
-from enum import StrEnum
-
 try:
     from . import __name__ as pkg_name
 except ImportError:
@@ -25,10 +23,12 @@ LOGO = '''
     ░███    ░███░░░   ░███      ░███ ░███ ░███ 
     █████   ░░██████  █████     █████░███ █████
    ░░░░░     ░░░░░░  ░░░░░     ░░░░░ ░░░ ░░░░░ '''
+
+
 # https://patorjk.com/software/taag/
 # DOS Rebel
 
-class MsgType(StrEnum):
+class MsgType:
     SYSTEM = '[系統]'
     USER = '[使用者]'
     TARGET = '[目標]'
