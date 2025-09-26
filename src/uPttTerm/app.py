@@ -1,7 +1,7 @@
 import asyncio
-from datetime import datetime
 import os
 import sys
+from datetime import datetime
 
 import PyPtt
 from prompt_toolkit.application import Application
@@ -50,7 +50,8 @@ class UPttApp:
         self.target = ''
         self.messages = []
         self.alert_message = None
-        self.last_mail_date = None
+        self.last_mail_time = None
+        self.last_msg_time = None
 
         # --- UI 元件 ---
         self.message_queue = asyncio.Queue()
@@ -208,6 +209,9 @@ class UPttApp:
 
         def get_display_text():
             terminal_lines = os.get_terminal_size().lines
+
+            self.messages.sort(key=lambda x: x[1] if isinstance(x[1], datetime) else datetime.min)
+
             # 限制訊息數量，避免過多佔用記憶體
             while len(self.messages) > config.MAX_MESSAGES:
                 self.messages.pop(0)
@@ -217,13 +221,25 @@ class UPttApp:
             # 可用行數 = 總行數 - 頂部保留行 - 底部保留行（調整為 -7 確保空間）
             available_lines = max(0, terminal_lines - 7)
             # 只顯示終端機可容納的最新訊息
-            for msg_type, msg in self.messages[-available_lines:]:
+            for msg_type, msg_time, msg in self.messages[-available_lines:]:
+
+                msg_time = msg_time.strftime('[%m.%d %H:%M]')
+
+                if self.last_msg_time is None or (msg_time != self.last_msg_time):
+                    self.last_msg_time = msg_time
+                    chat_area.append(
+                        Window(
+                            FormattedTextControl(msg_time),
+                            align=WindowAlign.CENTER,
+                            height=1, wrap_lines=False
+                        ))
 
                 if msg_type == MsgType.TARGET:
-                    text = f"{self.target}: {msg}"
+                    text = f"[{self.target}] {msg}"
+
                     align = WindowAlign.LEFT
                 elif msg_type == MsgType.USER:
-                    text = f"我: {msg}"
+                    text = f"{msg}"
                     align = WindowAlign.RIGHT
                 else:
                     continue  # 忽略無效類型
@@ -242,7 +258,7 @@ class UPttApp:
             Window(FormattedTextControl(f"[系統] 這是與 {self.target} 的對話視窗。"), height=1),
             Window(FormattedTextControl(f"[系統] 輸入 '{contant.CMD_EXIT}' 來離開。"), height=1),
             Window(FormattedTextControl(lambda: contant.DIVISION_TYPE * os.get_terminal_size().columns), height=1),
-            DynamicContainer(lambda: HSplit(get_display_text(), height=D(weight=1), style='class:chat-area')),
+            DynamicContainer(lambda: HSplit(get_display_text(), height=D(weight=1))),
             Window(FormattedTextControl(lambda: contant.DIVISION_TYPE * os.get_terminal_size().columns), height=1),
             Window(content=BufferControl(buffer=self.input_buffer), height=D.exact(1), wrap_lines=False)
         ]
@@ -296,7 +312,9 @@ class UPttApp:
             self.app.exit()
             return
 
-        self.messages.append((MsgType.USER, text))
+        text_time = datetime.now()
+
+        self.messages.append((MsgType.USER, text_time, text))
         self.app.invalidate()
 
         ptt_msg = utils.msg_to_mail(pkg_name, self.ptt_id, text)
@@ -346,8 +364,8 @@ class UPttApp:
     async def _message_printer_task(self):
         """從佇列中取出訊息並附加到 UI。"""
         while True:
-            message = await self.message_queue.get()
-            self.messages.append((MsgType.TARGET, message))
+            msg_time, message = await self.message_queue.get()
+            self.messages.append((MsgType.TARGET, msg_time, message))
             self.app.invalidate()
             self.message_queue.task_done()
 
@@ -379,10 +397,10 @@ class UPttApp:
                         if mail_info[PyPtt.MailField.date] is None:
                             continue
 
-                        date = datetime.strptime(mail_info[PyPtt.MailField.date], '%a %b %d %H:%M:%S %Y')
-                        if self.last_mail_date and date <= self.last_mail_date:
+                        msg_time = datetime.strptime(mail_info[PyPtt.MailField.date], '%a %b %d %H:%M:%S %Y')
+                        if self.last_mail_time and msg_time <= self.last_mail_time:
                             continue
-                        self.last_mail_date = date
+                        self.last_mail_time = msg_time
 
                         if PyPtt.MailField.title not in mail_info:
                             continue
@@ -400,7 +418,9 @@ class UPttApp:
                         start = content.find(contant.PTT_MSG_DIVISION_LINE) + len(
                             contant.PTT_MSG_DIVISION_LINE)
                         end = content.rfind(contant.PTT_MSG_DIVISION_LINE)
-                        self.message_queue.put_nowait(content[start:end].strip())
+
+                        self.message_queue.put_nowait(
+                            (msg_time, content[start:end].strip()))
 
                         del_mail_list.append(mail_idx)
 
