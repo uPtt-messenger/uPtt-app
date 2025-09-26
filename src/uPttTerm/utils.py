@@ -40,7 +40,7 @@ def get_latest_pypi_version(is_test: bool=False):
 
     print(f"Checking latest version from {'Test' if is_test else 'PyPI'}...")
     try:
-        url = f"https://{"test." if is_test else ""}pypi.org/pypi/{pkg_name}/json"
+        url = f"https://{'test.' if is_test else ''}pypi.org/pypi/{pkg_name}/json"
 
         response = requests.get(url)
         response.raise_for_status()  # 如果請求失敗則拋出異常
