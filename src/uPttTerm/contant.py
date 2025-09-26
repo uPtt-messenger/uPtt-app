@@ -1,8 +1,38 @@
-from . import __name__ as pkg_name
+from enum import StrEnum
 
-SYSTEM_MSG = "[系統]"
-USER_MSG = "[使用者]"
-TARGET_MSG = "[目標]"
+try:
+    from . import __name__ as pkg_name
+except ImportError:
+    from __init__ import __name__ as pkg_name
+
+LOGO = '''
+            ███████████   █████     █████      
+           ░░███░░░░░███ ░░███     ░░███       
+ █████ ████ ░███    ░███ ███████   ███████     
+░░███ ░███  ░██████████ ░░░███░   ░░░███░      
+ ░███ ░███  ░███░░░░░░    ░███      ░███       
+ ░███ ░███  ░███          ░███ ███  ░███ ███   
+ ░░████████ █████         ░░█████   ░░█████    
+  ░░░░░░░░ ░░░░░           ░░░░░     ░░░░░     
+                                               
+                                               
+                                               
+ ███████████                                   
+░█░░░███░░░█                                   
+░   ░███  ░   ██████  ████████  █████████████  
+    ░███     ███░░███░░███░░███░░███░░███░░███ 
+    ░███    ░███████  ░███ ░░░  ░███ ░███ ░███ 
+    ░███    ░███░░░   ░███      ░███ ░███ ░███ 
+    █████   ░░██████  █████     █████░███ █████
+   ░░░░░     ░░░░░░  ░░░░░     ░░░░░ ░░░ ░░░░░ '''
+# https://patorjk.com/software/taag/
+# DOS Rebel
+
+class MsgType(StrEnum):
+    SYSTEM = '[系統]'
+    USER = '[使用者]'
+    TARGET = '[目標]'
+
 
 DOWNLOAD_URL = "https://github.com/uPtt-messenger/uPttTerm/tree/feat/init"
 

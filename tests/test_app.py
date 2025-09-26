@@ -1,6 +1,6 @@
 import os
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 sys.path.append(os.getcwd())
 
@@ -8,12 +8,11 @@ from src.uPttTerm.app import UPttApp
 
 
 def test_app_initialization():
-    # Mock the PyPtt.Service dependency
-    mock_ptt_service = MagicMock()
+    with patch('src.uPttTerm.app.UPttService') as MockUPttService:
+        mock_service_instance = MagicMock()
+        MockUPttService.return_value = mock_service_instance
+        app = UPttApp()
 
-    # Instantiate UPttApp with the mock service
-    app = UPttApp(mock_ptt_service)
-
-    assert app is not None
-    assert isinstance(app, UPttApp)
-    assert app.ptt_service == mock_ptt_service
+        assert app is not None
+        assert isinstance(app, UPttApp)
+        assert app.ptt_service == mock_service_instance

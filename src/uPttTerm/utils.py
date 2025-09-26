@@ -1,4 +1,13 @@
-from . import contant
+import os
+import sys
+
+import requests
+
+try:
+    from . import contant, __version__, __name__ as pkg_name
+except ImportError:
+    import contant
+    from __init__ import __version__, __name__ as pkg_name
 
 
 def gen_random_string(length=10):
@@ -26,6 +35,53 @@ def msg_to_mail(app_name, ptt_id, msg):
     return mail
 
 
+def get_latest_pypi_version(is_test: bool=False):
+    """查詢 PyPI 上指定套件的最新版本。"""
+
+    print(f"Checking latest version from {'Test' if is_test else 'PyPI'}...")
+    try:
+        url = f"https://{"test." if is_test else ""}pypi.org/pypi/{pkg_name}/json"
+
+        response = requests.get(url)
+        response.raise_for_status()  # 如果請求失敗則拋出異常
+        data = response.json()
+        latest_version = data["info"]["version"]
+        return latest_version
+    except requests.exceptions.RequestException as e:
+        return f"Error fetching data: {e}"
+    except KeyError:
+        return "Error: Could not find version info in the response."
+
+def is_running_from_pypi_install():
+    script_path = os.path.abspath(__file__)
+    for path in sys.path:
+        if "site-packages" in path or "dist-packages" in path:
+            if script_path.startswith(path):
+                return True
+    return False
+
+
+def is_update_available():
+    """比較目前版本與最新版本，判斷是否有更新可用。"""
+    from packaging import version
+
+    current_version = __version__
+    # current_version = '0.1.0.dev20250925150919'
+    latest_version = get_latest_pypi_version(
+        'dev' in current_version or not is_running_from_pypi_install()
+    )
+
+    try:
+        current_ver = version.parse(current_version)
+        latest_ver = version.parse(latest_version)
+        return latest_ver > current_ver
+    except Exception as e:
+        print(f"Error comparing versions: {e}")
+        return False
+
+
 if __name__ == '__main__':
     print(gen_random_string(16))
-    print(msg_to_mail("test app name", "測試測試訊息"))
+    print(msg_to_mail("test app name", "test_user", "測試測試訊息"))
+
+    print(is_update_available())

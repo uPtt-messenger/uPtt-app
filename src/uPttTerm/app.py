@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 import os
 import sys
 
@@ -10,6 +11,7 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import Layout
 from prompt_toolkit.layout.containers import (
     ConditionalContainer,
+    DynamicContainer,
     Float,
     FloatContainer,
     HSplit,
@@ -24,6 +26,8 @@ from wcwidth import wcswidth
 
 from . import __name__ as pkg_name, __version__
 from . import config, contant, utils
+from .contant import MsgType
+from .ptt import UPttService
 
 
 class UPttApp:
@@ -34,9 +38,9 @@ class UPttApp:
     與 PTT 服務的互動邏輯。
     """
 
-    def __init__(self, ptt_service: PyPtt.Service):
+    def __init__(self):
         # --- 核心屬性 ---
-        self.ptt_service = ptt_service
+        self.ptt_service = UPttService()
         self.app = None
         self.background_tasks = []
 
@@ -45,7 +49,8 @@ class UPttApp:
         self.ptt_id = ''
         self.target = ''
         self.messages = []
-        self.error_message = ''
+        self.alert_message = None
+        self.last_mail_date = None
 
         # --- UI 元件 ---
         self.message_queue = asyncio.Queue()
@@ -103,7 +108,7 @@ class UPttApp:
 
     def _set_error(self, message: str):
         """設定錯誤訊息並觸發 UI 重繪。"""
-        self.error_message = message
+        self.alert_message = ('fg:red', message)
         self.app.invalidate()
 
     def _update_layout(self):
@@ -141,30 +146,11 @@ class UPttApp:
 
     def _get_login_windows(self) -> list:
         """產生登入畫面的視窗元件。"""
-        LOGO = r'''██╗   ██╗██████╗ ████████╗████████╗ 
-██║   ██║██╔══██╗╚══██╔══╝╚══██╔══╝ 
-██║   ██║██████╔╝   ██║      ██║    
-██║   ██║██╔═══╝    ██║      ██║    
-╚██████╔╝██║        ██║      ██║    
- ╚═════╝ ╚═╝        ╚═╝      ╚═╝    
-                                    
-████████╗███████╗██████╗ ███╗   ███╗
-╚══██╔══╝██╔════╝██╔══██╗████╗ ████║
-   ██║   █████╗  ██████╔╝██╔████╔██║
-   ██║   ██╔══╝  ██╔══██╗██║╚██╔╝██║
-   ██║   ███████╗██║  ██║██║ ╚═╝ ██║
-   ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝'''
 
-        def get_centered_logo():
-            terminal_width = os.get_terminal_size().columns
-            padded_lines = []
-            for line in LOGO.split('\n'):
-                padding = ' ' * max(0, (terminal_width - wcswidth(line)) // 2)
-                padded_lines.append(padding + line)
-            return '\n'.join(padded_lines)
+        # check update
 
-        def get_centered_text(text):
-            return lambda: ' ' * max(0, (os.get_terminal_size().columns - 2 - wcswidth(text)) // 2) + text
+        if utils.is_update_available():
+            self.alert_message = ('fg:green', '有版本更新！')
 
         self.id_window = Window(
             content=BufferControl(buffer=self.id_buffer),
@@ -180,19 +166,19 @@ class UPttApp:
 
         return [
             Window(height=D(weight=1)),
-            Window(FormattedTextControl(get_centered_logo)),
+            Window(FormattedTextControl(contant.LOGO), align=WindowAlign.CENTER),
             Window(height=2),
-            Window(FormattedTextControl(get_centered_text("批踢踢帳號")), height=1),
+            Window(FormattedTextControl("批踢踢帳號"), align=WindowAlign.CENTER, height=1),
             self.id_window,
             Window(height=1),
-            Window(FormattedTextControl(get_centered_text("批踢踢密碼")), height=1),
+            Window(FormattedTextControl("批踢踢密碼"), align=WindowAlign.CENTER, height=1),
             self.pw_window,
             Window(height=1),
             Window(
                 FormattedTextControl(
-                    lambda: [('fg:red', f"錯誤：{self.error_message}")] if self.error_message else []
+                    lambda: [self.alert_message] if self.alert_message else []
                 ),
-                height=lambda: 0 if not self.error_message else 1,
+                height=1,
                 align=WindowAlign.CENTER
             ),
             Window(height=D(weight=1)),
@@ -201,12 +187,9 @@ class UPttApp:
     def _get_select_target_windows(self) -> list:
         """產生選擇對話對象畫面的視窗元件。"""
 
-        def get_centered_text(text):
-            return lambda: ' ' * max(0, (os.get_terminal_size().columns - 2 - wcswidth(text)) // 2) + text
-
         return [
             Window(height=D(weight=1)),
-            Window(FormattedTextControl(get_centered_text("請輸入你要對話的使用者")), height=1),
+            Window(FormattedTextControl("請輸入你要對話的使用者"), height=1, align=WindowAlign.CENTER),
             Window(
                 content=BufferControl(buffer=self.target_buffer),
                 height=1,
@@ -214,8 +197,8 @@ class UPttApp:
             ),
             Window(height=1),
             Window(
-                FormattedTextControl(get_centered_text(self.error_message)),
-                height=0 if not self.error_message else 1,
+                FormattedTextControl(self.alert_message), align=WindowAlign.CENTER,
+                height=lambda: 0 if not self.alert_message else 1,
             ),
             Window(height=D(weight=1)),
         ]
@@ -229,29 +212,37 @@ class UPttApp:
             while len(self.messages) > config.MAX_MESSAGES:
                 self.messages.pop(0)
 
-            lines = []
-            # 可用行數 = 總行數 - 頂部保留行 - 底部保留行
-            available_lines = terminal_lines - 3 - 2
+            chat_area = []
+
+            # 可用行數 = 總行數 - 頂部保留行 - 底部保留行（調整為 -7 確保空間）
+            available_lines = max(0, terminal_lines - 7)
             # 只顯示終端機可容納的最新訊息
             for msg_type, msg in self.messages[-available_lines:]:
-                if msg_type == contant.SYSTEM_MSG:
-                    if msg == contant.DIVISION_LINE:
-                        lines.append(contant.DIVISION_TYPE * os.get_terminal_size().columns)
-                    else:
-                        lines.append(f"{contant.SYSTEM_MSG} {msg}")
-                elif msg_type == contant.TARGET_MSG:
-                    lines.append(f"{self.target}: {msg}")
-                elif msg_type == contant.USER_MSG:
-                    terminal_width = os.get_terminal_size().columns - 2
-                    padding = max(0, terminal_width - wcswidth(msg))
-                    lines.append(f"{' ' * padding}{msg}")
-            return '\n'.join(lines)
+
+                if msg_type == MsgType.TARGET:
+                    text = f"{self.target}: {msg}"
+                    align = WindowAlign.LEFT
+                elif msg_type == MsgType.USER:
+                    text = f"我: {msg}"
+                    align = WindowAlign.RIGHT
+                else:
+                    continue  # 忽略無效類型
+
+                chat_area.append(Window(
+                    FormattedTextControl(text),
+                    align=align,
+                    height=1,
+                    wrap_lines=False
+                ))
+
+            return chat_area
 
         return [
+
             Window(FormattedTextControl(f"[系統] 這是與 {self.target} 的對話視窗。"), height=1),
             Window(FormattedTextControl(f"[系統] 輸入 '{contant.CMD_EXIT}' 來離開。"), height=1),
             Window(FormattedTextControl(lambda: contant.DIVISION_TYPE * os.get_terminal_size().columns), height=1),
-            Window(content=FormattedTextControl(get_display_text), height=D(weight=1), wrap_lines=True),
+            DynamicContainer(lambda: HSplit(get_display_text(), height=D(weight=1), style='class:chat-area')),
             Window(FormattedTextControl(lambda: contant.DIVISION_TYPE * os.get_terminal_size().columns), height=1),
             Window(content=BufferControl(buffer=self.input_buffer), height=D.exact(1), wrap_lines=False)
         ]
@@ -269,9 +260,9 @@ class UPttApp:
         """處理登入邏輯。"""
         self.ptt_id = self.id_buffer.text
         ptt_pw = self.pw_buffer.text
-        self.error_message = ''
+        self.alert_message = None
         try:
-            self.ptt_service.call('login', {'ptt_id': self.ptt_id, 'ptt_pw': ptt_pw, 'kick_other_session': True})
+            self.ptt_service.login(self.ptt_id, ptt_pw)
             self._set_state('SELECT_TARGET')
         except PyPtt.exceptions.WrongIDorPassword:
             self._handle_login_failure('帳號密碼錯誤')
@@ -285,7 +276,7 @@ class UPttApp:
     def select_target(self):
         """處理選擇對話對象的邏輯。"""
         target_id = self.target_buffer.text
-        self.error_message = ''
+        self.alert_message = None
         try:
             target_info = self.ptt_service.call('get_user', {'user_id': target_id})
             self.target = target_info['ptt_id'].split(' ')[0]
@@ -305,12 +296,13 @@ class UPttApp:
             self.app.exit()
             return
 
+        self.messages.append((MsgType.USER, text))
+        self.app.invalidate()
+
         ptt_msg = utils.msg_to_mail(pkg_name, self.ptt_id, text)
         self.ptt_service.call('mail',
                               {'ptt_id': self.target, 'title': contant.PTT_MSG_TITLE, 'content': ptt_msg,
                                'backup': False})
-        self.messages.append((contant.USER_MSG, text))
-        self.app.invalidate()
 
     def start_chat(self):
         """初始化聊天視窗並啟動背景任務。"""
@@ -323,8 +315,8 @@ class UPttApp:
 
     async def run(self):
         """執行應用程式主迴圈並處理資源清理。"""
-        print(f"歡迎使用 {pkg_name}v{__version__}")
-        sys.stdout.write(f"\x1b]2;{pkg_name}v{__version__}\x07")
+        print(f"歡迎使用 {pkg_name} v{__version__}")
+        sys.stdout.write(f"\x1b]2;{pkg_name} v{__version__}\x07")
         self._update_layout()
         try:
             await self.app.run_async()
@@ -336,12 +328,14 @@ class UPttApp:
                 await asyncio.gather(*self.background_tasks, return_exceptions=True)
 
             self.ptt_service.call('logout')
-            # self.ptt_service.close()
+            self.ptt_service.close()
+
+            await asyncio.sleep(1)  # 確保所有背景任務有時間完成
 
             print("程式已終止。")
             print(contant.DIVISION_TYPE * os.get_terminal_size().columns)
             goodbye_message = f"由衷感謝您使用 {pkg_name}！"
-            terminal_width = os.get_terminal_size().columns
+            terminal_width = os.get_terminal_size().columns - 2
             message_width = wcswidth(goodbye_message)
             padding = max(0, (terminal_width - message_width) // 2)
             print(' ' * padding + goodbye_message)
@@ -353,13 +347,13 @@ class UPttApp:
         """從佇列中取出訊息並附加到 UI。"""
         while True:
             message = await self.message_queue.get()
-            self.messages.append((contant.TARGET_MSG, message))
+            self.messages.append((MsgType.TARGET, message))
             self.app.invalidate()
             self.message_queue.task_done()
 
     async def _message_generator_task(self):
         """定期檢查 PTT 信箱並將新訊息放入佇列。"""
-        first_round = True
+        self.check_offline_msg = True
         while True:
             await asyncio.sleep(config.CHECK_PTT_MAIL_INTERVAL)
 
@@ -372,21 +366,44 @@ class UPttApp:
                     continue
 
                 del_mail_list = []
-                lookback_limit = 10 if not first_round else 50
-                first_round = False
+                lookback_limit = 10 if not self.check_offline_msg else 50
+                self.check_offline_msg = False
 
                 for mail_idx in range(max(1, cur_mail_idx - lookback_limit), cur_mail_idx + 1):
                     try:
                         mail_info = self.ptt_service.call('get_mail', {'index': mail_idx})
-                        if (PyPtt.MailField.title in mail_info and
-                                mail_info[PyPtt.MailField.title] == contant.PTT_MSG_TITLE and
-                                mail_info[PyPtt.MailField.author].lower().startswith(self.target.lower())):
-                            content = mail_info[PyPtt.MailField.content]
-                            start = content.find(contant.PTT_MSG_DIVISION_LINE) + len(
-                                contant.PTT_MSG_DIVISION_LINE)
-                            end = content.rfind(contant.PTT_MSG_DIVISION_LINE)
-                            self.message_queue.put_nowait(content[start:end].strip())
-                            del_mail_list.append(mail_idx)
+
+                        if PyPtt.MailField.date not in mail_info:
+                            continue
+
+                        if mail_info[PyPtt.MailField.date] is None:
+                            continue
+
+                        date = datetime.strptime(mail_info[PyPtt.MailField.date], '%a %b %d %H:%M:%S %Y')
+                        if self.last_mail_date and date <= self.last_mail_date:
+                            continue
+                        self.last_mail_date = date
+
+                        if PyPtt.MailField.title not in mail_info:
+                            continue
+
+                        if PyPtt.MailField.author not in mail_info:
+                            continue
+
+                        if mail_info[PyPtt.MailField.title] != contant.PTT_MSG_TITLE:
+                            continue
+
+                        if not mail_info[PyPtt.MailField.author].lower().startswith(self.target.lower()):
+                            continue
+
+                        content = mail_info[PyPtt.MailField.content]
+                        start = content.find(contant.PTT_MSG_DIVISION_LINE) + len(
+                            contant.PTT_MSG_DIVISION_LINE)
+                        end = content.rfind(contant.PTT_MSG_DIVISION_LINE)
+                        self.message_queue.put_nowait(content[start:end].strip())
+
+                        del_mail_list.append(mail_idx)
+
                     except PyPtt.exceptions.Error:
                         continue
 
@@ -401,8 +418,7 @@ class UPttApp:
 
 def main():
     """應用程式進入點。"""
-    ptt_service = PyPtt.Service({'log_level': PyPtt.log.SILENT})
-    app = UPttApp(ptt_service)
+    app = UPttApp()
     try:
         asyncio.run(app.run())
     except (KeyboardInterrupt, Exception):
