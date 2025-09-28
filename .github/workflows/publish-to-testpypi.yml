@@ -8,6 +8,7 @@ on:
       - 'requirements.txt'
       - 'MANIFEST.in'
       - '.github/workflows/publish-to-testpypi.yml'
+  workflow_dispatch:
 
 jobs:
   test:

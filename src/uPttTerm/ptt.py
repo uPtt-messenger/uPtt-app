@@ -1,4 +1,3 @@
-import asyncio
 import time
 
 import PyPtt
@@ -6,7 +5,9 @@ import PyPtt
 
 class UPttService:
     def __init__(self):
-        self.service: PyPtt.Service = PyPtt.Service({'log_level': PyPtt.log.SILENT})
+        self.service: PyPtt.Service = PyPtt.Service(
+            # {'log_level': PyPtt.log.SILENT}
+        )
         self.ptt_id = None
         self.ptt_pw = None
 
@@ -23,6 +24,9 @@ class UPttService:
 
     def call(self, api, args=None):
 
+        if self.ptt_pw is None or self.ptt_id is None:
+            raise PyPtt.Error('Not logged in')
+
         for _ in range(self.max_retry):
             try:
                 return self.service.call(api, args)
@@ -36,4 +40,3 @@ class UPttService:
     def close(self):
         self.service.call('logout')
         self.service.close()
-

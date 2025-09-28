@@ -40,7 +40,6 @@ class UPttApp:
 
     def __init__(self):
         # --- 核心屬性 ---
-        self.ptt_service = UPttService()
         self.app = None
         self.background_tasks = []
 
@@ -350,8 +349,8 @@ class UPttApp:
             if self.background_tasks:
                 await asyncio.gather(*self.background_tasks, return_exceptions=True)
 
-            self.ptt_service.call('logout')
-            self.ptt_service.close()
+            # self.ptt_service.call('logout')
+            # self.ptt_service.close()
 
             await asyncio.sleep(1)  # 確保所有背景任務有時間完成
 
