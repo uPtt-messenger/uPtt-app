@@ -12,6 +12,7 @@ from src.uPttTerm.app import UPttApp
 from src.uPttTerm.ptt import UPttService
 from src.uPttTerm import contant
 from src.uPttTerm.contant import MsgType
+from src.uPttTerm.contant import CMD
 
 
 # --- Custom Mock PyPtt Exceptions to avoid i18n issues ---
@@ -189,7 +190,7 @@ def test_send_message_empty(app_instance):
 
 
 def test_send_message_exit_command(app_instance):
-    app_instance.input_buffer.text = contant.CMD_EXIT
+    app_instance.input_buffer.text = CMD.EXIT
     app_instance.send_message()
 
     app_instance.input_buffer.reset.assert_called_once()

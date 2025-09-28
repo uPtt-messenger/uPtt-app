@@ -26,7 +26,7 @@ from wcwidth import wcswidth
 
 from . import __name__ as pkg_name, __version__
 from . import config, contant, utils
-from .contant import MsgType
+from .contant import MsgType, CMD
 from .ptt import UPttService
 
 
@@ -256,7 +256,7 @@ class UPttApp:
         return [
 
             Window(FormattedTextControl(f"[系統] 這是與 {self.target} 的對話視窗。"), height=1),
-            Window(FormattedTextControl(f"[系統] 輸入 '{contant.CMD_EXIT}' 來離開。"), height=1),
+            Window(FormattedTextControl(f"[系統] 輸入 '{CMD.EXIT}' 來離開。"), height=1),
             Window(FormattedTextControl(lambda: contant.DIVISION_TYPE * os.get_terminal_size().columns), height=1),
             DynamicContainer(lambda: HSplit(get_display_text(), height=D(weight=1))),
             Window(FormattedTextControl(lambda: contant.DIVISION_TYPE * os.get_terminal_size().columns), height=1),
@@ -308,7 +308,7 @@ class UPttApp:
             return
 
         self.input_buffer.reset()
-        if text.lower() == contant.CMD_EXIT:
+        if text.lower() == CMD.EXIT:
             self.app.exit()
             return
 
