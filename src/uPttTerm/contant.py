@@ -38,4 +38,5 @@ PTT_MSG_DIVISION_LINE = DIVISION_TYPE * 20
 
 class CMD:
     HELP = "/help"
+    CLEAR = "/clear"
     EXIT = "/exit"
