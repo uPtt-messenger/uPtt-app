@@ -45,13 +45,14 @@ class UPttApp:
         self.background_tasks = []
 
         # --- 狀態管理 ---
-        self.state = 'LOGIN'  # 可為: LOGIN, SELECT_TARGET, CHATTING
+        self.state = 'LOGIN'
         self.ptt_id = ''
         self.target = ''
         self.messages = []
         self.alert_message = None
         self.last_mail_time = None
         self.last_msg_time = None
+        self.id = utils.gen_random_string(16)
 
         # --- UI 元件 ---
         self.message_queue = asyncio.Queue()
