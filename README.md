@@ -27,8 +27,8 @@
 1.  建立並啟動虛擬環境（可選）：
     ```bash
     python -m venv .venv
-    source venv/bin/activate  # Linux 或 macOS
-    venv\Scripts\activate     # Windows
+    source .venv/bin/activate  # Linux 或 macOS
+    .venv\Scripts\activate     # Windows
     ```
     
 2.  安裝套件
@@ -55,6 +55,32 @@
 4.  成功後，即可開始聊天。在輸入區輸入訊息後按 `Enter` 即可發送。
 
 5.  若要離開程式，請在輸入區輸入 `/exit` 並按 `Enter`，或直接按下 `Ctrl+C`。
+
+## 開發測試
+
+1.  下載原始碼並進入專案目錄：
+    ```bash
+    git clone
+    ```
+    
+2. 建立並啟動虛擬環境（可選）：
+    ```bash
+    python -m venv .venv
+    source .venv/bin/activate  # Linux 或 macOS
+    .venv\Scripts\activate     # Windows
+    ```
+   
+3. 安裝開發需求：
+    ```bash
+    pip install -r requirements.txt
+    pip install -r requirements-dev.txt
+    ```
+
+4. 執行應用程式：
+    ```bash
+    PYTHONPATH=src python3 -m uPttTerm.app
+    ```
+
 
 ## 功能特色
 
