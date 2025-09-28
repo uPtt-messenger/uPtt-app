@@ -311,6 +311,10 @@ class UPttApp:
         if text.lower() == CMD.EXIT:
             self.app.exit()
             return
+        if text.lower() == CMD.CLEAR:
+            self.messages.clear()
+            self.app.invalidate()
+            return
 
         text_time = datetime.now()
 
