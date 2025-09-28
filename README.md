@@ -8,12 +8,10 @@
 ## 實際畫面
 
 ### 登入視窗
-<img width="410" height="735" alt="image" src="https://github.com/user-attachments/assets/33cb8055-66cd-4a96-8198-5607c1319c0b" />
+<img width="480" height="701" alt="image" src="https://github.com/user-attachments/assets/784da131-f637-4c82-8408-146a32643a21" />
 
 ### 對話視窗
-<img width="360" height="574" alt="image" src="https://github.com/user-attachments/assets/4b1063bd-cf0f-4c6c-b9eb-c80c8c409fea" />
-
-
+<img width="435" height="448" alt="image" src="https://github.com/user-attachments/assets/65680862-f313-4cc8-a2e3-f04fcc625940" />
 
 ## 需求
 
