@@ -6,15 +6,13 @@ from datetime import datetime
 import PyPtt
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
-from prompt_toolkit.filters import Condition
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import Layout
 from prompt_toolkit.layout.containers import (
-    ConditionalContainer,
     DynamicContainer,
-    Float,
     FloatContainer,
     HSplit,
+    VSplit,
     Window,
     WindowAlign,
 )
@@ -70,20 +68,7 @@ class UPttApp:
         self.layout = Layout(
             container=FloatContainer(
                 content=self.framed_container,
-                floats=[
-                    Float(
-                        content=ConditionalContainer(
-                            content=Window(
-                                FormattedTextControl(f'v{__version__}'),
-                                height=1,
-                                width=len(f'v{__version__}')
-                            ),
-                            filter=Condition(lambda: self.state == 'LOGIN')
-                        ),
-                        bottom=1,
-                        right=2,
-                    )
-                ]
+                floats=[]
             ),
             focused_element=self.id_window
         )
@@ -182,7 +167,17 @@ class UPttApp:
                 height=1,
                 align=WindowAlign.CENTER
             ),
-            Window(height=D(weight=1)),
+            HSplit([
+                Window(height=D(weight=1)),
+                VSplit([
+                    Window(width=D(weight=1)),
+                    Window(
+                        FormattedTextControl(f'v{__version__}'),
+                        height=1,
+                        width=len(f'v{__version__}')
+                    )
+                ], height=1)
+            ])
         ]
 
     def _get_select_target_windows(self) -> list:
