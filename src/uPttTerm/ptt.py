@@ -25,7 +25,7 @@ class UPttService:
     def call(self, api, args=None):
 
         if self.ptt_pw is None or self.ptt_id is None:
-            raise PyPtt.Error('Not logged in')
+            raise PyPtt.RequireLogin("Please login first before calling any API.")
 
         for _ in range(self.max_retry):
             try:

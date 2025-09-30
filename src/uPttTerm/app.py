@@ -1,11 +1,14 @@
 import asyncio
+import json
 import os
+import subprocess
 import sys
 from datetime import datetime
 
 import PyPtt
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
+from prompt_toolkit.filters import Condition
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import Layout
 from prompt_toolkit.layout.containers import (
@@ -25,7 +28,6 @@ from wcwidth import wcswidth
 from . import __name__ as pkg_name, __version__
 from . import config, contant, utils
 from .contant import MsgType, CMD
-from .ptt import UPttService
 
 
 class UPttApp:
@@ -55,10 +57,15 @@ class UPttApp:
         self.message_queue = asyncio.Queue()
         self.id_buffer = Buffer(name="id_buffer")
         self.pw_buffer = Buffer(name="pw_buffer")
-        self.target_buffer = Buffer(name="target_buffer")
+        self.target_buffer = Buffer(name="target_buffer", on_text_changed=self._on_target_text_changed)
         self.input_buffer = Buffer(multiline=False, name="input_buffer")
         self.id_window = None
         self.pw_window = None
+
+        # --- 即時搜尋功能 ---
+        self.target_suggestions = []
+        self.selected_suggestion_index = 0
+        self.search_cache = {}
 
         # --- 初始化 UI ---
         self.bindings = KeyBindings()
@@ -69,8 +76,7 @@ class UPttApp:
             container=FloatContainer(
                 content=self.framed_container,
                 floats=[]
-            ),
-            focused_element=self.id_window
+            )
         )
         self.app = Application(
             layout=self.layout,
@@ -79,6 +85,9 @@ class UPttApp:
             mouse_support=False
         )
 
+        # 設定初始狀態和焦點
+        self._set_state('LOGIN')
+
     # --- 私有方法: 狀態與 UI 管理 ---
 
     def _set_state(self, new_state: str):
@@ -86,16 +95,41 @@ class UPttApp:
         self.state = new_state
         self._update_layout()
 
+        # 確保 UI 更新後再設定焦點
         # 根據新狀態設定焦點
-        if self.state == 'SELECT_TARGET':
-            self.app.layout.focus(self.target_buffer)
-        elif self.state == 'CHATTING':
-            self.app.layout.focus(self.input_buffer)
+        try:
+            if self.state == 'LOGIN':
+                if self.id_window:
+                    self.app.layout.focus(self.id_window)
+            elif self.state == 'SELECT_TARGET':
+                self.app.layout.focus(self.target_buffer)
+            elif self.state == 'CHATTING':
+                self.app.layout.focus(self.input_buffer)
+        except Exception:
+            # 如果焦點設定失敗，不影響應用程式運行
+            pass
 
     def _set_error(self, message: str):
         """設定錯誤訊息並觸發 UI 重繪。"""
         self.alert_message = ('fg:red', message)
         self.app.invalidate()
+
+    def _on_target_text_changed(self, buffer):
+        """當目標輸入框文字改變時，過濾使用者建議清單。"""
+        text = buffer.text.lower()
+        if not text:
+            self.target_suggestions = []
+        elif text in self.search_cache:
+            self.target_suggestions = self.search_cache[text]
+        else:
+            r = utils.call_server_api('search_user', {'ptt_id': text, 'min_page': 1, 'max_page': 2}, timeout=10)
+            self.target_suggestions = r["result"][:5] if "result" in r else self.target_suggestions
+
+            self.search_cache[text] = self.target_suggestions
+
+        self.selected_suggestion_index = 0
+        if self.app:
+            self.app.invalidate()
 
     def _update_layout(self):
         """根據當前狀態更新顯示的視窗。"""
@@ -105,10 +139,13 @@ class UPttApp:
             self.container.children = self._get_select_target_windows()
         elif self.state == 'CHATTING':
             self.container.children = self._get_chat_windows()
+
+        # 強制重繪界面以確保更新被應用
         self.app.invalidate()
 
     def _setup_key_bindings(self):
         """設定全域按鍵綁定。"""
+        is_selecting_target = Condition(lambda: self.state == 'SELECT_TARGET')
 
         @self.bindings.add('c-c')
         def _(event):
@@ -124,19 +161,42 @@ class UPttApp:
                 elif event.app.layout.current_buffer == self.pw_buffer:
                     self.login()
             elif self.state == 'SELECT_TARGET':
-                self.select_target()
+                # 如果有建議選項且目前輸入的文字與所選建議不同，則執行補全
+                if self.target_suggestions and self.target_buffer.text != self.target_suggestions[self.selected_suggestion_index]:
+                    self.target_buffer.text = self.target_suggestions[self.selected_suggestion_index]
+                    self.target_buffer.cursor_position = len(self.target_buffer.text)
+                # 否則，確認選擇並進入聊天室
+                else:
+                    self.select_target()
             elif self.state == 'CHATTING':
                 self.send_message()
+
+        @self.bindings.add('down', filter=is_selecting_target)
+        def _(event):
+            """在建議清單中向下移動。"""
+            if self.target_suggestions:
+                self.selected_suggestion_index = \
+                    (self.selected_suggestion_index + 1) % len(self.target_suggestions)
+
+        @self.bindings.add('up', filter=is_selecting_target)
+        def _(event):
+            """在建議清單中向上移動。"""
+            if self.target_suggestions:
+                self.selected_suggestion_index = \
+                    (self.selected_suggestion_index - 1 + len(self.target_suggestions)) \
+                    % len(self.target_suggestions)
+
+        @self.bindings.add('tab', filter=is_selecting_target)
+        def _(event):
+            """自動完成選擇的建議。"""
+            if self.target_suggestions:
+                self.target_buffer.text = self.target_suggestions[self.selected_suggestion_index]
+                self.target_buffer.cursor_position = len(self.target_buffer.text)
 
     # --- 私有方法: 視窗產生器 ---
 
     def _get_login_windows(self) -> list:
         """產生登入畫面的視窗元件。"""
-
-        # check update
-
-        if utils.is_update_available():
-            self.alert_message = ('fg:green', '有版本更新！')
 
         self.id_window = Window(
             content=BufferControl(buffer=self.id_buffer),
@@ -183,6 +243,19 @@ class UPttApp:
     def _get_select_target_windows(self) -> list:
         """產生選擇對話對象畫面的視窗元件。"""
 
+        def get_suggestion_windows():
+            """根據建議清單產生視窗元件列表。"""
+            windows = []
+            for i, user in enumerate(self.target_suggestions):
+                if i == self.selected_suggestion_index:
+                    style = 'class:reverse'
+                    text = f'{user} '
+                else:
+                    style = ''
+                    text = f'{user} '
+                windows.append(Window(FormattedTextControl([(style, text)]), height=1, align=WindowAlign.CENTER))
+            return windows
+
         return [
             Window(height=D(weight=1)),
             Window(FormattedTextControl("請輸入你要對話的使用者"), height=1, align=WindowAlign.CENTER),
@@ -192,6 +265,7 @@ class UPttApp:
                 align=WindowAlign.CENTER
             ),
             Window(height=1),
+            DynamicContainer(lambda: HSplit(get_suggestion_windows())),
             Window(
                 FormattedTextControl(self.alert_message), align=WindowAlign.CENTER,
                 height=lambda: 0 if not self.alert_message else 1,
@@ -272,24 +346,27 @@ class UPttApp:
         self.ptt_id = self.id_buffer.text
         ptt_pw = self.pw_buffer.text
         self.alert_message = None
-        try:
-            self.ptt_service.login(self.ptt_id, ptt_pw)
-            self._set_state('SELECT_TARGET')
-        except PyPtt.exceptions.WrongIDorPassword:
-            self._handle_login_failure('帳號密碼錯誤')
-        except PyPtt.exceptions.OnlySecureConnection:
-            self._handle_login_failure('只能使用安全連線')
-        except PyPtt.exceptions.ResetYourContactEmail:
-            self._handle_login_failure('請先至信箱設定連絡信箱')
-        except PyPtt.exceptions.LoginError as e:
-            self._handle_login_failure(f'登入失敗: {e}')
+
+        r = utils.login_server(self.ptt_id, ptt_pw)
+        if 'error' in r:
+            self._handle_login_failure(r['error'])
+            return
+
+        # 登入成功，清理狀態並切換到選擇目標畫面
+        self.alert_message = None
+        self.target_buffer.reset()  # 確保目標輸入框是空的
+        self._set_state('SELECT_TARGET')
 
     def select_target(self):
         """處理選擇對話對象的邏輯。"""
+
         target_id = self.target_buffer.text
         self.alert_message = None
         try:
-            target_info = self.ptt_service.call('get_user', {'user_id': target_id})
+            r = utils.call_server_api('get_user', {'user_id': target_id})
+            target_info = r['result'] if 'result' in r else None
+
+            # target_info = self.ptt_service.call('get_user', {'user_id': target_id})
             self.target = target_info['ptt_id'].split(' ')[0]
             self._set_state('CHATTING')
             self.start_chat()
@@ -299,17 +376,21 @@ class UPttApp:
     def send_message(self):
         """處理傳送訊息的邏輯。"""
         text = self.input_buffer.text.strip()
+        text_cmd = text.lower()
         if not text:
             return
-
         self.input_buffer.reset()
-        if text.lower() == CMD.EXIT:
-            self.app.exit()
-            return
-        if text.lower() == CMD.CLEAR:
-            self.messages.clear()
-            self.app.invalidate()
-            return
+
+        match text_cmd:
+            case CMD.CLEAR:
+                self.messages.clear()
+                self.app.invalidate()
+                return
+            case CMD.EXIT | CMD.QUIT:
+                self.app.exit()
+                return
+            case _:
+                pass
 
         text_time = datetime.now()
 
@@ -334,7 +415,34 @@ class UPttApp:
         """執行應用程式主迴圈並處理資源清理。"""
         print(f"歡迎使用 {pkg_name} v{__version__}")
         sys.stdout.write(f"\x1b]2;{pkg_name} v{__version__}\x07")
-        self._update_layout()
+
+        ######
+        # check the core service is available here
+
+        if not utils.is_server_running():
+            print("核心服務尚未啟動，正在啟動中...")
+            subprocess.Popen([
+                "uvicorn",
+                "uPttTerm.server:app",
+                "--host", "127.0.0.1",
+                "--port", f"{config.SERVICE_PORT}",
+                "--reload"
+            ])
+
+            while not utils.is_server_running():
+                await asyncio.sleep(0.5)
+
+        r = utils.call_server_api('get_time')
+        if 'error' in r:
+            if utils.is_update_available():
+                self.alert_message = ('fg:green', '有版本更新！')
+            self._set_state('LOGIN')
+        else:
+            self._set_state('SELECT_TARGET')
+
+        ######
+
+        # 注意：_set_state 已經會調用 _update_layout，所以這裡不需要重複調用
         try:
             await self.app.run_async()
         finally:
@@ -343,9 +451,6 @@ class UPttApp:
                 task.cancel()
             if self.background_tasks:
                 await asyncio.gather(*self.background_tasks, return_exceptions=True)
-
-            # self.ptt_service.call('logout')
-            # self.ptt_service.close()
 
             await asyncio.sleep(1)  # 確保所有背景任務有時間完成
 
@@ -440,8 +545,9 @@ def main():
     app = UPttApp()
     try:
         asyncio.run(app.run())
-    except (KeyboardInterrupt, Exception):
+    except (KeyboardInterrupt, Exception) as e:
         # 錯誤已在 app.run() 方法的 finally 區塊中處理
+        raise e
         pass
 
 

@@ -1,12 +1,13 @@
+import json
 from contextlib import asynccontextmanager
+from typing import Optional, Dict, Any
 
 import PyPtt
 from fastapi import FastAPI
+from pydantic import BaseModel
 
 from . import __name__ as pkg_name, __version__
 from .ptt import UPttService
-
-app = FastAPI()
 
 ptt_service = UPttService()
 
@@ -23,15 +24,22 @@ async def lifespan(app: FastAPI):
     try:
         # 假設您的服務有一個 logout 方法來清理和登出
         ptt_service.call('logout')
+        ptt_service.close()
         print("已成功登出 PTT。")
     except Exception as e:
         print(f"登出 PTT 時發生錯誤: {e}")
 
+app = FastAPI(lifespan=lifespan)
 
-@app.get("/health")
-def health_check():
-    """一個簡單的健康檢查端點，用於確認伺服器是否正常回應。"""
-    return {"status": "ok"}
+class LoginRequest(BaseModel):
+    """登入請求的資料結構"""
+    username: str
+    password: str
+
+class ApiCallRequest(BaseModel):
+    """通用 API 呼叫的資料結構"""
+    api: str
+    args: Optional[Dict[str, Any]] = None
 
 
 @app.get("/")
@@ -51,11 +59,21 @@ def login(username: str, password: str):
 
 
 @app.get("/api/call")
-def call_api(api: str, args: dict = None):
+def call_api(api: str, args: str = None):
     if not api:
         return {"error": "API name is required."}
+
+    json_args = None
+    if args:
+        try:
+            json_args = json.loads(args)
+        except json.JSONDecodeError as e:
+            print(f"Invalid args: {args}")
+            return {"error": f"Invalid args format: {e}"}
+
+    print(api, json_args)
     try:
-        result = ptt_service.call(api, args)
+        result = ptt_service.call(api, json_args)
         return {"result": result}
-    except PyPtt.Error as e:
+    except Exception as e:
         return {"error": f"{e}"}
