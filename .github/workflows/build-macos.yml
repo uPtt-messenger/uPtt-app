@@ -1,0 +1,37 @@
+name: Build macOS App
+
+on:
+  push:
+    tags:
+      - 'v**'
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: |
+          # PYTHONPATH 確保 PyInstaller 能找到 src 目錄下的模組
+          PYTHONPATH=src pyinstaller uPttTerm.spec
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/uPttTerm
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
