@@ -33,7 +33,7 @@ a = Analysis(
     cipher=block_cipher,
     noarchive=False,
 )
-pyz = PEXE(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(
     pyz,
