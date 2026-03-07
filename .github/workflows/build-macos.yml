@@ -28,10 +28,16 @@ jobs:
           # PYTHONPATH 確保 PyInstaller 能找到 src 目錄下的模組
           PYTHONPATH=src pyinstaller uPttTerm.spec
 
+      - name: Package .app for distribution
+        run: |
+          cd dist
+          # 將 .app 目錄打包成 zip，以保留 macOS 特殊的檔案屬性與權限
+          zip -r uPttTerm.zip uPttTerm.app
+
       - name: Create Release
         id: create_release
         uses: softprops/action-gh-release@v1
         with:
-          files: dist/uPttTerm
+          files: dist/uPttTerm.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
