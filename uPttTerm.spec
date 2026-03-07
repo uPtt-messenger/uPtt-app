@@ -19,7 +19,7 @@ hidden_imports = [
 ]
 
 a = Analysis(
-    ['src/uPttTerm/app.py'],
+    ['src/run_app.py'],
     pathex=['src'],
     binaries=[],
     datas=[],

@@ -25,9 +25,9 @@ from prompt_toolkit.layout.processors import PasswordProcessor
 from prompt_toolkit.widgets import Frame
 from wcwidth import wcswidth
 
-from . import __name__ as pkg_name, __version__
-from . import config, contant, utils
-from .contant import MsgType, CMD
+from uPttTerm import __name__ as pkg_name, __version__
+from uPttTerm import config, contant, utils
+from uPttTerm.contant import MsgType, CMD
 
 
 class UPttApp:
