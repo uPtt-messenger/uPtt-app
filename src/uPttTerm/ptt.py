@@ -24,8 +24,17 @@ class UPttService:
 
     def call(self, api, args=None):
 
-        if self.ptt_pw is None or self.ptt_id is None:
+        if api != 'logout' and (self.ptt_pw is None or self.ptt_id is None):
             raise PyPtt.RequireLogin("Please login first before calling any API.")
+
+        if api == 'logout':
+            self.ptt_id = None
+            self.ptt_pw = None
+            try:
+                self.service.call('logout')
+            except Exception:
+                pass
+            return True
 
         for _ in range(self.max_retry):
             try:
@@ -38,5 +47,5 @@ class UPttService:
         return None
 
     def close(self):
-        self.service.call('logout')
+        self.call('logout')
         self.service.close()

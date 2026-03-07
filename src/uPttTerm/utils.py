@@ -102,7 +102,7 @@ def login_server(username, password, timeout=5):
     return r.json()
 
 
-def call_server_api(api:str, args:dict=None, timeout=2):
+def call_server_api(api:str, args:dict=None, timeout=10):
 
     try:
         r = requests.get(f"http://127.0.0.1:{config.SERVICE_PORT}/api/call",

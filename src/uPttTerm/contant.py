@@ -42,3 +42,4 @@ class CMD:
     CLEAR = "/clear"
     EXIT = "/exit"
     QUIT = "/quit"
+    LOGOUT = "/logout"

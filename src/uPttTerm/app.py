@@ -42,6 +42,7 @@ class UPttApp:
         # --- 核心屬性 ---
         self.app = None
         self.background_tasks = []
+        self.server_process = None
 
         # --- 狀態管理 ---
         self.state = 'LOGIN'
@@ -325,7 +326,7 @@ class UPttApp:
         return [
 
             Window(FormattedTextControl(f"[系統] 這是與 {self.target} 的對話視窗。"), height=1),
-            Window(FormattedTextControl(f"[系統] 輸入 '{CMD.EXIT}' 來離開。"), height=1),
+            Window(FormattedTextControl(f"[系統] 輸入 '{CMD.EXIT}' 來離開、'{CMD.LOGOUT}' 來登出所有視窗。"), height=1),
             Window(FormattedTextControl(lambda: contant.DIVISION_TYPE * os.get_terminal_size().columns), height=1),
             DynamicContainer(lambda: HSplit(get_display_text(), height=D(weight=1))),
             Window(FormattedTextControl(lambda: contant.DIVISION_TYPE * os.get_terminal_size().columns), height=1),
@@ -362,16 +363,22 @@ class UPttApp:
 
         target_id = self.target_buffer.text
         self.alert_message = None
-        try:
-            r = utils.call_server_api('get_user', {'user_id': target_id})
-            target_info = r['result'] if 'result' in r else None
+        r = utils.call_server_api('get_user', {'user_id': target_id})
+        if 'error' in r:
+            if 'NoSuchUser' in r['error']:
+                 self._set_error('查無此人')
+            else:
+                 self._set_error(r['error'])
+            return
 
-            # target_info = self.ptt_service.call('get_user', {'user_id': target_id})
-            self.target = target_info['ptt_id'].split(' ')[0]
-            self._set_state('CHATTING')
-            self.start_chat()
-        except PyPtt.exceptions.NoSuchUser:
+        target_info = r.get('result')
+        if not target_info or 'ptt_id' not in target_info:
             self._set_error('查無此人')
+            return
+
+        self.target = target_info['ptt_id'].split(' ')[0]
+        self._set_state('CHATTING')
+        self.start_chat()
 
     def send_message(self):
         """處理傳送訊息的邏輯。"""
@@ -386,7 +393,7 @@ class UPttApp:
                 self.messages.clear()
                 self.app.invalidate()
                 return
-            case CMD.EXIT | CMD.QUIT:
+            case CMD.EXIT | CMD.QUIT | CMD.LOGOUT:
                 self.app.exit()
                 return
             case _:
@@ -398,9 +405,11 @@ class UPttApp:
         self.app.invalidate()
 
         ptt_msg = utils.msg_to_mail(pkg_name, self.ptt_id, text)
-        self.ptt_service.call('mail',
+        r = utils.call_server_api('mail',
                               {'ptt_id': self.target, 'title': contant.PTT_MSG_TITLE, 'content': ptt_msg,
                                'backup': False})
+        if 'error' in r:
+            self._set_error(f"發送失敗: {r['error']}")
 
     def start_chat(self):
         """初始化聊天視窗並啟動背景任務。"""
@@ -420,14 +429,13 @@ class UPttApp:
         # check the core service is available here
 
         if not utils.is_server_running():
-            print("核心服務尚未啟動，正在啟動中...")
-            subprocess.Popen([
+            # 將輸出導向 DEVNULL 以避免破壞 TUI 介面，並關閉檔案描述符
+            self.server_process = subprocess.Popen([
                 "uvicorn",
                 "uPttTerm.server:app",
                 "--host", "127.0.0.1",
                 "--port", f"{config.SERVICE_PORT}",
-                "--reload"
-            ])
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
 
             while not utils.is_server_running():
                 await asyncio.sleep(0.5)
@@ -447,6 +455,23 @@ class UPttApp:
             await self.app.run_async()
         finally:
             print("正在離開程式...")
+            
+            # 主動呼叫伺服器登出 PTT
+            print("正在登出 PTT...")
+            try:
+                # 使用 to_thread 避免在清理階段阻塞
+                await asyncio.to_thread(utils.call_server_api, 'logout')
+            except Exception:
+                pass
+
+            if self.server_process:
+                print("正在關閉伺服器...")
+                try:
+                    self.server_process.terminate()
+                    self.server_process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self.server_process.kill()
+
             for task in self.background_tasks:
                 task.cancel()
             if self.background_tasks:
@@ -482,62 +507,60 @@ class UPttApp:
             if not self.target:
                 continue
 
-            try:
-                cur_mail_idx = self.ptt_service.call('get_newest_index', {'index_type': PyPtt.NewIndex.MAIL})
-                if cur_mail_idx == 0:
+            r = await asyncio.to_thread(utils.call_server_api, 'get_newest_index', {'index_type': PyPtt.NewIndex.MAIL})
+            if 'error' in r:
+                # 偵測到登入失效（表示有其他實例登出了），則關閉當前視窗
+                if "login first" in r['error'].lower():
+                    self.app.exit()
+                continue
+
+            cur_mail_idx = r.get('result', 0)
+            if cur_mail_idx == 0:
+                continue
+
+            del_mail_list = []
+            lookback_limit = 10 if not self.check_offline_msg else 50
+            self.check_offline_msg = False
+
+            for mail_idx in range(max(1, cur_mail_idx - lookback_limit), cur_mail_idx + 1):
+                r = await asyncio.to_thread(utils.call_server_api, 'get_mail', {'index': mail_idx})
+                if 'error' in r:
                     continue
 
-                del_mail_list = []
-                lookback_limit = 10 if not self.check_offline_msg else 50
-                self.check_offline_msg = False
+                mail_info = r.get('result')
+                if not mail_info:
+                    continue
 
-                for mail_idx in range(max(1, cur_mail_idx - lookback_limit), cur_mail_idx + 1):
-                    try:
-                        mail_info = self.ptt_service.call('get_mail', {'index': mail_idx})
+                if PyPtt.MailField.date not in mail_info or mail_info[PyPtt.MailField.date] is None:
+                    continue
 
-                        if PyPtt.MailField.date not in mail_info:
-                            continue
+                msg_time = datetime.strptime(mail_info[PyPtt.MailField.date], '%a %b %d %H:%M:%S %Y')
+                if self.last_mail_time and msg_time <= self.last_mail_time:
+                    continue
+                self.last_mail_time = msg_time
 
-                        if mail_info[PyPtt.MailField.date] is None:
-                            continue
+                if PyPtt.MailField.title not in mail_info or PyPtt.MailField.author not in mail_info:
+                    continue
 
-                        msg_time = datetime.strptime(mail_info[PyPtt.MailField.date], '%a %b %d %H:%M:%S %Y')
-                        if self.last_mail_time and msg_time <= self.last_mail_time:
-                            continue
-                        self.last_mail_time = msg_time
+                if mail_info[PyPtt.MailField.title] != contant.PTT_MSG_TITLE:
+                    continue
 
-                        if PyPtt.MailField.title not in mail_info:
-                            continue
+                if not mail_info[PyPtt.MailField.author].lower().startswith(self.target.lower()):
+                    continue
 
-                        if PyPtt.MailField.author not in mail_info:
-                            continue
+                content = mail_info[PyPtt.MailField.content]
+                start = content.find(contant.PTT_MSG_DIVISION_LINE) + len(
+                    contant.PTT_MSG_DIVISION_LINE)
+                end = content.rfind(contant.PTT_MSG_DIVISION_LINE)
 
-                        if mail_info[PyPtt.MailField.title] != contant.PTT_MSG_TITLE:
-                            continue
+                self.message_queue.put_nowait(
+                    (msg_time, content[start:end].strip()))
 
-                        if not mail_info[PyPtt.MailField.author].lower().startswith(self.target.lower()):
-                            continue
+                del_mail_list.append(mail_idx)
 
-                        content = mail_info[PyPtt.MailField.content]
-                        start = content.find(contant.PTT_MSG_DIVISION_LINE) + len(
-                            contant.PTT_MSG_DIVISION_LINE)
-                        end = content.rfind(contant.PTT_MSG_DIVISION_LINE)
-
-                        self.message_queue.put_nowait(
-                            (msg_time, content[start:end].strip()))
-
-                        del_mail_list.append(mail_idx)
-
-                    except PyPtt.exceptions.Error:
-                        continue
-
-                # 從後往前刪除已處理的信件
-                for cur_mail_idx in sorted(del_mail_list, reverse=True):
-                    self.ptt_service.call('del_mail', {'index': cur_mail_idx})
-
-            except PyPtt.exceptions.Error:
-                # 在檢查信箱的過程中可能發生任何 PTT 錯誤 (例如斷線)，忽略並等待下一輪
-                continue
+            # 從後往前刪除已處理的信件
+            for cur_mail_idx in sorted(del_mail_list, reverse=True):
+                await asyncio.to_thread(utils.call_server_api, 'del_mail', {'index': cur_mail_idx})
 
 
 def main():
