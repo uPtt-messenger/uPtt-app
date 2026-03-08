@@ -43,3 +43,5 @@ class CMD:
     EXIT = "/exit"
     QUIT = "/quit"
     LOGOUT = "/logout"
+    CLOSE = "/close"
+    BACK = "/back"

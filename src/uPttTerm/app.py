@@ -47,6 +47,7 @@ class UPttApp:
         self.app = None
         self.background_tasks = []
         self.server_process = None
+        self.should_logout = False  # 控制離開時是否要徹底登出 PTT
 
         # --- 狀態管理 ---
         self.state = 'LOGIN'
@@ -71,6 +72,7 @@ class UPttApp:
         self.target_suggestions = []
         self.selected_suggestion_index = 0
         self.search_cache = {}
+        self._search_debounce_task = None
 
         # --- 初始化 UI ---
         self.bindings = KeyBindings()
@@ -120,33 +122,41 @@ class UPttApp:
         self.app.invalidate()
 
     def _on_target_text_changed(self, buffer):
-        """當目標輸入框文字改變時，過濾使用者建議清單。"""
-        text = buffer.text.lower()
+        """當目標輸入框文字改變時，過濾使用者建議清單（具備防抖與取消舊請求功能）。"""
+        text = buffer.text.lower().strip()
+        
+        if self._search_debounce_task:
+            self._search_debounce_task.cancel()
+
         if not text:
             self.target_suggestions = []
+            self.app.invalidate()
             return
 
         if text in self.search_cache:
             self.target_suggestions = self.search_cache[text]
             self.selected_suggestion_index = 0
-            if self.app:
-                self.app.invalidate()
+            self.app.invalidate()
             return
 
-        async def _fetch_search_results():
-            r = await asyncio.to_thread(
-                utils.call_server_api, 'search_user',
-                {'ptt_id': text, 'min_page': 1, 'max_page': 2},
-                timeout=10
-            )
-            if "error" not in r:
-                self.target_suggestions = r["result"][:5] if "result" in r else self.target_suggestions
-                self.search_cache[text] = self.target_suggestions
-                self.selected_suggestion_index = 0
-                if self.app:
-                    self.app.invalidate()
+        async def _debounced_search():
+            try:
+                await asyncio.sleep(0.3)
+                r = await asyncio.to_thread(
+                    utils.call_server_api, 'search_user',
+                    {'ptt_id': text, 'min_page': 1, 'max_page': 2},
+                    timeout=5
+                )
+                if "error" not in r:
+                    self.target_suggestions = r["result"][:5] if "result" in r else []
+                    self.search_cache[text] = self.target_suggestions
+                    self.selected_suggestion_index = 0
+                    if self.app:
+                        self.app.invalidate()
+            except asyncio.CancelledError:
+                pass
 
-        asyncio.create_task(_fetch_search_results())
+        self._search_debounce_task = asyncio.create_task(_debounced_search())
 
     def _update_layout(self):
         """根據當前狀態更新顯示的視窗。"""
@@ -166,7 +176,7 @@ class UPttApp:
 
         @self.bindings.add('c-c')
         def _(event):
-            """Ctrl+C: 離開程式。"""
+            """Ctrl+C: 離開當前視窗。"""
             event.app.exit()
 
         @self.bindings.add('enter')
@@ -178,13 +188,15 @@ class UPttApp:
                 elif event.app.layout.current_buffer == self.pw_buffer:
                     asyncio.create_task(self.login())
             elif self.state == 'SELECT_TARGET':
-                # 如果有建議選項且目前輸入的文字與所選建議不同，則執行補全
-                if self.target_suggestions and self.target_buffer.text != self.target_suggestions[self.selected_suggestion_index]:
-                    self.target_buffer.text = self.target_suggestions[self.selected_suggestion_index]
-                    self.target_buffer.cursor_position = len(self.target_buffer.text)
-                # 否則，確認選擇並進入聊天室
-                else:
-                    asyncio.create_task(self.select_target())
+                current_text = self.target_buffer.text.strip()
+                if self.target_suggestions:
+                    selected_val = self.target_suggestions[self.selected_suggestion_index]
+                    if current_text != selected_val:
+                        self.target_buffer.text = selected_val
+                        self.target_buffer.cursor_position = len(self.target_buffer.text)
+                        return
+                
+                asyncio.create_task(self.select_target())
             elif self.state == 'CHATTING':
                 asyncio.create_task(self.send_message())
 
@@ -378,7 +390,10 @@ class UPttApp:
     async def select_target(self):
         """處理選擇對話對象的邏輯。"""
 
-        target_id = self.target_buffer.text
+        target_id = self.target_buffer.text.strip()
+        if not target_id:
+            return
+
         self.alert_message = None
         r = await asyncio.to_thread(utils.call_server_api, 'get_user', {'user_id': target_id})
         if 'error' in r:
@@ -410,7 +425,20 @@ class UPttApp:
                 self.messages.clear()
                 self.app.invalidate()
                 return
-            case CMD.EXIT | CMD.QUIT | CMD.LOGOUT:
+            case CMD.EXIT | CMD.QUIT | CMD.CLOSE:
+                # 僅退出當前視窗，不執行登出
+                self.app.exit()
+                return
+            case CMD.BACK:
+                # 返回選擇對象畫面
+                self.messages.clear()
+                self.target_buffer.reset()
+                self.input_buffer.reset()
+                self._set_state('SELECT_TARGET')
+                return
+            case CMD.LOGOUT:
+                # 徹底登出 PTT，這會導致所有視窗關閉
+                self.should_logout = True
                 self.app.exit()
                 return
             case _:
@@ -456,17 +484,14 @@ class UPttApp:
         # check the core service is available here
 
         if not utils.is_server_running():
-            # 環境變數中加入當前路徑，確保子程序能找到包
             env = os.environ.copy()
             base_dir = os.getcwd()
             src_dir = os.path.join(base_dir, "src")
             env["PYTHONPATH"] = f"{src_dir}:{env.get('PYTHONPATH', '')}"
             
-            # 判斷是否在 PyInstaller 環境下
             if getattr(sys, 'frozen', False):
                 cmd = [sys.executable, "--server", str(config.SERVICE_PORT)]
             else:
-                # 開發環境：直接執行當前檔案路徑，確保路徑正確
                 current_file = os.path.abspath(__file__)
                 cmd = [sys.executable, current_file, "--server", str(config.SERVICE_PORT)]
 
@@ -475,9 +500,8 @@ class UPttApp:
                 close_fds=True, env=env
             )
 
-            # 等待伺服器啟動，加入逾時保護
             success = False
-            for _ in range(20): # 最多等待 10 秒
+            for _ in range(20):
                 if utils.is_server_running():
                     success = True
                     break
@@ -492,25 +516,25 @@ class UPttApp:
                 self.alert_message = ('fg:green', '有版本更新！')
             self._set_state('LOGIN')
         else:
-            # 已經登入，啟動連線監控
             self._start_session_monitor()
             self._set_state('SELECT_TARGET')
 
         ######
 
-        # 注意：_set_state 已經會調用 _update_layout，所以這裡不需要重複調用
         try:
             await self.app.run_async()
         finally:
-            # 主動呼叫伺服器登出 PTT
-            try:
-                # 使用 to_thread 避免在清理階段阻塞
-                # 這裡不需要等待，因為如果失敗了也沒關係
-                await asyncio.to_thread(utils.call_server_api, 'logout')
-            except Exception:
-                pass
+            # 只有當 should_logout 為 True 時才主動登出 PTT
+            if self.should_logout:
+                print("正在登出 PTT (所有視窗將同步關閉)...")
+                try:
+                    await asyncio.to_thread(utils.call_server_api, 'logout')
+                except Exception:
+                    pass
 
-            if self.server_process:
+            # 只有當啟動伺服器的實例執行 logout 時，才關閉伺服器
+            if self.server_process and self.should_logout:
+                print("正在關閉背景伺服器...")
                 try:
                     self.server_process.terminate()
                     self.server_process.wait(timeout=5)
@@ -522,9 +546,9 @@ class UPttApp:
             if self.background_tasks:
                 await asyncio.gather(*self.background_tasks, return_exceptions=True)
 
-            await asyncio.sleep(1)  # 確保所有背景任務有時間完成
+            await asyncio.sleep(1)
 
-            print("程式已終止。")
+            print("視窗已關閉。")
             print(contant.DIVISION_TYPE * os.get_terminal_size().columns)
             goodbye_message = f"由衷感謝您使用 {pkg_name}！"
             terminal_width = os.get_terminal_size().columns - 2
@@ -537,22 +561,19 @@ class UPttApp:
 
     async def _session_monitor_task(self):
         """監控伺服器端的 PTT 會話狀態。"""
-        # 使用極短的輪詢間隔以確保「同步關閉」感
         check_interval = 1.0 
         
         while True:
             await asyncio.sleep(check_interval)
             
-            # 只有在非登入狀態才需要監控
             if self.state == 'LOGIN':
                 continue
                 
-            # 使用極短逾時，因為只是檢查存活，不要卡住背景任務
             r = await asyncio.to_thread(utils.call_server_api, 'get_time', timeout=2)
             
             if 'error' in r:
                 error_msg = r['error'].lower()
-                # 關鍵錯誤：登入失效或伺服器失聯
+                # 如果是「登入失效」或是「連不到伺服器」，則同步關閉
                 if "login first" in error_msg or "connection error" in error_msg:
                     self.app.exit()
                     break
@@ -576,7 +597,6 @@ class UPttApp:
 
             r = await asyncio.to_thread(utils.call_server_api, 'get_newest_index', {'index_type': PyPtt.NewIndex.MAIL})
             if 'error' in r:
-                # 錯誤處理已交由 _session_monitor_task
                 continue
 
             cur_mail_idx = r.get('result', 0)
@@ -623,17 +643,14 @@ class UPttApp:
 
                 del_mail_list.append(mail_idx)
 
-            # 從後往前刪除已處理的信件
             for cur_mail_idx in sorted(del_mail_list, reverse=True):
                 await asyncio.to_thread(utils.call_server_api, 'del_mail', {'index': cur_mail_idx})
 
 
 def main():
     """應用程式進入點。"""
-    # 支援 --server 模式啟動伺服器
     if len(sys.argv) > 2 and sys.argv[1] == "--server":
         from uPttTerm.server import run_server
-        # 靜音
         sys.stdout = open(os.devnull, 'w')
         sys.stderr = open(os.devnull, 'w')
         run_server("127.0.0.1", int(sys.argv[2]))
@@ -643,7 +660,6 @@ def main():
     try:
         asyncio.run(app.run())
     except (KeyboardInterrupt, Exception) as e:
-        # 錯誤已在 app.run() 方法的 finally 區塊中處理
         raise e
         pass
 
