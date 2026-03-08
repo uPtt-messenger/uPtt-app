@@ -6,8 +6,8 @@ import PyPtt
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-from . import __name__ as pkg_name, __version__
-from .ptt import UPttService
+from uPttTerm import __name__ as pkg_name, __version__
+from uPttTerm.ptt import UPttService
 
 ptt_service = UPttService()
 
@@ -15,19 +15,15 @@ ptt_service = UPttService()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 在應用程式啟動時執行的程式碼 (yield 之前)
-    print("應用程式啟動，PTT Service 已準備就緒。")
-
     yield  # 應用程式在此運行
 
     # 在應用程式關閉時執行的程式碼 (yield 之後)
-    print("應用程式正在關閉，準備登出 PTT...")
     try:
         # 假設您的服務有一個 logout 方法來清理和登出
         ptt_service.call('logout')
         ptt_service.close()
-        print("已成功登出 PTT。")
-    except Exception as e:
-        print(f"登出 PTT 時發生錯誤: {e}")
+    except Exception:
+        pass
 
 app = FastAPI(lifespan=lifespan)
 
@@ -68,12 +64,20 @@ def call_api(api: str, args: str = None):
         try:
             json_args = json.loads(args)
         except json.JSONDecodeError as e:
-            print(f"Invalid args: {args}")
             return {"error": f"Invalid args format: {e}"}
 
-    print(api, json_args)
     try:
         result = ptt_service.call(api, json_args)
         return {"result": result}
     except Exception as e:
         return {"error": f"{e}"}
+
+
+def run_server(host: str, port: int):
+    import uvicorn
+    # 使用 critical 等級日誌，徹底讓伺服器安靜
+    uvicorn.run(app, host=host, port=port, log_level="critical")
+
+if __name__ == "__main__":
+    import sys
+    run_server("127.0.0.1", int(sys.argv[1]) if len(sys.argv) > 1 else 8000)

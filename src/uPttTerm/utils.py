@@ -102,7 +102,7 @@ def login_server(username, password, timeout=5):
     return r.json()
 
 
-def call_server_api(api:str, args:dict=None, timeout=10):
+def call_server_api(api:str, args:dict=None, timeout=30):
 
     try:
         r = requests.get(f"http://127.0.0.1:{config.SERVICE_PORT}/api/call",
@@ -110,6 +110,10 @@ def call_server_api(api:str, args:dict=None, timeout=10):
             'api': api,
             'args': json.dumps(args) if args is not None else None
         }, timeout=timeout)
+    except requests.exceptions.ReadTimeout:
+        return {
+            'error': 'Server request timed out'
+        }
     except requests.exceptions.ConnectionError as e:
         return {
             'error': f'Connection error: {e}'
