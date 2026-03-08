@@ -12,6 +12,14 @@ except ImportError:
     from __init__ import __version__, __name__ as pkg_name
     import config
 
+SECOND = 1
+MINUTE = 60 * SECOND
+HOUR = 60 * MINUTE
+DAY = 24 * HOUR
+WEEK = 7 * DAY
+
+
+
 
 def gen_random_string(length=10):
     """Generate a random string of fixed length."""

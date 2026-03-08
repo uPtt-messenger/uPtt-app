@@ -2,7 +2,7 @@
 
 block_cipher = None
 
-# 需要明確加入的隱藏依賴項 (例如 FastAPI, Uvicorn 相關組件)
+# 需要明確加入的隱藏依賴項
 hidden_imports = [
     'uvicorn.logging',
     'uvicorn.loops',
@@ -38,18 +38,14 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+    exclude_binaries=True, # 不要在 exe 裡面包二進位檔
     name='uPttTerm',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    console=True,  # 必須為 True，因為是 TUI 程式
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
@@ -57,8 +53,20 @@ exe = EXE(
     entitlements_file=None,
 )
 
-app = BUNDLE(
+# 使用 COLLECT 模式，將程式庫與執行檔放在同一個目錄
+coll = COLLECT(
     exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='uPttTerm',
+)
+
+app = BUNDLE(
+    coll, # 打包 COLLECT 出來的目錄
     name='uPttTerm.app',
     icon=None,
     bundle_identifier='com.uptt.messenger.uPttTerm',

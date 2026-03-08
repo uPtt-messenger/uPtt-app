@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from uPttTerm import __name__ as pkg_name, __version__
 from uPttTerm.ptt import UPttService
+from uPttTerm.utils import HOUR
 
 ptt_service = UPttService()
 last_request_time = time.time()
@@ -19,7 +20,7 @@ active_clients: Set[str] = set()
 shutdown_task: Optional[asyncio.Task] = None
 
 # 閒置逾時
-IDLE_TIMEOUT = 60 
+IDLE_TIMEOUT = 24 * HOUR
 
 def log_server(message):
     """將伺服器訊息寫入 log 檔"""
@@ -37,11 +38,13 @@ def force_exit():
 
 async def idle_monitor():
     """定期檢查伺服器是否閒置過久。"""
+
+    # active_clients
     while True:
         await asyncio.sleep(2)
         now = time.time()
-        # 情況 A：真的沒活動視窗且超過 10 秒
-        if len(active_clients) == 0 and now - last_request_time > 10:
+        # 情況 A：真的沒活動視窗且超過 2 秒
+        if len(active_clients) == 0 and now - last_request_time > 1:
             if not shutdown_task or shutdown_task.done():
                 log_server("Idle monitor: 無活動視窗，觸發關閉。")
                 await shutdown_server()
