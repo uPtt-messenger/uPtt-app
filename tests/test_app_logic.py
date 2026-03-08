@@ -44,7 +44,9 @@ class MockNoSuchUser(PyPtt.exceptions.NoSuchUser):
 # Fixture to create a UPttApp instance with mocked utils functions
 @pytest.fixture
 def app_instance():
-    with patch('src.uPttTerm.app.utils.login_server') as mock_login_server, \
+    # Mock asyncio.create_task to avoid RuntimeError: no running event loop
+    with patch('src.uPttTerm.app.asyncio.create_task') as mock_create_task, \
+         patch('src.uPttTerm.app.utils.login_server') as mock_login_server, \
          patch('src.uPttTerm.app.utils.call_server_api') as mock_call_server_api, \
          patch('prompt_toolkit.buffer.Buffer', autospec=True) as MockBufferClass:
 
@@ -65,6 +67,7 @@ def app_instance():
         app.app.layout.focus = MagicMock()
         app.app.invalidate = MagicMock()
         app.app.exit = MagicMock()
+        app.app.create_background_task = MagicMock()
 
         # The app instance's buffers are already the mock objects
         app.id_buffer.reset = MagicMock()
@@ -75,30 +78,34 @@ def app_instance():
         # Store mocks in app instance for easy access in tests
         app.mock_login_server = mock_login_server
         app.mock_call_server_api = mock_call_server_api
+        app.mock_create_task = mock_create_task
 
         yield app
 
 
 # --- Test login method ---
 
-def test_login_success(app_instance):
+@pytest.mark.asyncio
+async def test_login_success(app_instance):
     app_instance.id_buffer.text = "test_id"
     app_instance.pw_buffer.text = "test_pw"
     app_instance.mock_login_server.return_value = {'result': 'Login successful.'}
 
-    app_instance.login()
+    with patch.object(app_instance, '_start_session_monitor'):
+        await app_instance.login()
 
     app_instance.mock_login_server.assert_called_once_with("test_id", "test_pw")
     assert app_instance.state == 'SELECT_TARGET'
     assert app_instance.alert_message is None
 
 
-def test_login_failure(app_instance):
+@pytest.mark.asyncio
+async def test_login_failure(app_instance):
     app_instance.id_buffer.text = "wrong_id"
     app_instance.pw_buffer.text = "wrong_pw"
     app_instance.mock_login_server.return_value = {'error': '帳號密碼錯誤'}
 
-    app_instance.login()
+    await app_instance.login()
 
     assert app_instance.state == 'LOGIN'
     assert app_instance.alert_message == ('fg:red', '帳號密碼錯誤')
@@ -107,8 +114,9 @@ def test_login_failure(app_instance):
 
 # --- Test select_target method ---
 
-def test_select_target_success(app_instance):
-    # Setting text triggers _on_target_text_changed which calls call_server_api
+@pytest.mark.asyncio
+async def test_select_target_success(app_instance):
+    # Setting text triggers _on_target_text_changed which calls create_task
     app_instance.target_buffer.text = "target_user"
     app_instance.mock_call_server_api.reset_mock()
     
@@ -117,7 +125,7 @@ def test_select_target_success(app_instance):
 
     # Mock start_chat as it's called internally
     with patch.object(app_instance, 'start_chat') as mock_start_chat:
-        app_instance.select_target()
+        await app_instance.select_target()
 
         app_instance.mock_call_server_api.assert_any_call(
             'get_user', {'user_id': "target_user"}
@@ -128,7 +136,8 @@ def test_select_target_success(app_instance):
         mock_start_chat.assert_called_once()
 
 
-def test_select_target_no_such_user(app_instance):
+@pytest.mark.asyncio
+async def test_select_target_no_such_user(app_instance):
     # Setting text triggers _on_target_text_changed
     app_instance.target_buffer.text = "non_existent_user"
     app_instance.app.invalidate.reset_mock()
@@ -136,7 +145,7 @@ def test_select_target_no_such_user(app_instance):
     app_instance.mock_call_server_api.return_value = {'error': 'NoSuchUser: non_existent_user'}
     app_instance.state = 'SELECT_TARGET'
 
-    app_instance.select_target()
+    await app_instance.select_target()
 
     assert app_instance.state == 'SELECT_TARGET'
     assert app_instance.alert_message == ('fg:red', '查無此人')
@@ -145,9 +154,10 @@ def test_select_target_no_such_user(app_instance):
 
 # --- Test send_message method ---
 
-def test_send_message_empty(app_instance):
+@pytest.mark.asyncio
+async def test_send_message_empty(app_instance):
     app_instance.input_buffer.text = "   "
-    app_instance.send_message()
+    await app_instance.send_message()
 
     # reset() is not called if text is empty after strip()
     app_instance.input_buffer.reset.assert_not_called()
@@ -155,16 +165,18 @@ def test_send_message_empty(app_instance):
     app_instance.app.invalidate.assert_not_called()
 
 
-def test_send_message_exit_command(app_instance):
+@pytest.mark.asyncio
+async def test_send_message_exit_command(app_instance):
     app_instance.input_buffer.text = CMD.EXIT
-    app_instance.send_message()
+    await app_instance.send_message()
 
     app_instance.input_buffer.reset.assert_called_once()
     app_instance.app.exit.assert_called_once()
     app_instance.mock_call_server_api.assert_not_called()
 
 
-def test_send_message_success(app_instance):
+@pytest.mark.asyncio
+async def test_send_message_success(app_instance):
     app_name = "uPttTerm"
     ptt_id = "test_id"
     target = "target_user"
@@ -177,7 +189,7 @@ def test_send_message_success(app_instance):
     # Mock utils.msg_to_mail - correct patching path
     with patch('src.uPttTerm.app.utils.msg_to_mail') as mock_msg_to_mail:
         mock_msg_to_mail.return_value = "formatted_mail_content"
-        app_instance.send_message()
+        await app_instance.send_message()
 
         app_instance.input_buffer.reset.assert_called_once()
         mock_msg_to_mail.assert_called_once_with(contant.pkg_name, ptt_id, message_text)

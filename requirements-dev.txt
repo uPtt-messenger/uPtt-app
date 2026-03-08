@@ -3,3 +3,4 @@ wheel
 twine
 pytest
 pytest-cov
+pytest-asyncio
