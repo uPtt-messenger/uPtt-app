@@ -22,11 +22,12 @@ from prompt_toolkit.layout.containers import (
     VSplit,
     Window,
     WindowAlign,
+    Float,
 )
 from prompt_toolkit.layout.controls import FormattedTextControl, BufferControl
 from prompt_toolkit.layout.dimension import Dimension as D
 from prompt_toolkit.layout.processors import PasswordProcessor
-from prompt_toolkit.widgets import Frame
+from prompt_toolkit.widgets import Frame, Shadow
 from wcwidth import wcswidth
 
 from uPttTerm import __name__ as pkg_name, __version__
@@ -48,6 +49,7 @@ class UPttApp:
         self.background_tasks = []
         self.server_process = None
         self.should_logout = False  # 控制離開時是否要徹底登出 PTT
+        self.show_help = False      # 控制是否顯示幫助視窗
 
         # --- 狀態管理 ---
         self.state = 'LOGIN'
@@ -79,12 +81,19 @@ class UPttApp:
         self._setup_key_bindings()
         self.container = HSplit(self._get_login_windows())
         self.framed_container = Frame(body=self.container)
+        
+        # 使用 FloatContainer 支援彈出式視窗 (Help Modal)
         self.layout = Layout(
             container=FloatContainer(
                 content=self.framed_container,
-                floats=[]
+                floats=[
+                    Float(
+                        content=DynamicContainer(self._get_help_modal_dynamic),
+                    )
+                ]
             )
         )
+        
         self.app = Application(
             layout=self.layout,
             key_bindings=self.bindings,
@@ -97,13 +106,36 @@ class UPttApp:
 
     # --- 私有方法: 狀態與 UI 管理 ---
 
+    def _get_help_modal_dynamic(self):
+        """動態判斷是否顯示幫助視窗。優化對齊效果。"""
+        if self.show_help:
+            # 建立左對齊的指令清單，並確保右側整齊
+            help_lines = [
+                f" {CMD.HELP:8} - 顯示此幫助視窗",
+                f" {CMD.BACK:8} - 返回對象選擇 (切換對象)",
+                f" {CMD.CLEAR:8} - 清除目前對話紀錄",
+                f" {CMD.CLOSE:8} - 關閉視窗 (別名: /exit)",
+                f" {CMD.LOGOUT:8} - 登出 PTT 並關閉所有視窗",
+            ]
+            content = "\n" + "\n".join(help_lines) + "\n\n [ 按 Enter 或 Esc 關閉 ]"
+            
+            return Frame(
+                body=Window(
+                    content=FormattedTextControl(content),
+                    align=WindowAlign.LEFT, # 改用左對齊，內部透過格式化對齊
+                    dont_extend_height=True,
+                    dont_extend_width=True,
+                ),
+                title=" 指令說明 ",
+                width=48, # 稍微加寬以容納對齊後的文字
+            )
+        return Window(height=0, width=0)
+
     def _set_state(self, new_state: str):
         """設定應用程式狀態，並更新 UI 和焦點。"""
         self.state = new_state
         self._update_layout()
 
-        # 確保 UI 更新後再設定焦點
-        # 根據新狀態設定焦點
         try:
             if self.state == 'LOGIN':
                 if self.id_window:
@@ -113,7 +145,6 @@ class UPttApp:
             elif self.state == 'CHATTING':
                 self.app.layout.focus(self.input_buffer)
         except Exception:
-            # 如果焦點設定失敗，不影響應用程式運行
             pass
 
     def _set_error(self, message: str):
@@ -174,13 +205,24 @@ class UPttApp:
     def _setup_key_bindings(self):
         """設定全域按鍵綁定。"""
         is_selecting_target = Condition(lambda: self.state == 'SELECT_TARGET')
+        is_showing_help = Condition(lambda: self.show_help)
 
         @self.bindings.add('c-c')
         def _(event):
-            """Ctrl+C: 離開當前視窗。"""
-            event.app.exit()
+            """Ctrl+C: 離開。"""
+            if self.show_help:
+                self.show_help = False
+            else:
+                event.app.exit()
 
-        @self.bindings.add('enter')
+        @self.bindings.add('enter', filter=is_showing_help)
+        @self.bindings.add('escape', filter=is_showing_help)
+        def _(event):
+            """在幫助視窗中按 Enter 或 Esc 關閉。"""
+            self.show_help = False
+            self.app.invalidate()
+
+        @self.bindings.add('enter', filter=~is_showing_help)
         def _(event):
             """Enter: 根據當前狀態執行不同操作。"""
             if self.state == 'LOGIN':
@@ -189,7 +231,6 @@ class UPttApp:
                 elif event.app.layout.current_buffer == self.pw_buffer:
                     asyncio.create_task(self.login())
             elif self.state == 'SELECT_TARGET':
-                # 如果有建議選項且目前使用者手動選擇了，則補全
                 if self.selected_suggestion_index >= 0 and self.target_suggestions:
                     selected_val = self.target_suggestions[self.selected_suggestion_index]
                     self.target_buffer.text = selected_val
@@ -197,7 +238,6 @@ class UPttApp:
                     self.selected_suggestion_index = -1
                     return 
                 
-                # 直接進入：立即取消任何正在進行的背景搜尋任務
                 if self._search_debounce_task:
                     self._search_debounce_task.cancel()
                 
@@ -318,51 +358,47 @@ class UPttApp:
 
             self.messages.sort(key=lambda x: x[1] if isinstance(x[1], datetime) else datetime.min)
 
-            # 限制訊息數量，避免過多佔用記憶體
             while len(self.messages) > config.MAX_MESSAGES:
                 self.messages.pop(0)
 
             chat_area = []
-
-            # 可用行數 = 總行數 - 頂部保留行 - 底部保留行（調整為 -7 確保空間）
             available_lines = max(0, terminal_lines - 7)
-            # 只顯示終端機可容納的最新訊息
-            for msg_type, msg_time, msg in self.messages[-available_lines:]:
+            for msg_type, msg_time, msg in self.messages:
+                msg_time_str = msg_time.strftime('[%m.%d %H:%M]')
 
-                msg_time = msg_time.strftime('[%m.%d %H:%M]')
-
-                if self.last_msg_time is None or (msg_time != self.last_msg_time):
-                    self.last_msg_time = msg_time
+                if self.last_msg_time is None or (msg_time_str != self.last_msg_time):
+                    self.last_msg_time = msg_time_str
                     chat_area.append(
                         Window(
-                            FormattedTextControl(msg_time),
+                            FormattedTextControl(msg_time_str),
                             align=WindowAlign.CENTER,
                             height=1, wrap_lines=False
                         ))
 
-                if msg_type == MsgType.TARGET:
-                    text = f"[{self.target}] {msg}"
+                lines = msg.strip().split('\n')
+                for line in lines:
+                    if msg_type == MsgType.TARGET:
+                        text = f"[{self.target}] {line}"
+                        align = WindowAlign.LEFT
+                    elif msg_type == MsgType.USER:
+                        text = f"{line}"
+                        align = WindowAlign.RIGHT
+                    else:
+                        continue
 
-                    align = WindowAlign.LEFT
-                elif msg_type == MsgType.USER:
-                    text = f"{msg}"
-                    align = WindowAlign.RIGHT
-                else:
-                    continue  # 忽略無效類型
+                    chat_area.append(Window(
+                        FormattedTextControl(text),
+                        align=align,
+                        height=1,
+                        wrap_lines=False
+                    ))
 
-                chat_area.append(Window(
-                    FormattedTextControl(text),
-                    align=align,
-                    height=1,
-                    wrap_lines=False
-                ))
-
-            return chat_area
+            return chat_area[-available_lines:]
 
         return [
 
             Window(FormattedTextControl(f"[系統] 這是與 {self.target} 的對話視窗。"), height=1),
-            Window(FormattedTextControl(f"[系統] 輸入 '{CMD.EXIT}' 來離開。"), height=1),
+            Window(FormattedTextControl(f"[系統] 輸入 '{CMD.HELP}' 來顯示說明。"), height=1),
             Window(FormattedTextControl(lambda: contant.DIVISION_TYPE * os.get_terminal_size().columns), height=1),
             DynamicContainer(lambda: HSplit(get_display_text(), height=D(weight=1))),
             Window(FormattedTextControl(lambda: contant.DIVISION_TYPE * os.get_terminal_size().columns), height=1),
@@ -389,10 +425,9 @@ class UPttApp:
             self._handle_login_failure(r['error'])
             return
 
-        # 登入成功，啟動連線監控並切換畫面
         self._start_session_monitor()
         self.alert_message = None
-        self.target_buffer.reset()  # 確保目標輸入框是空的
+        self.target_buffer.reset()
         self._set_state('SELECT_TARGET')
 
     async def select_target(self):
@@ -430,15 +465,7 @@ class UPttApp:
 
         match text_cmd:
             case CMD.HELP:
-                help_text = (
-                    "\n[可用指令]\n"
-                    f"{CMD.HELP}   - 顯示此幫助訊息\n"
-                    f"{CMD.BACK}   - 返回選擇對象畫面，切換聊天對象\n"
-                    f"{CMD.CLEAR}  - 清除目前視窗的對話紀錄\n"
-                    f"{CMD.CLOSE}  - 關閉目前視窗 (別名: {CMD.EXIT}, {CMD.QUIT})\n"
-                    f"{CMD.LOGOUT} - 登出 PTT 並關閉所有連動視窗"
-                )
-                self.messages.append((MsgType.TARGET, datetime.now(), help_text))
+                self.show_help = True
                 self.app.invalidate()
                 return
             case CMD.CLEAR:
@@ -484,7 +511,6 @@ class UPttApp:
 
     def _start_session_monitor(self):
         """啟動監控連線狀態的背景任務。"""
-        # 避免重複啟動監控
         for task in self.background_tasks:
             if hasattr(task, '_is_monitor') and task._is_monitor:
                 return
@@ -496,9 +522,6 @@ class UPttApp:
     async def run(self):
         """執行應用程式主迴圈並處理資源清理。"""
         sys.stdout.write(f"\x1b]2;{pkg_name} v{__version__}\x07")
-
-        ######
-        # check the core service is available here
 
         if not utils.is_server_running():
             env = os.environ.copy()
@@ -527,7 +550,6 @@ class UPttApp:
             if not success:
                 return
 
-        # 向伺服器註冊此客戶端
         import requests
         try:
             requests.get(f"http://127.0.0.1:{config.SERVICE_PORT}/api/register", params={"client_id": self.id}, timeout=2)
@@ -541,16 +563,13 @@ class UPttApp:
             self._set_state('LOGIN')
         else:
             self._set_state('SELECT_TARGET')
+            self._set_state('SELECT_TARGET')
             self._start_session_monitor()
-
-        ######
 
         try:
             await self.app.run_async()
         finally:
-            # 向伺服器註銷此客戶端
             try:
-                # 使用同步呼叫確保在退出前送達
                 requests.get(f"http://127.0.0.1:{config.SERVICE_PORT}/api/unregister", params={"client_id": self.id}, timeout=2)
             except Exception:
                 pass
