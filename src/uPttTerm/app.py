@@ -505,6 +505,7 @@ class UPttApp:
             # 主動呼叫伺服器登出 PTT
             try:
                 # 使用 to_thread 避免在清理階段阻塞
+                # 這裡不需要等待，因為如果失敗了也沒關係
                 await asyncio.to_thread(utils.call_server_api, 'logout')
             except Exception:
                 pass
@@ -536,18 +537,25 @@ class UPttApp:
 
     async def _session_monitor_task(self):
         """監控伺服器端的 PTT 會話狀態。"""
+        # 使用極短的輪詢間隔以確保「同步關閉」感
+        check_interval = 1.0 
+        
         while True:
-            await asyncio.sleep(config.CHECK_PTT_MAIL_INTERVAL)
+            await asyncio.sleep(check_interval)
             
-            # 只有在非登入狀態才需要監控（因為登入後才有會話）
+            # 只有在非登入狀態才需要監控
             if self.state == 'LOGIN':
                 continue
                 
-            r = await asyncio.to_thread(utils.call_server_api, 'get_time')
+            # 使用極短逾時，因為只是檢查存活，不要卡住背景任務
+            r = await asyncio.to_thread(utils.call_server_api, 'get_time', timeout=2)
+            
             if 'error' in r:
-                # 偵測到登入失效（表示有其他實例登出了），則關閉當前視窗
-                if "login first" in r['error'].lower():
+                error_msg = r['error'].lower()
+                # 關鍵錯誤：登入失效或伺服器失聯
+                if "login first" in error_msg or "connection error" in error_msg:
                     self.app.exit()
+                    break
 
     async def _message_printer_task(self):
         """從佇列中取出訊息並附加到 UI。"""
@@ -568,7 +576,7 @@ class UPttApp:
 
             r = await asyncio.to_thread(utils.call_server_api, 'get_newest_index', {'index_type': PyPtt.NewIndex.MAIL})
             if 'error' in r:
-                # 登入失效的處理已交由 _session_monitor_task
+                # 錯誤處理已交由 _session_monitor_task
                 continue
 
             cur_mail_idx = r.get('result', 0)
