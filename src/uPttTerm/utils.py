@@ -90,6 +90,10 @@ def login_server(username, password, timeout=5):
             'username': username,
             'password': password
         }, timeout=timeout)
+    except requests.exceptions.ReadTimeout:
+        return {
+            'error': 'Login request timed out'
+        }
     except requests.exceptions.ConnectionError as e:
         return {
             'error': f'Connection error: {e}'
@@ -128,10 +132,9 @@ def call_server_api(api:str, args:dict=None, timeout=30):
 def is_server_running():
 
     try:
-        r = requests.get(f"http://127.0.0.1:{config.SERVICE_PORT}/", timeout=5)
-    except requests.exceptions.ConnectionError:
-        return False
-    except requests.exceptions.ReadTimeout:
+        # 縮短逾時至 1 秒，避免在啟動檢查時卡死
+        r = requests.get(f"http://127.0.0.1:{config.SERVICE_PORT}/", timeout=1)
+    except (requests.exceptions.ConnectionError, requests.exceptions.ReadTimeout):
         return False
 
     return r.status_code == 200

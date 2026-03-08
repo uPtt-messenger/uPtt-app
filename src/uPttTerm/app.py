@@ -70,7 +70,7 @@ class UPttApp:
 
         # --- 即時搜尋功能 ---
         self.target_suggestions = []
-        self.selected_suggestion_index = 0
+        self.selected_suggestion_index = -1
         self.search_cache = {}
         self._search_debounce_task = None
 
@@ -130,12 +130,13 @@ class UPttApp:
 
         if not text:
             self.target_suggestions = []
+            self.selected_suggestion_index = -1
             self.app.invalidate()
             return
 
         if text in self.search_cache:
             self.target_suggestions = self.search_cache[text]
-            self.selected_suggestion_index = 0
+            self.selected_suggestion_index = -1
             self.app.invalidate()
             return
 
@@ -150,7 +151,7 @@ class UPttApp:
                 if "error" not in r:
                     self.target_suggestions = r["result"][:5] if "result" in r else []
                     self.search_cache[text] = self.target_suggestions
-                    self.selected_suggestion_index = 0
+                    self.selected_suggestion_index = -1
                     if self.app:
                         self.app.invalidate()
             except asyncio.CancelledError:
@@ -188,13 +189,17 @@ class UPttApp:
                 elif event.app.layout.current_buffer == self.pw_buffer:
                     asyncio.create_task(self.login())
             elif self.state == 'SELECT_TARGET':
-                current_text = self.target_buffer.text.strip()
-                if self.target_suggestions:
+                # 如果有建議選項且目前使用者手動選擇了，則補全
+                if self.selected_suggestion_index >= 0 and self.target_suggestions:
                     selected_val = self.target_suggestions[self.selected_suggestion_index]
-                    if current_text != selected_val:
-                        self.target_buffer.text = selected_val
-                        self.target_buffer.cursor_position = len(self.target_buffer.text)
-                        return
+                    self.target_buffer.text = selected_val
+                    self.target_buffer.cursor_position = len(self.target_buffer.text)
+                    self.selected_suggestion_index = -1
+                    return 
+                
+                # 直接進入：立即取消任何正在進行的背景搜尋任務
+                if self._search_debounce_task:
+                    self._search_debounce_task.cancel()
                 
                 asyncio.create_task(self.select_target())
             elif self.state == 'CHATTING':
@@ -211,16 +216,19 @@ class UPttApp:
         def _(event):
             """在建議清單中向上移動。"""
             if self.target_suggestions:
-                self.selected_suggestion_index = \
-                    (self.selected_suggestion_index - 1 + len(self.target_suggestions)) \
-                    % len(self.target_suggestions)
+                if self.selected_suggestion_index <= 0:
+                    self.selected_suggestion_index = len(self.target_suggestions) - 1
+                else:
+                    self.selected_suggestion_index -= 1
 
         @self.bindings.add('tab', filter=is_selecting_target)
         def _(event):
             """自動完成選擇的建議。"""
             if self.target_suggestions:
-                self.target_buffer.text = self.target_suggestions[self.selected_suggestion_index]
+                idx = max(0, self.selected_suggestion_index)
+                self.target_buffer.text = self.target_suggestions[idx]
                 self.target_buffer.cursor_position = len(self.target_buffer.text)
+                self.selected_suggestion_index = -1
 
     # --- 私有方法: 視窗產生器 ---
 
@@ -421,23 +429,32 @@ class UPttApp:
         self.input_buffer.reset()
 
         match text_cmd:
+            case CMD.HELP:
+                help_text = (
+                    "\n[可用指令]\n"
+                    f"{CMD.HELP}   - 顯示此幫助訊息\n"
+                    f"{CMD.BACK}   - 返回選擇對象畫面，切換聊天對象\n"
+                    f"{CMD.CLEAR}  - 清除目前視窗的對話紀錄\n"
+                    f"{CMD.CLOSE}  - 關閉目前視窗 (別名: {CMD.EXIT}, {CMD.QUIT})\n"
+                    f"{CMD.LOGOUT} - 登出 PTT 並關閉所有連動視窗"
+                )
+                self.messages.append((MsgType.TARGET, datetime.now(), help_text))
+                self.app.invalidate()
+                return
             case CMD.CLEAR:
                 self.messages.clear()
                 self.app.invalidate()
                 return
             case CMD.EXIT | CMD.QUIT | CMD.CLOSE:
-                # 僅退出當前視窗，不執行登出
                 self.app.exit()
                 return
             case CMD.BACK:
-                # 返回選擇對象畫面
                 self.messages.clear()
                 self.target_buffer.reset()
                 self.input_buffer.reset()
                 self._set_state('SELECT_TARGET')
                 return
             case CMD.LOGOUT:
-                # 徹底登出 PTT，這會導致所有視窗關閉
                 self.should_logout = True
                 self.app.exit()
                 return
@@ -510,36 +527,40 @@ class UPttApp:
             if not success:
                 return
 
+        # 向伺服器註冊此客戶端
+        import requests
+        try:
+            requests.get(f"http://127.0.0.1:{config.SERVICE_PORT}/api/register", params={"client_id": self.id}, timeout=2)
+        except Exception:
+            pass
+
         r = utils.call_server_api('get_time')
         if 'error' in r:
             if utils.is_update_available():
                 self.alert_message = ('fg:green', '有版本更新！')
             self._set_state('LOGIN')
         else:
-            self._start_session_monitor()
             self._set_state('SELECT_TARGET')
+            self._start_session_monitor()
 
         ######
 
         try:
             await self.app.run_async()
         finally:
-            # 只有當 should_logout 為 True 時才主動登出 PTT
+            # 向伺服器註銷此客戶端
+            try:
+                # 使用同步呼叫確保在退出前送達
+                requests.get(f"http://127.0.0.1:{config.SERVICE_PORT}/api/unregister", params={"client_id": self.id}, timeout=2)
+            except Exception:
+                pass
+
             if self.should_logout:
                 print("正在登出 PTT (所有視窗將同步關閉)...")
                 try:
                     await asyncio.to_thread(utils.call_server_api, 'logout')
                 except Exception:
                     pass
-
-            # 只有當啟動伺服器的實例執行 logout 時，才關閉伺服器
-            if self.server_process and self.should_logout:
-                print("正在關閉背景伺服器...")
-                try:
-                    self.server_process.terminate()
-                    self.server_process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    self.server_process.kill()
 
             for task in self.background_tasks:
                 task.cancel()
@@ -573,7 +594,6 @@ class UPttApp:
             
             if 'error' in r:
                 error_msg = r['error'].lower()
-                # 如果是「登入失效」或是「連不到伺服器」，則同步關閉
                 if "login first" in error_msg or "connection error" in error_msg:
                     self.app.exit()
                     break
