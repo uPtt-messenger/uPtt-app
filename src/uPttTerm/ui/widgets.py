@@ -15,6 +15,8 @@ class ChatMessage(Static):
     def compose(self) -> ComposeResult:
         with Horizontal(classes="message-item " + ("msg-right" if self.is_me else "msg-left")):
             if self.is_me:
+                # 建立一個空元件來把訊息推向右邊
+                yield Static("", classes="spacer")
                 yield Label(self.time_str, classes="msg-meta")
                 yield Label(self.text, classes="msg-bubble")
             else:

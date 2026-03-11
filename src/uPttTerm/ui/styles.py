@@ -30,6 +30,29 @@ LoginScreen {
     padding: 1 2;
 }
 
+#login-actions {
+    margin-top: 2;
+    height: 3;
+    width: 100%;
+}
+
+#login-btn {
+    width: 1fr;
+    margin-right: 1;
+}
+
+#exit-btn {
+    width: 1fr;
+    margin-left: 1;
+}
+
+#version-label {
+    width: 100%;
+    margin-top: 1;
+    text-align: right;
+    color: $ptt-white 40%;
+}
+
 #logo {
     width: 100%;
     content-align: center middle;
@@ -49,11 +72,6 @@ LoginScreen {
     text-align: center;
     margin-top: 1;
     display: none;
-}
-
-#login-btn {
-    margin-top: 2;
-    width: 100%;
 }
 
 /* 主畫面架構 */
@@ -116,6 +134,10 @@ MainChatScreen Header {
     width: 100%;
     height: auto;
     margin: 0 0 1 0;
+}
+
+.spacer {
+    width: 1fr;
 }
 
 .msg-left {
