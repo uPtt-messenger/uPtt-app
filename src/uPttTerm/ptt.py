@@ -6,7 +6,7 @@ import PyPtt
 class UPttService:
     def __init__(self):
         self.service: PyPtt.Service = PyPtt.Service(
-            # {'log_level': PyPtt.log.SILENT}
+            {'log_level': PyPtt.log.SILENT}
         )
         self.ptt_id = None
         self.ptt_pw = None

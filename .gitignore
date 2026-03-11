@@ -6,4 +6,4 @@ dist/
 *venv*/
 coverage.xml
 .coverage
-server_debug.log
+*.log
