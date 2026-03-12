@@ -105,7 +105,8 @@ MainChatScreen Header {
 }
 
 #chat-list ListItem {
-    padding: 0 1;
+    padding: 0;
+    height: 3;
 }
 
 #chat-list ListItem:hover {
@@ -115,6 +116,33 @@ MainChatScreen Header {
 #chat-list ListItem.--highlight {
     background: $primary;
     color: $ptt-white;
+}
+
+.sidebar-item-container {
+    padding: 0 1;
+    height: 100%;
+    align: left middle;
+}
+
+.sidebar-row-top {
+    height: 1;
+}
+
+.unread-mark {
+    width: 2;
+    color: $error;
+    text-style: bold;
+}
+
+.sidebar-id {
+    text-style: bold;
+    color: $ptt-cyan;
+}
+
+.sidebar-nickname {
+    color: $ptt-white 50%;
+    margin-left: 2;
+    height: 1;
 }
 
 #chat-area {

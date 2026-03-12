@@ -132,10 +132,29 @@ class MainChatScreen(Screen):
         current_idx = list_view.index
         list_view.clear()
         for target_key in self.chat_histories.keys():
-            display_name = self.display_names.get(target_key, target_key)
+            full_display = self.display_names.get(target_key, target_key)
+            
+            # 解析 ID 與 暱稱
+            if ' (' in full_display:
+                ptt_id, nickname = full_display.split(' (', 1)
+                nickname = '(' + nickname
+            else:
+                ptt_id = full_display
+                nickname = ""
+                
             unread = self.unread_counts.get(target_key, 0)
-            prefix = "[red]*[/] " if unread > 0 else "  "
-            list_view.append(ListItem(Label(f"{prefix}{display_name}")))
+            
+            # 建立雙行佈局元件
+            item_content = Vertical(
+                Horizontal(
+                    Label("[red]*[/]" if unread > 0 else " ", classes="unread-mark"),
+                    Label(ptt_id, classes="sidebar-id"),
+                    classes="sidebar-row-top"
+                ),
+                Label(nickname if nickname else "", classes="sidebar-nickname"),
+                classes="sidebar-item-container"
+            )
+            list_view.append(ListItem(item_content))
         list_view.index = current_idx
 
     @work(exclusive=True)
@@ -269,11 +288,15 @@ class MainChatScreen(Screen):
 
     @on(ListView.Selected)
     def on_chat_selected(self, event: ListView.Selected):
-        # 取得 Label 的文字內容並過濾掉 Rich 標記與前綴符號
-        raw_text = str(event.item.query_one(Label).renderable)
-        # 移除 Rich 標記與可能的前綴 (* 或空格)
-        target_display = raw_text.replace("[red]*[/] ", "").lstrip("* ").strip()
-        self.select_chat(target_display)
+        # 透過類別選取器精確取得 ID Label
+        try:
+            id_label = event.item.query_one(".sidebar-id", Label)
+            ptt_id = str(id_label.renderable).strip()
+            # 取得完整的顯示名稱 (含暱稱)
+            full_display = self.display_names.get(ptt_id.lower(), ptt_id)
+            self.select_chat(full_display)
+        except Exception as e:
+            logger.error(f"Select chat error: {e}")
 
     @on(Input.Submitted, "#message-input")
     @work
