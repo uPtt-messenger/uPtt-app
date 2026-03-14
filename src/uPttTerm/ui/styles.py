@@ -1,230 +1,142 @@
-# --- PTT 配色與 TUI 樣式 ---
+# --- uPttTerm QSS 樣式表 ---
 
-CSS = """
-/* 全域變數與配色 */
-$ptt-blue: #0000AA;
-$ptt-yellow: #FFFF55;
-$ptt-cyan: #55FFFF;
-$ptt-white: #FFFFFF;
-$black: #000000;
-$chat-bg: #121212;
-$sidebar-bg: #1e1e1e;
-$my-bubble: #005f87;
-$other-bubble: #3a3a3a;
-
-Screen {
-    background: $chat-bg;
-    color: $ptt-white;
+MAIN_STYLE = """
+/* 全域字體與背景 */
+QWidget {
+    font-family: "PingFang TC", "Lantinghei TC", "Heiti TC", "Microsoft JhengHei", "Apple LiGothic Medium", sans-serif;
+    font-size: 14px;
+    background-color: #F5F5F5;
+    color: #333333;
 }
 
-/* 登入畫面樣式 */
-LoginScreen {
-    align: center middle;
+/* 登入視窗 */
+#login-window {
+    background-color: #FFFFFF;
 }
 
-#login-dialog {
-    width: 65;
-    height: auto;
-    border: thick $primary;
-    background: $surface;
-    padding: 1 2;
+#logo-label {
+    font-size: 24px;
+    font-weight: bold;
+    color: #0056b3;
+    margin-bottom: 20px;
 }
 
-#login-actions {
-    margin-top: 2;
-    height: 3;
-    width: 100%;
+QLineEdit {
+    padding: 8px;
+    border: 1px solid #CCCCCC;
+    border-radius: 4px;
+    background-color: #FFFFFF;
 }
 
-#login-btn {
-    width: 1fr;
-    margin-right: 1;
+QLineEdit:focus {
+    border: 1px solid #0056b3;
 }
 
-#exit-btn {
-    width: 1fr;
-    margin-left: 1;
+QPushButton {
+    padding: 10px;
+    background-color: #0056b3;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-weight: bold;
 }
 
-#version-label {
-    width: 100%;
-    margin-top: 1;
-    text-align: right;
-    color: $ptt-white 40%;
+QPushButton:hover {
+    background-color: #004494;
 }
 
-#logo {
-    width: 100%;
-    content-align: center middle;
-    color: $accent;
-    margin-bottom: 1;
-    text-style: bold;
+QPushButton:disabled {
+    background-color: #CCCCCC;
 }
 
-.input-label {
-    margin-top: 1;
-    text-style: bold;
-    color: $ptt-cyan;
+#error-label {
+    color: #D32F2F;
+    font-size: 12px;
 }
 
-#login-error {
-    color: $error;
-    text-align: center;
-    margin-top: 1;
-    display: none;
-}
-
-/* 主畫面架構 */
-MainChatScreen Header {
-    background: $primary-darken-2;
-    color: $ptt-white;
-    text-style: bold;
-}
-
-#main-container {
-    layout: horizontal;
-}
-
+/* 主視窗 */
 #sidebar {
-    width: 30;
-    height: 100%;
-    background: $sidebar-bg;
-    border-right: solid $primary;
+    background-color: #FFFFFF;
+    border-right: 1px solid #E0E0E0;
+    min-width: 250px;
 }
 
 #sidebar-title {
-    padding: 1;
-    background: $primary-darken-3;
-    color: $ptt-cyan;
-    text-align: center;
-    text-style: bold;
+    font-weight: bold;
+    padding: 10px;
+    background-color: #F8F9FA;
+    border-bottom: 1px solid #E0E0E0;
 }
 
-#chat-list {
-    background: transparent;
+QListWidget {
+    border: none;
+    background-color: transparent;
 }
 
-#chat-list ListItem {
-    padding: 0;
-    height: 3;
+QListWidget::item {
+    padding: 10px;
+    border-bottom: 1px solid #F0F0F0;
 }
 
-#chat-list ListItem:hover {
-    background: $ptt-white 10%;
-}
-
-#chat-list ListItem.--highlight {
-    background: $primary;
-    color: $ptt-white;
-}
-
-.sidebar-item-container {
-    padding: 0 1;
-    height: 100%;
-    align: left middle;
-}
-
-.sidebar-row-top {
-    height: 1;
-}
-
-.unread-mark {
-    width: 2;
-    color: $error;
-    text-style: bold;
-}
-
-.sidebar-id {
-    text-style: bold;
-    color: $ptt-cyan;
-}
-
-.sidebar-nickname {
-    color: $ptt-white 50%;
-    margin-left: 2;
-    height: 1;
+QListWidget::item:selected {
+    background-color: #E3F2FD;
+    color: #1976D2;
 }
 
 #chat-area {
-    width: 1fr;
-    height: 100%;
+    background-color: #EBEBEB;
 }
 
-/* 訊息區域 */
-#messages-container {
-    height: 1fr;
-    padding: 1 2;
-    background: $chat-bg;
-    overflow-y: scroll;
-}
-
-.message-item {
-    width: 100%;
-    height: auto;
-    margin: 0 0 1 0;
-}
-
-.spacer {
-    width: 1fr;
-}
-
-.msg-left {
-    content-align: left middle;
-}
-
-.msg-right {
-    content-align: right middle;
-}
-
-.msg-bubble {
-    padding: 0 2;
-    max-width: 70%;
-}
-
-.msg-left .msg-bubble {
-    background: $other-bubble;
-    color: $ptt-white;
-}
-
-.msg-right .msg-bubble {
-    background: $my-bubble;
-    color: $ptt-white;
-    text-align: right;
-}
-
-.msg-meta {
-    color: $ptt-white 40%;
-    margin: 0 1;
-}
-
-/* 輸入區域 */
-#input-container {
-    height: auto;
-    border-top: solid $primary;
-    background: $surface;
-}
-
-#message-input {
+/* 對話氣泡 */
+#messages-scroll {
+    background-color: #EBEBEB;
     border: none;
-    background: transparent;
 }
 
-/* Modal 樣式 */
-ModalScreen {
-    align: center middle;
-    background: $black 50%;
+#messages-container {
+    background-color: #EBEBEB;
 }
 
-.dialog-box {
-    width: 50;
-    height: auto;
-    border: thick $primary;
-    background: $surface;
-    padding: 1 2;
+/* 訊息輸入區 */
+#input-area {
+    background-color: #FFFFFF;
+    border-top: 1px solid #E0E0E0;
+    padding: 10px;
 }
 
-#help-text {
-    margin: 1 0;
-    color: $ptt-white;
+QTextEdit#message-edit {
+    border: 1px solid #E0E0E0;
+    border-radius: 4px;
+    background-color: #FFFFFF;
+}
+
+/* 系統匣選單 */
+QMenu {
+    background-color: white;
+    border: 1px solid #CCCCCC;
+}
+
+QMenu::item:selected {
+    background-color: #0056b3;
+    color: white;
 }
 """
+
+# 對話氣泡的 HTML/CSS 範本 (用於 QLabel 或自訂 Widget)
+def get_bubble_style(is_me: bool) -> str:
+    if is_me:
+        return """
+            background-color: #DCF8C6;
+            color: #000000;
+            border-radius: 10px;
+            padding: 10px;
+            margin-left: 50px;
+        """
+    else:
+        return """
+            background-color: #FFFFFF;
+            color: #000000;
+            border-radius: 10px;
+            padding: 10px;
+            margin-right: 50px;
+        """

@@ -1,361 +1,433 @@
-import asyncio
 import logging
 from datetime import datetime
 from typing import Dict, List, Optional
 
-import PyPtt
-from textual import on, work
-from textual.app import ComposeResult
-from textual.binding import Binding
-from textual.containers import Horizontal, Vertical, ScrollableContainer
-from textual.screen import Screen
-from textual.widgets import (
-    Header, Footer, Input, Button, Label, ListView, ListItem, Static
+from PySide6.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QPushButton, QStackedWidget, QListWidget, QListWidgetItem, QSplitter,
+    QScrollArea, QTextEdit, QSystemTrayIcon, QMenu, QMessageBox, QInputDialog
 )
+from PySide6.QtCore import Qt, Signal, Slot, QThread, QSize, QEvent
+from PySide6.QtGui import QIcon, QAction, QShortcut, QKeySequence
 
-from uPttTerm import config, contant, utils, __version__
-from uPttTerm.contant import LOGO
-from uPttTerm.ui.widgets import ChatMessage
-from uPttTerm.ui.modals import HelpModal, NewChatModal
+from uPttTerm import __version__, contant
+from uPttTerm.ui.styles import MAIN_STYLE
+from uPttTerm.ui.widgets import ChatBubble, ContactItem
+from uPttTerm.worker import PTTWorker
+from uPttTerm.ptt import UPttService
 
-logger = logging.getLogger("uPttTerm")
+logger = logging.getLogger("uPttTerm.ui.screens")
 
-class LoginScreen(Screen):
+class LoginWindow(QWidget):
     """登入畫面"""
-    BINDINGS = [Binding("escape", "app.exit", "離開")]
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="login-dialog"):
-            yield Static(LOGO, id="logo")
-            yield Label("PTT 帳號", classes="input-label")
-            yield Input(placeholder="Account ID", id="username")
-            yield Label("PTT 密碼", classes="input-label")
-            yield Input(placeholder="Password", password=True, id="password")
-            yield Label("", id="login-error")
-            with Horizontal(id="login-actions"):
-                yield Button("登入 PTT", variant="primary", id="login-btn")
-                yield Button("關閉程式", variant="error", id="exit-btn")
-            yield Label(f"v{__version__}", id="version-label")
-
-    def on_mount(self):
-        self.query_one("#username").focus()
-
-    @work(exclusive=True)
-    async def handle_login(self):
-        username = self.query_one("#username", Input).value.strip()
-        password = self.query_one("#password", Input).value.strip()
-        if not username or not password:
-            self.show_error("請輸入帳號與密碼")
-            return
-
-        btn = self.query_one("#login-btn", Button)
-        btn.disabled = True
-        self.show_error("正在建立獨立連線...", color="cyan")
-
-        try:
-            # 呼叫 App 層級的獨立 PTT 實例
-            await asyncio.to_thread(self.app.ptt.login, username, password)
-            logger.info(f"User {username} logged in successfully.")
-            self.app.ptt_id = username
-            self.app.push_screen(MainChatScreen())
-        except Exception as e:
-            logger.error(f"Login failed: {str(e)}")
-            self.show_error(f"登入失敗: {str(e)}")
-            btn.disabled = False
-
-    def show_error(self, message: str, color: str = "red"):
-        err_label = self.query_one("#login-error", Label)
-        err_label.update(message)
-        err_label.styles.color = color
-        err_label.display = True
-
-    @on(Button.Pressed, "#exit-btn")
-    def on_exit_click(self):
-        """關閉程式按鈕"""
-        self.app.exit()
-
-    @on(Input.Submitted, "#username")
-    def on_username_submit(self):
-        """帳號欄位按 Enter 時，焦點跳至密碼欄位"""
-        self.query_one("#password").focus()
-
-    @on(Button.Pressed, "#login-btn")
-    @on(Input.Submitted, "#password")
-    def on_submit(self):
-        self.handle_login()
-
-class MainChatScreen(Screen):
-    """主聊天畫面"""
-    BINDINGS = [
-        Binding("f1", "help", "說明"),
-        Binding("ctrl+n", "new_chat", "新對話"),
-        Binding("ctrl+w", "close_chat", "關閉對話"),
-        Binding("ctrl+l", "focus_sidebar", "清單"),
-        Binding("ctrl+i", "focus_input", "輸入"),
-        Binding("escape", "back", "返回/離開", show=False),
-    ]
+    login_requested = Signal(str, str)
 
     def __init__(self):
         super().__init__()
-        self.chat_histories: Dict[str, List[Dict]] = {} 
-        self.display_names: Dict[str, str] = {} # 儲存 ID (暱稱) 的顯示格式
+        self.setObjectName("login-window")
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setAlignment(Qt.AlignCenter)
+        layout.setContentsMargins(50, 50, 50, 50)
+        layout.setSpacing(15)
+
+        self.logo_label = QLabel("uPttTerm")
+        self.logo_label.setObjectName("logo-label")
+        self.logo_label.setAlignment(Qt.AlignCenter)
+        
+        self.username_input = QLineEdit()
+        self.username_input.setPlaceholderText("PTT 帳號")
+        self.username_input.setFixedWidth(280)
+        
+        self.password_input = QLineEdit()
+        self.password_input.setPlaceholderText("PTT 密碼")
+        self.password_input.setEchoMode(QLineEdit.Password)
+        self.password_input.setFixedWidth(280)
+        
+        self.login_btn = QPushButton("登入 PTT")
+        self.login_btn.setFixedWidth(280)
+        self.login_btn.clicked.connect(self.handle_login)
+        
+        self.error_label = QLabel("")
+        self.error_label.setObjectName("error-label")
+        self.error_label.setAlignment(Qt.AlignCenter)
+        self.error_label.hide()
+        
+        layout.addWidget(self.logo_label)
+        layout.addWidget(self.username_input)
+        layout.addWidget(self.password_input)
+        layout.addWidget(self.error_label)
+        layout.addWidget(self.login_btn)
+        
+        # 綁定 Enter 鍵
+        self.username_input.returnPressed.connect(self.password_input.setFocus)
+        self.password_input.returnPressed.connect(self.handle_login)
+
+    def handle_login(self):
+        user = self.username_input.text().strip()
+        pw = self.password_input.text().strip()
+        if not user or not pw:
+            self.show_error("請輸入完整帳號密碼")
+            return
+        
+        self.login_btn.setEnabled(False)
+        self.login_btn.setText("正在連線...")
+        self.login_requested.emit(user, pw)
+
+    def show_error(self, message: str):
+        self.error_label.setText(message)
+        self.error_label.show()
+        self.login_btn.setEnabled(True)
+        self.login_btn.setText("登入 PTT")
+
+class MainWindow(QMainWindow):
+    """主聊天畫面"""
+    send_requested = Signal(str, str)
+
+    def __init__(self, ptt_service: UPttService):
+        super().__init__()
+        self.setWindowTitle("uPttTerm")
+        self.setMinimumSize(900, 600)
+        self.ptt_service = ptt_service
+        self.current_chat_id = None
+        self.chat_histories: Dict[str, List[Dict]] = {}
         self.unread_counts: Dict[str, int] = {}
-        self.current_target: Optional[str] = None
-        self.last_mail_time: Optional[datetime] = None
-        self.polling = True
-
-    def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
-        with Horizontal(id="main-container"):
-            with Vertical(id="sidebar"):
-                yield Label("對話清單", id="sidebar-title")
-                yield ListView(id="chat-list")
-            with Vertical(id="chat-area"):
-                yield ScrollableContainer(id="messages-container")
-                with Vertical(id="input-container"):
-                    yield Input(placeholder="> 請輸入訊息... (按下 Enter 發送)", id="message-input")
-        yield Footer()
-
-    def on_mount(self):
-        self.query_one(Header).tall = True
-        self.update_header()
-        self.start_polling()
-
-    def update_header(self):
-        total_unread = sum(self.unread_counts.values())
-        status = f" [red]{total_unread} 未讀[/]" if total_unread > 0 else " 狀態: 獨立連線中"
-        self.app.title = f"uPttTerm | 帳號: {self.app.ptt_id}"
-        self.app.sub_title = status
-
-    def refresh_sidebar(self):
-        list_view = self.query_one("#chat-list", ListView)
-        current_idx = list_view.index
-        list_view.clear()
-        for target_key in self.chat_histories.keys():
-            full_display = self.display_names.get(target_key, target_key)
-            
-            # 解析 ID 與 暱稱
-            if ' (' in full_display:
-                ptt_id, nickname = full_display.split(' (', 1)
-                nickname = '(' + nickname
-            else:
-                ptt_id = full_display
-                nickname = ""
-                
-            unread = self.unread_counts.get(target_key, 0)
-            
-            # 建立雙行佈局元件
-            item_content = Vertical(
-                Horizontal(
-                    Label("[red]*[/]" if unread > 0 else " ", classes="unread-mark"),
-                    Label(ptt_id, classes="sidebar-id"),
-                    classes="sidebar-row-top"
-                ),
-                Label(nickname if nickname else "", classes="sidebar-nickname"),
-                classes="sidebar-item-container"
-            )
-            list_view.append(ListItem(item_content))
-        list_view.index = current_idx
-
-    @work(exclusive=True)
-    async def start_polling(self):
-        """背景輪詢新信件"""
-        first_run = True
-        while self.polling:
-            await asyncio.sleep(config.CHECK_PTT_MAIL_INTERVAL)
-            try:
-                newest_idx = await asyncio.to_thread(self.app.ptt.call, 'get_newest_index', {'index_type': PyPtt.NewIndex.MAIL})
-                if not newest_idx: continue
-
-                # 初次啟動檢查較多封數
-                lookback = 50 if first_run else 10
-                first_run = False
-                
-                mails_to_process = []
-                for mail_idx in range(max(1, newest_idx - lookback), newest_idx + 1):
-                    mail = await asyncio.to_thread(self.app.ptt.call, 'get_mail', {'index': mail_idx})
-                    if not mail or mail.get(PyPtt.MailField.title) != contant.PTT_MSG_TITLE: continue
-                    
-                    msg_time = datetime.strptime(mail[PyPtt.MailField.date], '%a %b %d %H:%M:%S %Y')
-                    if self.last_mail_time and msg_time <= self.last_mail_time: continue
-                    
-                    full_author = mail[PyPtt.MailField.author].strip()
-                    sender_id = full_author.split(' ')[0]
-                    content = mail[PyPtt.MailField.content]
-                    
-                    mails_to_process.append({
-                        'index': mail_idx,
-                        'sender_id': sender_id,
-                        'full_author': full_author,
-                        'content': content,
-                        'time': msg_time
-                    })
-
-                # 依序處理訊息
-                for mail_data in mails_to_process:
-                    content = mail_data['content']
-                    try:
-                        start = content.find(contant.PTT_MSG_DIVISION_LINE) + len(contant.PTT_MSG_DIVISION_LINE)
-                        end = content.rfind(contant.PTT_MSG_DIVISION_LINE)
-                        if start < end:
-                            self.receive_message(mail_data['sender_id'], content[start:end].strip(), mail_data['time'], mail_data['full_author'])
-                        self.last_mail_time = mail_data['time']
-                    except Exception as e:
-                        logger.error(f"Parse mail error: {e}")
-
-                # 反向刪除，避免索引移位
-                for mail_data in sorted(mails_to_process, key=lambda x: x['index'], reverse=True):
-                    await asyncio.to_thread(self.app.ptt.call, 'del_mail', {'index': mail_data['index']})
-
-            except Exception as e:
-                logger.error(f"Polling error: {e}")
-
-    def receive_message(self, sender: str, text: str, msg_time: datetime, full_author: str = None):
-        # PTT ID 是不分大小寫的，統一使用小寫作為 Key
-        sender_key = sender.strip().lower()
         
-        # 更新顯示名稱 (包含暱稱)
-        if full_author:
-            self.display_names[sender_key] = full_author
-        elif sender_key not in self.display_names:
-            self.display_names[sender_key] = sender
+        # 初始背景執行緒
+        self.init_worker()
+        self.init_ui()
+        self.init_tray()
+        self.init_shortcuts()
+        
+        self.setStyleSheet(MAIN_STYLE)
 
-        if sender_key not in self.chat_histories:
-            self.chat_histories[sender_key] = []
-            self.unread_counts[sender_key] = 0
-            self.refresh_sidebar()
+    def init_worker(self):
+        """啟動 PTT 背景 Worker"""
+        self.ptt_thread = QThread()
+        self.worker = PTTWorker(self.ptt_service)
+        self.worker.moveToThread(self.ptt_thread)
         
-        time_str = msg_time.strftime("%H:%M")
-        # 儲存完整 timestamp 用於排序
-        self.chat_histories[sender_key].append({
-            "text": text, 
-            "is_me": False, 
-            "time": time_str,
-            "timestamp": msg_time
-        })
-        # 依照時間排序
-        self.chat_histories[sender_key].sort(key=lambda x: x["timestamp"])
+        # 連接發信訊號 (跨執行緒會自動排程)
+        self.send_requested.connect(self.worker.send_message)
         
-        if self.current_target and self.current_target.lower().split(' ')[0] == sender_key:
-            self.refresh_messages()
-        elif self.current_target is None:
-            # 如果目前沒有對話，自動切換過去
-            self.select_chat(full_author or sender)
+        # 連接 Worker 訊號
+        self.worker.new_message_received.connect(self.on_new_message)
+        self.worker.send_result.connect(self.on_send_result)
+        self.worker.status_updated.connect(lambda s: logger.info(f"Worker Status: {s}"))
+        self.worker.login_result.connect(self.on_login_result)
+        
+        # 啟動執行緒
+        self.ptt_thread.start()
+
+    def init_ui(self):
+        # 使用 QStackedWidget 切換登入與主畫面
+        self.central_stack = QStackedWidget()
+        self.setCentralWidget(self.central_stack)
+        
+        # 1. 登入畫面
+        self.login_screen = LoginWindow()
+        # 這裡也改用訊號連接，確保在背景執行緒登入
+        self.login_screen.login_requested.connect(self.worker.do_login)
+        
+        # 2. 聊天畫面 (使用 Splitter)
+        self.chat_screen = QWidget()
+        chat_layout = QHBoxLayout(self.chat_screen)
+        chat_layout.setContentsMargins(0, 0, 0, 0)
+        chat_layout.setSpacing(0)
+        
+        self.splitter = QSplitter(Qt.Horizontal)
+        
+        # 左側: 會話清單
+        self.sidebar = QWidget()
+        self.sidebar.setObjectName("sidebar")
+        sidebar_vbox = QVBoxLayout(self.sidebar)
+        sidebar_vbox.setContentsMargins(0, 0, 0, 0)
+        
+        sidebar_header = QHBoxLayout()
+        sidebar_header.setContentsMargins(10, 10, 10, 10)
+        self.sidebar_title = QLabel("會話清單")
+        self.sidebar_title.setObjectName("sidebar-title")
+        self.new_chat_btn = QPushButton("+")
+        self.new_chat_btn.setFixedSize(30, 30)
+        self.new_chat_btn.clicked.connect(self.on_new_chat_clicked)
+        sidebar_header.addWidget(self.sidebar_title)
+        sidebar_header.addWidget(self.new_chat_btn)
+        
+        self.contact_list = QListWidget()
+        self.contact_list.itemClicked.connect(self.on_contact_selected)
+        
+        sidebar_vbox.addLayout(sidebar_header)
+        sidebar_vbox.addWidget(self.contact_list)
+        
+        # 右側: 對話區
+        self.chat_area = QWidget()
+        self.chat_area.setObjectName("chat-area")
+        chat_vbox = QVBoxLayout(self.chat_area)
+        chat_vbox.setContentsMargins(0, 0, 0, 0)
+        chat_vbox.setSpacing(0)
+        
+        # 歷史訊息滾動區
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setObjectName("messages-scroll")
+        self.scroll_area.setWidgetResizable(True)
+        self.messages_widget = QWidget()
+        self.messages_widget.setObjectName("messages-container")
+        self.messages_layout = QVBoxLayout(self.messages_widget)
+        self.messages_layout.setAlignment(Qt.AlignTop)
+        self.scroll_area.setWidget(self.messages_widget)
+        
+        # 輸入區
+        self.input_area = QWidget()
+        self.input_area.setObjectName("input-area")
+        input_vbox = QVBoxLayout(self.input_area)
+        
+        self.message_edit = QTextEdit()
+        self.message_edit.setObjectName("message-edit")
+        self.message_edit.setFixedHeight(80)
+        self.message_edit.setPlaceholderText("輸入訊息... (Enter 發送, Shift+Enter 換行)")
+        # 安裝事件過濾器處理 Enter 鍵
+        self.message_edit.installEventFilter(self)
+        
+        input_vbox.addWidget(self.message_edit)
+        
+        chat_vbox.addWidget(self.scroll_area)
+        chat_vbox.addWidget(self.input_area)
+        
+        self.splitter.addWidget(self.sidebar)
+        self.splitter.addWidget(self.chat_area)
+        self.splitter.setStretchFactor(1, 4)
+        
+        chat_layout.addWidget(self.splitter)
+        
+        self.central_stack.addWidget(self.login_screen)
+        self.central_stack.addWidget(self.chat_screen)
+
+    def init_tray(self):
+        """初始化系統匣"""
+        self.tray_icon = QSystemTrayIcon(self)
+        # 這裡需要一個圖示，暫時使用內建
+        self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_MessageBoxInformation) if hasattr(self, 'style') else QIcon())
+        
+        tray_menu = QMenu()
+        show_action = QAction("顯示主畫面", self)
+        show_action.triggered.connect(self.showNormal)
+        quit_action = QAction("完全退出", self)
+        quit_action.triggered.connect(self.fully_quit)
+        
+        tray_menu.addAction(show_action)
+        tray_menu.addSeparator()
+        tray_menu.addAction(quit_action)
+        
+        self.tray_icon.setContextMenu(tray_menu)
+        self.tray_icon.show()
+        self.tray_icon.activated.connect(self.on_tray_activated)
+
+    def init_shortcuts(self):
+        """初始化快捷鍵"""
+        QShortcut(QKeySequence("Ctrl+N"), self, self.on_new_chat_clicked)
+        QShortcut(QKeySequence("Ctrl+Q"), self, self.fully_quit)
+        QShortcut(QKeySequence("Ctrl+W"), self, self.close_current_chat)
+
+    def eventFilter(self, obj, event):
+        """過濾 QTextEdit 的按鍵事件，處理發送邏輯"""
+        if obj is self.message_edit and event.type() == QEvent.KeyPress:
+            if event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+                if event.modifiers() & Qt.ShiftModifier:
+                    # Shift+Enter -> 正常換行
+                    return False
+                else:
+                    # Enter -> 發送
+                    self.handle_send()
+                    return True
+        return super().eventFilter(obj, event)
+
+    @Slot(bool, str)
+    def on_login_result(self, success, message):
+        if success:
+            self.central_stack.setCurrentIndex(1)
+            self.setWindowTitle(f"uPttTerm - {self.ptt_service.ptt_id}")
         else:
-            self.unread_counts[sender_key] += 1
-            self.refresh_sidebar()
-            self.update_header()
+            self.login_screen.show_error(message)
 
-    def refresh_messages(self):
-        """重新渲染目前的訊息視窗，確保排序正確"""
-        if not self.current_target:
+    def on_new_chat_clicked(self):
+        target_id, ok = QInputDialog.getText(self, "新增對話", "請輸入 PTT ID:")
+        if ok and target_id:
+            target_id = target_id.strip().lower()
+            self.add_or_select_contact(target_id)
+
+    def add_or_select_contact(self, ptt_id):
+        ptt_id = ptt_id.lower()
+        # 檢查是否已在清單中
+        for i in range(self.contact_list.count()):
+            item = self.contact_list.item(i)
+            widget = self.contact_list.itemWidget(item)
+            if widget.ptt_id == ptt_id:
+                self.contact_list.setCurrentItem(item)
+                self.on_contact_selected(item)
+                return
+        
+        # 新增至清單
+        item = QListWidgetItem(self.contact_list)
+        item.setSizeHint(QSize(0, 50))
+        widget = ContactItem(ptt_id)
+        self.contact_list.addItem(item)
+        self.contact_list.setItemWidget(item, widget)
+        
+        if ptt_id not in self.chat_histories:
+            self.chat_histories[ptt_id] = []
+            self.unread_counts[ptt_id] = 0
+            
+        self.contact_list.setCurrentItem(item)
+        self.on_contact_selected(item)
+
+    def on_contact_selected(self, item):
+        widget = self.contact_list.itemWidget(item)
+        self.current_chat_id = widget.ptt_id
+        self.unread_counts[self.current_chat_id] = 0
+        widget.set_unread(0)
+        self.refresh_chat_display()
+        self.message_edit.setFocus()
+
+    def refresh_chat_display(self):
+        """重新渲染右側訊息區域，並根據時間戳記排序"""
+        # 清除現有訊息
+        while self.messages_layout.count():
+            child = self.messages_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+        
+        if not self.current_chat_id:
             return
             
-        # 取得純 ID 用於查找歷史紀錄
-        target_id_only = self.current_target.split(' ')[0].lower()
-        container = self.query_one("#messages-container", ScrollableContainer)
+        history = self.chat_histories.get(self.current_chat_id, [])
+        # --- 新增排序邏輯：確保訊息依照時間戳記從小到大排列 ---
+        history.sort(key=lambda x: x.get('timestamp', datetime.min))
         
-        # 為了絕對正確的排序，我們這裡採取重新 mount 的策略
-        container.query("*").remove()
-        for msg in self.chat_histories[target_id_only]:
-            sender_display = self.app.ptt_id if msg["is_me"] else self.current_target
-            container.mount(ChatMessage(
-                sender_display, 
-                msg["text"], msg["is_me"], msg["time"]
-            ))
-        container.scroll_end(animate=False)
-
-    def select_chat(self, target_id: str):
-        # target_id 可能是 "ID (暱稱)" 或純 "ID"
-        target_id_only = target_id.split(' ')[0]
-        target_key = target_id_only.lower()
+        for msg in history:
+            bubble = ChatBubble(msg['text'], msg['time'], msg['is_me'])
+            self.messages_layout.addWidget(bubble)
         
-        self.current_target = target_id # 保留原始輸入用於顯示
-        # 如果是新的對話且還沒有暱稱資訊，嘗試記錄
-        if target_key not in self.display_names:
-            self.display_names[target_key] = target_id
+        # 滾動到底部
+        self.scroll_area.verticalScrollBar().setValue(
+            self.scroll_area.verticalScrollBar().maximum()
+        )
 
-        self.unread_counts[target_key] = 0
-        self.refresh_sidebar()
-        self.update_header()
-        
-        self.refresh_messages()
-        self.query_one("#message-input").focus()
-
-    def add_new_chat(self, target_id: str):
-        if not target_id: return
-        self.select_chat(target_id)
-
-    @on(ListView.Selected)
-    def on_chat_selected(self, event: ListView.Selected):
-        # 透過類別選取器精確取得 ID Label
-        try:
-            id_label = event.item.query_one(".sidebar-id", Label)
-            ptt_id = str(id_label.renderable).strip()
-            # 取得完整的顯示名稱 (含暱稱)
-            full_display = self.display_names.get(ptt_id.lower(), ptt_id)
-            self.select_chat(full_display)
-        except Exception as e:
-            logger.error(f"Select chat error: {e}")
-
-    @on(Input.Submitted, "#message-input")
-    @work
-    async def handle_send(self, event: Input.Submitted):
-        text = event.value.strip()
-        if not text or not self.current_target: return
-        
-        target_id_only = self.current_target.split(' ')[0]
-        target_key = target_id_only.lower()
-        self.query_one("#message-input", Input).value = ""
-        
+    def handle_send(self):
+        text = self.message_edit.toPlainText().strip()
+        if not text or not self.current_chat_id:
+            return
+            
+        # 1. 立即顯示在 UI (這部分仍在主執行緒)
         now = datetime.now()
-        time_str = now.strftime("%H:%M")
-        
-        # 儲存發送訊息
-        self.chat_histories[target_key].append({
-            "text": text, 
-            "is_me": True, 
-            "time": time_str,
-            "timestamp": now
+        now_str = now.strftime("%H:%M")
+        self.chat_histories[self.current_chat_id].append({
+            'text': text, 
+            'time': now_str, 
+            'timestamp': now,  # 儲存完整的 datetime
+            'is_me': True
         })
-        # 依照時間排序
-        self.chat_histories[target_key].sort(key=lambda x: x["timestamp"])
+        self.refresh_chat_display()
+        self.message_edit.clear()
         
-        self.refresh_messages()
+        # 2. 透過訊號觸發 Worker 背景發送 (跨執行緒安全)
+        self.send_requested.emit(self.current_chat_id, text)
+
+    @Slot(dict)
+    def on_new_message(self, data):
+        sender = data['sender'].lower()
+        if sender not in self.chat_histories:
+            self.chat_histories[sender] = []
+            self.unread_counts[sender] = 0
+            # 如果是新聯絡人，新增到清單
+            self.add_or_select_contact(sender)
+            
+        self.chat_histories[sender].append({
+            'text': data['text'], 
+            'time': data['time'], 
+            'timestamp': data.get('timestamp', datetime.now()), # 優先使用 Worker 傳來的時間
+            'is_me': False
+        })
         
-        try:
-            ptt_msg = utils.msg_to_mail(contant.pkg_name, self.app.ptt_id or "uPttUser", text)
-            await asyncio.to_thread(self.app.ptt.call, 'mail', {
-                'ptt_id': target_id_only, # 這裡必須用純 ID
-                'title': contant.PTT_MSG_TITLE, 
-                'content': ptt_msg, 
-                'backup': False
-            })
-        except Exception as e:
-            container = self.query_one("#messages-container", ScrollableContainer)
-            container.mount(ChatMessage("系統", f"發送失敗: {str(e)}", is_me=False))
-            container.scroll_end(animate=True)
-
-    def action_new_chat(self):
-        self.app.push_screen(NewChatModal(), self.add_new_chat)
-
-    def action_close_chat(self):
-        if self.current_target:
-            target_key = self.current_target.lower()
-            if target_key in self.chat_histories:
-                del self.chat_histories[target_key]
-            if target_key in self.unread_counts:
-                del self.unread_counts[target_key]
-            self.current_target = None
-            self.refresh_sidebar()
-            self.query_one("#messages-container").query("*").remove()
-            self.update_header()
-
-    def action_focus_sidebar(self): self.query_one("#chat-list").focus()
-    def action_focus_input(self): self.query_one("#message-input").focus()
-    def action_help(self): self.app.push_screen(HelpModal())
-    def action_back(self):
-        if self.focused == self.query_one("#message-input"):
-            self.action_focus_sidebar()
+        if self.current_chat_id == sender:
+            self.refresh_chat_display()
         else:
-            self.app.exit()
+            self.unread_counts[sender] += 1
+            # 更新清單中的未讀計數
+            for i in range(self.contact_list.count()):
+                item = self.contact_list.item(i)
+                widget = self.contact_list.itemWidget(item)
+                if widget.ptt_id == sender:
+                    widget.set_unread(self.unread_counts[sender])
+                    break
+        
+        # 桌面通知
+        if not self.isActiveWindow():
+            self.tray_icon.showMessage(
+                f"新訊息: {sender}",
+                data['text'][:50],
+                QSystemTrayIcon.Information,
+                3000
+            )
+
+    @Slot(bool, str)
+    def on_send_result(self, success, error_msg):
+        if not success:
+            QMessageBox.warning(self, "發送失敗", f"無法發送訊息: {error_msg}")
+
+    def on_tray_activated(self, reason):
+        if reason == QSystemTrayIcon.Trigger:
+            self.showNormal()
+            self.activateWindow()
+
+    def closeEvent(self, event):
+        """關閉視窗時改為隱藏至系統匣"""
+        if self.tray_icon.isVisible():
+            self.hide()
+            event.ignore()
+        else:
+            self.fully_quit()
+
+    def close_current_chat(self):
+        if self.current_chat_id:
+            # 簡單處理，這裡可以加入確認對話框
+            self.current_chat_id = None
+            self.refresh_chat_display()
+
+    def fully_quit(self):
+        """徹底退出程式，確保 PTT 登出與執行緒釋放"""
+        logger.info("正在執行完全退出程序...")
+        try:
+            # 1. 停止 Worker (使用訊號通知)
+            if hasattr(self, 'worker'):
+                # 這裡可以直接呼叫，因為 Worker 的 stop 有加 @Slot 並受 QThread 事件循環保護
+                # 但更保險的做法是透過 QMetaObject.invokeMethod
+                from PySide6.QtCore import QMetaObject
+                QMetaObject.invokeMethod(self.worker, "stop", Qt.AutoConnection)
+            
+            # 2. 等待執行緒結束 (給予 1.5 秒緩衝)
+            if hasattr(self, 'ptt_thread') and self.ptt_thread.isRunning():
+                self.ptt_thread.quit()
+                if not self.ptt_thread.wait(1500):
+                    logger.warning("Worker 執行緒未在預期時間內結束，強制終止。")
+                    self.ptt_thread.terminate()
+            
+            # 3. 隱藏系統匣 (避免在工作列留殘影)
+            if hasattr(self, 'tray_icon'):
+                self.tray_icon.hide()
+            
+            logger.info("退出程序完成。")
+            QApplication.quit()
+            
+            # 如果 QApplication.quit() 沒能成功殺掉進程 (有時發生在 macOS)，作為最後保險：
+            import os
+            os._exit(0)
+            
+        except Exception as e:
+            logger.error(f"退出程式時發生異常: {e}")
+            import os
+            os._exit(1)
+
+# 為了讓 QSystemTrayIcon 能找到 QStyle，需要引入 QApplication
+from PySide6.QtWidgets import QApplication, QStyle
