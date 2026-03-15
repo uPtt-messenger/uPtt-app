@@ -53,28 +53,31 @@ class ChatBubble(QWidget):
 
 class ContactItem(QWidget):
     """
-    自訂會話清單項目 (優化排版與字型相容性，全動態置中平衡版)。
+    自訂會話清單項目 (全能適配、極致緊緻專業版)。
     """
     def __init__(self, ptt_id: str, nickname: str = "", unread_count: int = 0, parent=None):
         super().__init__(parent)
         self.ptt_id_display = ptt_id
         self.ptt_id = ptt_id.lower()
+        
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setStyleSheet("background: transparent;")
 
+        # 主佈局：左右排列
         main_layout = QHBoxLayout(self)
-        main_layout.setContentsMargins(10, 0, 10, 0) 
-        main_layout.setSpacing(0)
+        main_layout.setContentsMargins(12, 0, 12, 0) 
+        main_layout.setSpacing(10)
 
-        # 1. 左側伸展：將內容推向中央
-        main_layout.addStretch()
-
-        # 2. 中央文字區域 (ID + 暱稱)
-        text_layout = QVBoxLayout()
-        text_layout.setSpacing(2)
+        # 1. 中央文字區域 (ID + 暱稱) - 左對齊以容納長 ID
+        text_container = QWidget()
+        text_container.setStyleSheet("background: transparent;")
+        text_layout = QVBoxLayout(text_container)
         text_layout.setContentsMargins(0, 0, 0, 0)
-
-        # ID 顯示 (水平置中)
+        text_layout.setSpacing(2)
+        
+        # ID 標籤 (左對齊)
         self.id_label = QLabel(self.ptt_id_display)
-        self.id_label.setAlignment(Qt.AlignCenter)
+        self.id_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.id_label.setStyleSheet("""
             font-weight: bold; 
             font-size: 15px; 
@@ -82,10 +85,10 @@ class ContactItem(QWidget):
             background: transparent;
         """)
         
-        # 暱稱標籤 (水平置中)
+        # 暱稱標籤 (左對齊)
         self.nickname_label = QLabel(f"({nickname})" if nickname else "")
-        self.nickname_label.setFixedHeight(16) 
-        self.nickname_label.setAlignment(Qt.AlignCenter)
+        self.nickname_label.setFixedHeight(14) 
+        self.nickname_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.nickname_label.setStyleSheet("""
             font-size: 11px; 
             color: #8B949E; 
@@ -95,24 +98,22 @@ class ContactItem(QWidget):
 
         text_layout.addWidget(self.id_label)
         text_layout.addWidget(self.nickname_label)
+        
+        main_layout.addWidget(text_container, alignment=Qt.AlignVCenter)
 
-        # 將文字佈局以垂直置中的方式加入主佈局
-        main_layout.addLayout(text_layout)
-        main_layout.setAlignment(text_layout, Qt.AlignVCenter)
-
-        # 3. 右側伸展：將內容推向中央，同時把未讀標記留給最右邊
+        # 2. 彈性空間：將未讀標記推向右側
         main_layout.addStretch()
 
-        # 4. 右側未讀標記 (固定在右側，垂直置中)
+        # 3. 右側未讀標記
         self.unread_label = QLabel(f"{unread_count}" if unread_count > 0 else "")
-        self.unread_label.setFixedSize(20, 20)
+        self.unread_label.setFixedSize(24, 24)
         self.unread_label.setAlignment(Qt.AlignCenter)
         self.update_unread_style(unread_count)
         
         main_layout.addWidget(self.unread_label, alignment=Qt.AlignVCenter)
         
-        # 維持穩定的總高度
-        self.setMinimumHeight(65)
+        # 設定固定高度
+        self.setFixedHeight(62)
 
     def update_info(self, ptt_id_display: str, nickname: str):
         """

@@ -1,4 +1,5 @@
 import logging
+import os
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -8,7 +9,8 @@ from PySide6.QtWidgets import (
     QScrollArea, QTextEdit, QSystemTrayIcon, QMenu, QMessageBox, QInputDialog
 )
 from PySide6.QtCore import Qt, Signal, Slot, QThread, QSize, QEvent
-from PySide6.QtGui import QIcon, QAction, QShortcut, QKeySequence
+from PySide6.QtGui import QIcon, QAction, QShortcut, QKeySequence, QPixmap, QPainter
+from PySide6.QtSvg import QSvgRenderer
 
 from uPtt import __version__, contant
 from uPtt.ui.styles import MAIN_STYLE
@@ -17,6 +19,30 @@ from uPtt.worker import PTTWorker
 from uPtt.ptt import UPttService
 
 logger = logging.getLogger("uPtt.ui.screens")
+
+# 資源目錄定義
+ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
+
+def render_svg(path: str, width: int, height: int, dpr: float = 1.0) -> QPixmap:
+    """高畫質渲染 SVG 檔案到 QPixmap (支援 High-DPI)"""
+    renderer = QSvgRenderer(path)
+    if not renderer.isValid():
+        return QPixmap()
+    
+    # 根據 DPR 放大實際像素大小
+    pixmap = QPixmap(int(width * dpr), int(height * dpr))
+    pixmap.fill(Qt.transparent)
+    
+    painter = QPainter(pixmap)
+    # 開啟抗鋸齒與高品質渲染
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setRenderHint(QPainter.SmoothPixmapTransform)
+    renderer.render(painter)
+    painter.end()
+    
+    # 設定邏輯大小，以便在 Qt 佈局中正確顯示
+    pixmap.setDevicePixelRatio(dpr)
+    return pixmap
 
 class LoginWindow(QWidget):
     """登入畫面"""
@@ -42,15 +68,19 @@ class LoginWindow(QWidget):
         layout.setContentsMargins(40, 40, 40, 40)
         layout.setSpacing(15)
 
-        # 標題與副標題
-        self.logo_label = QLabel("[ uPtt ]")
+        # 標題與副標題 (改用高畫質 SVG 渲染)
+        self.logo_label = QLabel()
         self.logo_label.setObjectName("logo-label")
         self.logo_label.setAlignment(Qt.AlignCenter)
         
-        self.subtitle_label = QLabel("開源批踢踢即時通訊軟體")
-        self.subtitle_label.setObjectName("subtitle-label")
-        self.subtitle_label.setAlignment(Qt.AlignCenter)
-
+        logo_path = os.path.join(ASSETS_DIR, "logo_horizontal.svg")
+        if os.path.exists(logo_path):
+            # 獲取當前螢幕的像素比例 (macOS 通常為 2.0)
+            dpr = self.devicePixelRatioF() if hasattr(self, 'devicePixelRatioF') else 1.0
+            self.logo_label.setPixmap(render_svg(logo_path, 300, 100, dpr))
+        else:
+            self.logo_label.setText("[ uPtt ]")
+        
         self.username_input = QLineEdit()
         self.username_input.setPlaceholderText("請輸入批踢踢代號")
         self.username_input.setFixedHeight(45)
@@ -70,7 +100,6 @@ class LoginWindow(QWidget):
         self.error_label.hide()
         
         layout.addWidget(self.logo_label)
-        layout.addWidget(self.subtitle_label)
         layout.addSpacing(10)
         layout.addWidget(self.username_input)
         layout.addWidget(self.password_input)
@@ -111,6 +140,12 @@ class MainWindow(QMainWindow):
     def __init__(self, ptt_service: UPttService):
         super().__init__()
         self.setWindowTitle("uPtt")
+        
+        # 設定視窗圖示
+        icon_path = os.path.join(ASSETS_DIR, "logo_icon.svg")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+            
         # 初始大小設為適合登入視窗的大小
         self.setFixedSize(500, 550)
         self.ptt_service = ptt_service
@@ -140,6 +175,7 @@ class MainWindow(QMainWindow):
         self.worker.new_message_received.connect(self.on_new_message)
         self.worker.send_result.connect(self.on_send_result)
         self.worker.user_info_result.connect(self.on_user_info_result)
+        self.worker.user_info_error.connect(self.on_user_info_error)
         self.worker.status_updated.connect(lambda s: logger.info(f"Worker Status: {s}"))
         self.worker.login_result.connect(self.on_login_result)
         
@@ -167,6 +203,7 @@ class MainWindow(QMainWindow):
         # 左側: 會話清單
         self.sidebar = QWidget()
         self.sidebar.setObjectName("sidebar")
+        self.sidebar.setFixedWidth(220) # 增加寬度並固定，為長 ID 提供空間
         sidebar_vbox = QVBoxLayout(self.sidebar)
         sidebar_vbox.setContentsMargins(0, 0, 0, 0)
         sidebar_vbox.setSpacing(0)
@@ -193,10 +230,6 @@ class MainWindow(QMainWindow):
         sidebar_header.setContentsMargins(12, 15, 12, 12)
         sidebar_header.setSpacing(10)
         
-        self.sidebar_title = QLabel("會話清單")
-        self.sidebar_title.setObjectName("sidebar-title")
-        self.sidebar_title.setStyleSheet("font-size: 11px; color: #8B949E; font-weight: bold; text-transform: uppercase;")
-        
         # 整合式新增對話輸入框
         self.new_chat_input = QLineEdit()
         self.new_chat_input.setPlaceholderText("搜尋或新增 ID...")
@@ -216,8 +249,6 @@ class MainWindow(QMainWindow):
             }
         """)
         self.new_chat_input.returnPressed.connect(self.handle_add_chat)
-        
-        sidebar_header.addWidget(self.sidebar_title)
         sidebar_header.addWidget(self.new_chat_input)
         
         self.contact_list = QListWidget()
@@ -288,13 +319,18 @@ class MainWindow(QMainWindow):
     def init_tray(self):
         """初始化系統匣"""
         self.tray_icon = QSystemTrayIcon(self)
-        # 這裡需要一個圖示，暫時使用內建
-        self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_MessageBoxInformation) if hasattr(self, 'style') else QIcon())
+        
+        # 使用新的圖示
+        icon_path = os.path.join(ASSETS_DIR, "logo_icon.svg")
+        if os.path.exists(icon_path):
+            self.tray_icon.setIcon(QIcon(icon_path))
+        else:
+            self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_MessageBoxInformation) if hasattr(self, 'style') else QIcon())
         
         tray_menu = QMenu()
-        show_action = QAction("顯示主畫面", self)
+        show_action = QAction("顯示聊天", self)
         show_action.triggered.connect(self.showNormal)
-        quit_action = QAction("完全退出", self)
+        quit_action = QAction("關閉", self)
         quit_action.triggered.connect(self.fully_quit)
         
         tray_menu.addAction(show_action)
@@ -349,6 +385,32 @@ class MainWindow(QMainWindow):
         if not found:
             logger.warning(f"在目前會話清單中找不到對應 ID: {ptt_id}")
 
+    @Slot(str, str)
+    def on_user_info_error(self, ptt_id, message):
+        logger.warning(f"使用者資訊獲取失敗: {ptt_id} -> {message}")
+        
+        # 彈出警告
+        QMessageBox.warning(self, "查詢失敗", f"無法取得使用者 '{ptt_id}' 的資訊：\n{message}")
+
+        # 如果搜尋不到 (NoSuchUser)，則將其從清單中移除
+        if "查無此人" in message:
+            ptt_id_lower = ptt_id.lower()
+            for i in range(self.contact_list.count()):
+                item = self.contact_list.item(i)
+                widget = self.contact_list.itemWidget(item)
+                if widget.ptt_id == ptt_id_lower:
+                    # 如果目前正在與此無效 ID 對話，清空對話區
+                    if self.current_chat_id == ptt_id_lower:
+                        self.current_chat_id = None
+                        self.refresh_chat_display()
+                        self.setWindowTitle(f"uPtt - {self.ptt_service.ptt_id}")
+
+                    # 移除該項目
+                    row = self.contact_list.row(item)
+                    self.contact_list.takeItem(row)
+                    logger.info(f"已從清單中移除無效 ID: {ptt_id}")
+                    break
+
     def handle_add_chat(self):
         target_id = self.new_chat_input.text().strip()
         if target_id:
@@ -372,9 +434,10 @@ class MainWindow(QMainWindow):
             # 設定 Splitter 初始比例 (側邊欄較窄)
             self.splitter.setSizes([180, 620])
             
+            corrected_id = self.ptt_service.ptt_id
             self.central_stack.setCurrentIndex(1)
-            self.setWindowTitle(f"uPtt - {self.ptt_service.ptt_id}")
-            self.user_id_label.setText(f"目前登入: {self.ptt_service.ptt_id}") # 更新目前使用者
+            self.setWindowTitle(f"uPtt - {corrected_id}")
+            self.user_id_label.setText(f"登入帳號: {corrected_id}") # 更新目前使用者
             self.message_edit.setFocus() # 登入後自動聚焦輸入框
         else:
             self.login_screen.show_error(message)

@@ -20,6 +20,7 @@ class PTTWorker(QObject):
     new_message_received = Signal(dict)  # {'sender': str, 'text': str, 'time': str, 'full_author': str}
     send_result = Signal(bool, str)  # (成功與否, 錯誤訊息)
     user_info_result = Signal(dict)  # {'ptt_id': str, 'nickname': str}
+    user_info_error = Signal(str, str)  # (ID, 錯誤訊息)
     status_updated = Signal(str)
 
     def __init__(self, ptt_service: UPttService):
@@ -35,6 +36,7 @@ class PTTWorker(QObject):
         try:
             success = self.ptt.login(username, password)
             if success:
+                # 這裡的 self.ptt.ptt_id 已經是修正過後的大小寫
                 self.login_result.emit(True, "登入成功")
                 # 登入成功後自動開始輪詢
                 self.start_polling()
@@ -150,33 +152,24 @@ class PTTWorker(QObject):
 
     @Slot(str)
     def get_user_info(self, ptt_id):
-        """主動獲取使用者資訊 (包含暱稱)"""
+        """主動獲取使用者資訊 (包含暱稱與正確大小寫)"""
         try:
             logger.info(f"--- 開始查詢使用者資訊: {ptt_id} ---")
-            user_info = self.ptt.call('get_user', {'user_id': ptt_id})
-
-            if user_info:
-                # 取得帶有暱稱的完整 ID 字串，例如 "TaiwanAILabs (台灣人工智慧實驗室)"
-                logger.info(f"PTT 回傳的使用者資訊: {user_info}")
-                full_id_str = user_info.get('ptt_id', ptt_id)
-
-                nickname = ""
-                # 解析格式: ID (暱稱)
-                if '(' in full_id_str and ')' in full_id_str:
-                    start = full_id_str.find('(') + 1
-                    end = full_id_str.rfind(')')
-                    nickname = full_id_str[start:end].strip()
-
-                logger.info(f"成功解析使用者資訊: {ptt_id} -> 暱稱='{nickname}'")
-
-                self.user_info_result.emit({
-                    'ptt_id': ptt_id.lower(),
-                    'nickname': nickname
-                })
-            else:
-                logger.warning(f"查詢失敗: PTT 未回傳 {ptt_id} 的任何資訊")
+            info = self.ptt.get_user_info(ptt_id)
+            
+            self.user_info_result.emit({
+                'ptt_id': info['ptt_id'],
+                'nickname': info['nickname']
+            })
+            logger.info(f"成功獲取使用者資訊: {info}")
+            
+        except ValueError as e:
+            error_msg = str(e)
+            logger.warning(f"查詢使用者 {ptt_id} 失敗: {error_msg}")
+            self.user_info_error.emit(ptt_id, error_msg)
         except Exception as e:
-            logger.error(f"獲取使用者 {ptt_id} 資訊過程中發生例外狀況: {e}", exc_info=True)
+            logger.error(f"獲取使用者 {ptt_id} 資訊過程中發生非預期錯誤: {e}", exc_info=True)
+            self.user_info_error.emit(ptt_id, f"系統錯誤: {str(e)}")
         finally:
             logger.info(f"--- 查詢結束: {ptt_id} ---")
 

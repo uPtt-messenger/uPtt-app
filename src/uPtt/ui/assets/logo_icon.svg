@@ -1,0 +1,13 @@
+<svg width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <!-- High visibility border for dark backgrounds -->
+    <rect x="2" y="2" width="76" height="76" rx="18" fill="#161B22" stroke="#30363D" stroke-width="2"/>
+    <rect x="12" y="12" width="56" height="56" rx="12" fill="#0D1117" stroke="#58A6FF" stroke-width="1.5" stroke-dasharray="2 2"/>
+    
+    <!-- The Master "u" Shape with Git Nodes -->
+    <path d="M28 28V42C28 48.6274 33.3726 54 40 54C46.6274 54 52 48.6274 52 42V28" stroke="#F0F6FC" stroke-width="6" stroke-linecap="round"/>
+    <path d="M52 38V54" stroke="#F0F6FC" stroke-width="6" stroke-linecap="round"/>
+    
+    <!-- Terminal/Git Flow Accents -->
+    <circle cx="28" cy="28" r="5" fill="#58A6FF"/>
+    <circle cx="52" cy="54" r="5" fill="#E3B341"/>
+</svg>

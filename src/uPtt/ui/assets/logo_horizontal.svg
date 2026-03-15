@@ -1,0 +1,9 @@
+<svg width="240" height="80" viewBox="0 0 240 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <rect x="10" y="20" width="40" height="40" rx="8" stroke="#58A6FF" stroke-width="3"/>
+    <!-- Styled lowercase 'u' inside box -->
+    <path d="M22 35V42C22 45 25 48 30 48C35 48 38 45 38 42V35" stroke="#F0F6FC" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="38" cy="48" r="3" fill="#E3B341"/>
+    
+    <text x="65" y="52" fill="#F0F6FC" style="font-family: 'Segoe UI', sans-serif; font-weight: bold; font-size: 32px">uPtt</text>
+    <text x="65" y="68" fill="#8B949E" style="font-family: 'Segoe UI', sans-serif; font-size: 12px">Open Source PTT Messenger</text>
+</svg>

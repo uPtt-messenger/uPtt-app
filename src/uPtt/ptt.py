@@ -33,7 +33,15 @@ class UPttService:
             self.service.call('login', {'ptt_id': ptt_id, 'ptt_pw': ptt_pw, 'kick_other_session': force})
             self.ptt_id = ptt_id
             self.ptt_pw = ptt_pw
-            logger.info(f"使用者 {ptt_id} 登入成功")
+            
+            # 登入成功後，嘗試取得正確的大小寫 ID
+            try:
+                info = self.get_user_info(ptt_id)
+                self.ptt_id = info['ptt_id']
+                logger.info(f"使用者登入成功，ID 已修正為: {self.ptt_id}")
+            except Exception as e:
+                logger.warning(f"登入後取得正確 ID 失敗: {e}，維持原始輸入: {ptt_id}")
+
             return True
         except Exception as e:
             logger.error(f"登入失敗: {e}")
@@ -72,6 +80,52 @@ class UPttService:
                 else:
                     raise e
         return None
+
+    def get_user_info(self, ptt_id: str) -> Dict[str, str]:
+        """
+        取得使用者資訊，回傳正確的大小寫 ID 與暱稱。
+        
+        Args:
+            ptt_id: PTT ID (不分大小寫)
+            
+        Returns:
+            Dict: {
+                'ptt_id': '正確大小寫ID',
+                'nickname': '暱稱'
+            }
+            
+        Raises:
+            ValueError: 如果找不到使用者或資訊不全
+            Exception: 其他 API 錯誤
+        """
+        try:
+            user_info = self.call('get_user', {'user_id': ptt_id})
+        except Exception as e:
+            # 判斷是否為「查無此人」的錯誤
+            if "NoSuchUser" in str(e):
+                raise ValueError(f"查無此人: {ptt_id}")
+            raise e
+
+        if not user_info or 'ptt_id' not in user_info:
+            raise ValueError(f"無法取得使用者資訊: {ptt_id}")
+
+        full_id_str = user_info['ptt_id']
+        # 格式通常為 "ID (Nickname)"
+        nickname = ""
+        true_id = ptt_id
+
+        if '(' in full_id_str and ')' in full_id_str:
+            start_idx = full_id_str.find('(')
+            end_idx = full_id_str.rfind(')')
+            true_id = full_id_str[:start_idx].strip()
+            nickname = full_id_str[start_idx + 1:end_idx].strip()
+        else:
+            true_id = full_id_str.strip()
+
+        return {
+            'ptt_id': true_id,
+            'nickname': nickname
+        }
 
     def close(self):
         """關閉連線"""
