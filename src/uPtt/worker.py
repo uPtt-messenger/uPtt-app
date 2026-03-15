@@ -1,14 +1,15 @@
 import logging
-import time
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional
 
-from PySide6.QtCore import QObject, Signal, Slot, QTimer
 import PyPtt
-from uPttTerm.ptt import UPttService
-from uPttTerm import config, contant, utils
+from PySide6.QtCore import QObject, Signal, Slot, QTimer
 
-logger = logging.getLogger("uPttTerm.worker")
+from . import config, contant, utils
+from .ptt import UPttService
+
+logger = logging.getLogger("uPtt.worker")
+
 
 class PTTWorker(QObject):
     """
@@ -50,7 +51,7 @@ class PTTWorker(QObject):
             # 根據 config 設定間隔 (秒轉毫秒)
             interval = getattr(config, 'CHECK_PTT_MAIL_INTERVAL', 10) * 1000
             self.polling_timer.start(interval)
-            logger.info(f"開始輪詢新信件，間隔: {interval/1000}s")
+            logger.info(f"開始輪詢新信件，間隔: {interval / 1000}s")
 
     def _poll_new_mails(self):
         """輪詢新信件的內部邏輯"""
@@ -62,29 +63,29 @@ class PTTWorker(QObject):
             # 初次啟動檢查較多封數
             lookback = 50 if self.is_first_polling else 10
             self.is_first_polling = False
-            
+
             mails_to_process = []
             for mail_idx in range(max(1, newest_idx - lookback), newest_idx + 1):
                 mail = self.ptt.call('get_mail', {'index': mail_idx})
-                # 只處理符合特定標題的訊息信 (uPttTerm 專用)
+                # 只處理符合特定標題的訊息信 (uPtt 專用)
                 if not mail or mail.get(PyPtt.MailField.title) != contant.PTT_MSG_TITLE:
                     continue
-                
+
                 full_author = mail[PyPtt.MailField.author].strip()
                 sender_id = full_author.split(' ')[0]
-                
+
                 # --- 新增過濾邏輯：忽略自己寄出的備份信 ---
                 if self.ptt.ptt_id and sender_id.lower() == self.ptt.ptt_id.lower():
                     # 如果是自己的備份信，直接刪除但不處理
                     self.ptt.call('del_mail', {'index': mail_idx})
                     continue
-                
+
                 try:
                     msg_time = datetime.strptime(mail[PyPtt.MailField.date], '%a %b %d %H:%M:%S %Y')
                 except ValueError:
                     continue
                 content = mail[PyPtt.MailField.content]
-                
+
                 mails_to_process.append({
                     'index': mail_idx,
                     'sender_id': sender_id,
@@ -127,9 +128,9 @@ class PTTWorker(QObject):
         try:
             # PTT ID 通常不分大小寫，但發送時建議使用原始輸入或去空白
             receiver_id = receiver_id.strip()
-            # 封裝成 uPttTerm 格式的站內信
+            # 封裝成 uPtt 格式的站內信
             ptt_msg = utils.msg_to_mail(contant.pkg_name, self.ptt.ptt_id or "uPttUser", text)
-            
+
             logger.info(f"正在發送站內信給 {receiver_id}...")
             # 呼叫 PyPtt mail API
             # 注意：PyPtt 的 mail API 成功時可能回傳 None 或特殊物件，我們以不噴錯為準
@@ -140,7 +141,7 @@ class PTTWorker(QObject):
                 'sign_file': '0',
                 'backup': False
             })
-            
+
             logger.info(f"訊息已成功發送至 {receiver_id}")
             self.send_result.emit(True, "")
         except Exception as e:
@@ -153,20 +154,21 @@ class PTTWorker(QObject):
         try:
             logger.info(f"--- 開始查詢使用者資訊: {ptt_id} ---")
             user_info = self.ptt.call('get_user', {'user_id': ptt_id})
-            
+
             if user_info:
                 # 取得帶有暱稱的完整 ID 字串，例如 "TaiwanAILabs (台灣人工智慧實驗室)"
+                logger.info(f"PTT 回傳的使用者資訊: {user_info}")
                 full_id_str = user_info.get('ptt_id', ptt_id)
-                
+
                 nickname = ""
                 # 解析格式: ID (暱稱)
                 if '(' in full_id_str and ')' in full_id_str:
                     start = full_id_str.find('(') + 1
                     end = full_id_str.rfind(')')
                     nickname = full_id_str[start:end].strip()
-                
+
                 logger.info(f"成功解析使用者資訊: {ptt_id} -> 暱稱='{nickname}'")
-                
+
                 self.user_info_result.emit({
                     'ptt_id': ptt_id.lower(),
                     'nickname': nickname
@@ -185,7 +187,7 @@ class PTTWorker(QObject):
             logger.info("正在停止 Worker...")
             if self.polling_timer:
                 self.polling_timer.stop()
-            
+
             # 關閉 PTT 連線
             if self.ptt:
                 self.ptt.close()

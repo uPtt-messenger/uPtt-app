@@ -3,7 +3,7 @@ import time
 import PyPtt
 from typing import Any, Dict, Optional
 
-logger = logging.getLogger("uPttTerm.ptt")
+logger = logging.getLogger("uPtt.ptt")
 
 class UPttService:
     """PTT 核心服務類別，負責底層 PyPtt 操作"""

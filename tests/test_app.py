@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.append(os.getcwd())
 
-from src.uPttTerm.app import UPttApp
+from src.uPtt.app import UPttApp
 
 
 def test_app_initialization():

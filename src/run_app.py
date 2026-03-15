@@ -5,12 +5,12 @@ import multiprocessing
 # 支援 PyInstaller 打包後的多行程
 multiprocessing.freeze_support()
 
-# 確保 src 目錄在路徑中，以便 import uPttTerm
+# 確保 src 目錄在路徑中，以便 import uPtt
 sys.path.insert(0, os.path.dirname(__file__))
 
 def start_ui():
-    """啟動 uPttTerm GUI 應用程式"""
-    from uPttTerm.app import main
+    """啟動 uPtt GUI 應用程式"""
+    from uPtt.app import main
     try:
         main()
     except Exception as e:

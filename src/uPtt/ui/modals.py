@@ -8,7 +8,7 @@ class HelpModal(ModalScreen):
     """指令說明視窗"""
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog-box"):
-            yield Label("uPttTerm 指令說明", id="logo")
+            yield Label("uPtt 指令說明", id="logo")
             yield Static(
                 "[cyan]F1[/]       - 顯示此說明\n"
                 "[cyan]Ctrl+N[/]   - 開啟新對話\n"

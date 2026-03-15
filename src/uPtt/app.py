@@ -29,16 +29,16 @@ def setup_logging(debug_mode: bool):
         root_logger.addHandler(file_handler)
         logging.info("已啟用除錯模式，日誌將同步紀錄至 uptt_debug.log")
 
-    logger = logging.getLogger("uPttTerm")
-    logger.info("uPttTerm 日誌系統初始化完成")
+    logger = logging.getLogger("uPtt")
+    logger.info("uPtt 日誌系統初始化完成")
 
 
-logger = logging.getLogger("uPttTerm")
+logger = logging.getLogger("uPtt")
 
 
 def main():
-    """uPttTerm GUI 應用程式進入點"""
-    parser = argparse.ArgumentParser(description="uPttTerm - PTT GUI Messenger")
+    """uPtt GUI 應用程式進入點"""
+    parser = argparse.ArgumentParser(description="uPtt - Open Source PTT Messenger")
     parser.add_argument("--debug", action="store_true", help="啟用除錯模式並記錄至檔案")
     args = parser.parse_args()
 
@@ -46,7 +46,7 @@ def main():
 
     # 初始化 Qt 應用程式
     qt_app = QApplication(sys.argv)
-    qt_app.setApplicationName("uPttTerm")
+    qt_app.setApplicationName("uPtt")
     qt_app.setQuitOnLastWindowClosed(False)  # 允許縮小至系統匣而不退出
 
     # 初始化 PTT 服務實例

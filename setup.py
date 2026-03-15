@@ -4,7 +4,7 @@ import os
 # Read metadata from __init__.py
 about = {}
 here = os.path.abspath(os.path.dirname(__file__))
-with open(os.path.join(here, 'src', 'uPttTerm', '__init__.py'), 'r', encoding='utf-8') as f:
+with open(os.path.join(here, 'src', 'uPtt', '__init__.py'), 'r', encoding='utf-8') as f:
     exec(f.read(), about)
 
 
@@ -29,7 +29,7 @@ setuptools.setup(
     install_requires=requirements,
     entry_points={
         "console_scripts": [
-            "uptt=uPttTerm.app:main",
+            "uptt=uPtt.app:main",
         ]
     },
     classifiers=[

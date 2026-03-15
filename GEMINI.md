@@ -67,7 +67,7 @@
 
 ## **6\. GUI 介面佈局與美學規範 (GUI UX/UI Standards)**
 
-為了維持 `uPttTerm` 的專業感與操作舒適度，Agent 在調整介面時必須遵守以下規範：
+為了維持 `uPtt` 的專業感與操作舒適度，Agent 在調整介面時必須遵守以下規範：
 
 ### **A. 全動態置中原則 (Dynamic Centering)**
 *   **水平與垂直雙向絕對置中：** 會話清單等條目式元件，應在 `QVBoxLayout` 或 `QHBoxLayout` 的上下/左右兩側使用 `addStretch()`，確保內容在容器內維持動態置中，而非使用固定邊距推擠。

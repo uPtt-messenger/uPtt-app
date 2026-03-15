@@ -5,8 +5,8 @@ import string
 
 sys.path.append(os.getcwd())
 
-from src.uPttTerm.utils import gen_random_string, msg_to_mail
-from src.uPttTerm import contant
+from src.uPtt.utils import gen_random_string, msg_to_mail
+from src.uPtt import contant
 
 def test_gen_random_string_length():
     length = 15

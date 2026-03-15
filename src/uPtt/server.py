@@ -10,9 +10,9 @@ import PyPtt
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-from uPttTerm import __name__ as pkg_name, __version__
-from uPttTerm.ptt import UPttService
-from uPttTerm.utils import HOUR
+from uPtt import __name__ as pkg_name, __version__
+from .ptt import UPttService
+from .utils import HOUR
 
 ptt_service = UPttService()
 last_request_time = time.time()
@@ -25,7 +25,7 @@ IDLE_TIMEOUT = 24 * HOUR
 def log_server(message):
     """將伺服器訊息寫入 log 檔"""
     try:
-        log_path = os.path.expanduser("~/uPttTerm_server.log")
+        log_path = os.path.expanduser("~/uPtt_server.log")
         with open(log_path, "a") as f:
             f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}\n")
     except Exception:

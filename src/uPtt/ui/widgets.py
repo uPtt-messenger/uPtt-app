@@ -5,9 +5,9 @@ from PySide6.QtWidgets import (
     QFrame, QSizePolicy, QStyle, QListWidgetItem
 )
 from PySide6.QtCore import Qt, QSize
-from uPttTerm.ui.styles import get_bubble_style
+from uPtt.ui.styles import get_bubble_style
 
-logger = logging.getLogger("uPttTerm.ui.widgets")
+logger = logging.getLogger("uPtt.ui.widgets")
 
 class ChatBubble(QWidget):
     """
@@ -72,9 +72,6 @@ class ContactItem(QWidget):
         text_layout.setSpacing(2)
         text_layout.setContentsMargins(0, 0, 0, 0)
 
-        # 垂直置中：上下加入 Stretch
-        text_layout.addStretch()
-
         # ID 顯示 (水平置中)
         self.id_label = QLabel(self.ptt_id_display)
         self.id_label.setAlignment(Qt.AlignCenter)
@@ -98,10 +95,10 @@ class ContactItem(QWidget):
 
         text_layout.addWidget(self.id_label)
         text_layout.addWidget(self.nickname_label)
-        
-        text_layout.addStretch()
 
+        # 將文字佈局以垂直置中的方式加入主佈局
         main_layout.addLayout(text_layout)
+        main_layout.setAlignment(text_layout, Qt.AlignVCenter)
 
         # 3. 右側伸展：將內容推向中央，同時把未讀標記留給最右邊
         main_layout.addStretch()
@@ -117,12 +114,23 @@ class ContactItem(QWidget):
         # 維持穩定的總高度
         self.setMinimumHeight(65)
 
-    def set_nickname(self, nickname: str):
+    def update_info(self, ptt_id_display: str, nickname: str):
+        """
+        更新聯絡人資訊，包含正確大小寫的 ID 與暱稱。
+        """
+        if ptt_id_display:
+            self.ptt_id_display = ptt_id_display
+            self.id_label.setText(ptt_id_display)
+        
         if nickname:
             self.nickname_label.setText(f"({nickname})")
-            logger.debug(f"UI 已更新暱稱: {self.ptt_id} -> {nickname}")
         else:
             self.nickname_label.setText("")
+            
+        logger.debug(f"UI 已更新資訊: {self.ptt_id} -> ID={ptt_id_display}, Nick={nickname}")
+
+    def set_nickname(self, nickname: str):
+        self.update_info(self.ptt_id_display, nickname)
 
     def update_unread_style(self, count: int):
         if count > 0:

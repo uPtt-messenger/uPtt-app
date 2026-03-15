@@ -8,11 +8,11 @@ from prompt_toolkit.buffer import Buffer
 
 sys.path.append(os.getcwd())
 
-from src.uPttTerm.app import UPttApp
-from src.uPttTerm.ptt import UPttService
-from src.uPttTerm import contant
-from src.uPttTerm.contant import MsgType
-from src.uPttTerm.contant import CMD
+from src.uPtt.app import UPttApp
+from src.uPtt.ptt import UPttService
+from src.uPtt import contant
+from src.uPtt.contant import MsgType
+from src.uPtt.contant import CMD
 
 
 # --- Custom Mock PyPtt Exceptions to avoid i18n issues ---
@@ -45,9 +45,9 @@ class MockNoSuchUser(PyPtt.exceptions.NoSuchUser):
 @pytest.fixture
 def app_instance():
     # Mock asyncio.create_task to avoid RuntimeError: no running event loop
-    with patch('src.uPttTerm.app.asyncio.create_task') as mock_create_task, \
-         patch('src.uPttTerm.app.utils.login_server') as mock_login_server, \
-         patch('src.uPttTerm.app.utils.call_server_api') as mock_call_server_api, \
+    with patch('src.uPtt.app.asyncio.create_task') as mock_create_task, \
+         patch('src.uPtt.app.utils.login_server') as mock_login_server, \
+         patch('src.uPtt.app.utils.call_server_api') as mock_call_server_api, \
          patch('prompt_toolkit.buffer.Buffer', autospec=True) as MockBufferClass:
 
         # Create distinct mock instances for each buffer that UPttApp will create
@@ -177,7 +177,7 @@ async def test_send_message_exit_command(app_instance):
 
 @pytest.mark.asyncio
 async def test_send_message_success(app_instance):
-    app_name = "uPttTerm"
+    app_name = "uPtt"
     ptt_id = "test_id"
     target = "target_user"
     message_text = "Hello, target!"
@@ -187,7 +187,7 @@ async def test_send_message_success(app_instance):
     app_instance.mock_call_server_api.return_value = {'result': None}
 
     # Mock utils.msg_to_mail - correct patching path
-    with patch('src.uPttTerm.app.utils.msg_to_mail') as mock_msg_to_mail:
+    with patch('src.uPtt.app.utils.msg_to_mail') as mock_msg_to_mail:
         mock_msg_to_mail.return_value = "formatted_mail_content"
         await app_instance.send_message()
 

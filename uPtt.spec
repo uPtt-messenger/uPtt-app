@@ -40,7 +40,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True, # 不要在 exe 裡面包二進位檔
-    name='uPttTerm',
+    name='uPtt',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -62,12 +62,12 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='uPttTerm',
+    name='uPtt',
 )
 
 app = BUNDLE(
     coll, # 打包 COLLECT 出來的目錄
-    name='uPttTerm.app',
+    name='uPtt.app',
     icon=None,
-    bundle_identifier='com.uptt.messenger.uPttTerm',
+    bundle_identifier='com.uptt.messenger.uPtt',
 )

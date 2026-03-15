@@ -1,7 +1,7 @@
-# uPttTerm
+# uPtt
 
-[![PyPI version](https://badge.fury.io/py/uPttTerm.svg)](https://badge.fury.io/py/uPttTerm)
-[![Python Version](https://img.shields.io/pypi/pyversions/uPttTerm.svg)](https://pypi.org/project/uPttTerm/)
+[![PyPI version](https://badge.fury.io/py/uPtt.svg)](https://badge.fury.io/py/uPtt)
+[![Python Version](https://img.shields.io/pypi/pyversions/uPtt.svg)](https://pypi.org/project/uPtt/)
 
 這是一個使用 Python 開發的終端機介面（TUI）應用程式，讓使用者可以只透過批踢踢伺服器與另一位使用者進行**即時聊天**。
 
@@ -32,10 +32,10 @@
 2.  安裝套件
     ```bash
     # 正式版本
-    pip install uPttTerm
+    pip install uPtt
     
     # 測試版本
-    pip install --extra-index-url https://test.pypi.org/simple/ uPttTerm
+    pip install --extra-index-url https://test.pypi.org/simple/ uPtt
     ```
     
 
@@ -76,7 +76,7 @@
 
 4. 執行應用程式：
     ```bash
-    PYTHONPATH=src python3 -m uPttTerm.app
+    PYTHONPATH=src python3 -m uPtt.app
     ```
 
 

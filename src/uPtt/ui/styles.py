@@ -1,4 +1,4 @@
-# --- uPttTerm QSS 樣式表 ---
+# --- uPtt QSS 樣式表 ---
 
 MAIN_STYLE = """
 /* 全域字體與背景 (暗色系) */

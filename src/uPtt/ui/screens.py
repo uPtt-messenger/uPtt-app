@@ -10,13 +10,13 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, Slot, QThread, QSize, QEvent
 from PySide6.QtGui import QIcon, QAction, QShortcut, QKeySequence
 
-from uPttTerm import __version__, contant
-from uPttTerm.ui.styles import MAIN_STYLE
-from uPttTerm.ui.widgets import ChatBubble, ContactItem
-from uPttTerm.worker import PTTWorker
-from uPttTerm.ptt import UPttService
+from uPtt import __version__, contant
+from uPtt.ui.styles import MAIN_STYLE
+from uPtt.ui.widgets import ChatBubble, ContactItem
+from uPtt.worker import PTTWorker
+from uPtt.ptt import UPttService
 
-logger = logging.getLogger("uPttTerm.ui.screens")
+logger = logging.getLogger("uPtt.ui.screens")
 
 class LoginWindow(QWidget):
     """登入畫面"""
@@ -110,7 +110,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self, ptt_service: UPttService):
         super().__init__()
-        self.setWindowTitle("uPttTerm")
+        self.setWindowTitle("uPtt")
         # 初始大小設為適合登入視窗的大小
         self.setFixedSize(500, 550)
         self.ptt_service = ptt_service
@@ -332,27 +332,32 @@ class MainWindow(QMainWindow):
 
     @Slot(dict)
     def on_user_info_result(self, data):
-        ptt_id = data['ptt_id']
+        ptt_id = data['ptt_id'] # 正確大小寫的 ID
         nickname = data['nickname']
         logger.info(f"收到使用者資訊回傳: ID='{ptt_id}', 暱稱='{nickname}'")
-        
-        # 更新清單中的暱稱
+
+        # 更新清單中的資訊 (包含正確大小寫的 ID)
         found = False
         for i in range(self.contact_list.count()):
             item = self.contact_list.item(i)
             widget = self.contact_list.itemWidget(item)
             if widget.ptt_id == ptt_id.lower():
-                widget.set_nickname(nickname)
+                widget.update_info(ptt_id, nickname)
                 logger.debug(f"成功更新介面清單項目: {ptt_id}")
                 found = True
                 break
-        
         if not found:
             logger.warning(f"在目前會話清單中找不到對應 ID: {ptt_id}")
 
     def handle_add_chat(self):
         target_id = self.new_chat_input.text().strip()
         if target_id:
+            # 阻止自己與自己對話
+            if target_id.lower() == self.ptt_service.ptt_id.lower():
+                logger.warning(f"不允許與自己對話: {target_id}")
+                self.new_chat_input.clear()
+                return
+
             self.add_or_select_contact(target_id)
             self.new_chat_input.clear() # 完成後自動清空
 
@@ -368,7 +373,7 @@ class MainWindow(QMainWindow):
             self.splitter.setSizes([180, 620])
             
             self.central_stack.setCurrentIndex(1)
-            self.setWindowTitle(f"uPttTerm - {self.ptt_service.ptt_id}")
+            self.setWindowTitle(f"uPtt - {self.ptt_service.ptt_id}")
             self.user_id_label.setText(f"目前登入: {self.ptt_service.ptt_id}") # 更新目前使用者
             self.message_edit.setFocus() # 登入後自動聚焦輸入框
         else:
@@ -376,14 +381,26 @@ class MainWindow(QMainWindow):
 
     def add_or_select_contact(self, ptt_id, nickname=""):
         ptt_id_lower = ptt_id.lower()
+        
         # 檢查是否已在清單中 (不分大小寫邏輯比較)
+        found_item = None
         for i in range(self.contact_list.count()):
             item = self.contact_list.item(i)
             widget = self.contact_list.itemWidget(item)
             if widget.ptt_id == ptt_id_lower:
-                self.contact_list.setCurrentItem(item)
-                self.on_contact_selected(item)
-                return
+                # 即使已存在，也更新其顯示文字 (避免使用者輸入了不同的大小寫但沒反應)
+                if widget.ptt_id_display != ptt_id:
+                    widget.update_info(ptt_id, nickname)
+                
+                found_item = item
+                break
+        
+        if found_item:
+            self.contact_list.setCurrentItem(found_item)
+            self.on_contact_selected(found_item)
+            # 即使已存在，也重新請求一次資訊以確保最新 (修正大小寫與暱稱)
+            self.user_info_requested.emit(ptt_id_lower)
+            return
         
         # 新增至清單 (雙行整齊版)
         item = QListWidgetItem(self.contact_list)
@@ -399,7 +416,7 @@ class MainWindow(QMainWindow):
         self.contact_list.setCurrentItem(item)
         self.on_contact_selected(item)
         
-        # 嘗試獲取使用者資訊以更新暱稱
+        # 嘗試獲取使用者資訊以更新暱稱與正確大小寫
         self.user_info_requested.emit(ptt_id_lower)
 
     def on_contact_selected(self, item):
@@ -411,7 +428,7 @@ class MainWindow(QMainWindow):
         self.message_edit.setFocus()
         
         # 每次切換聯絡人時更新視窗標題
-        self.setWindowTitle(f"uPttTerm - 與 {widget.ptt_id_display} 對話中")
+        self.setWindowTitle(f"uPtt - 與 {widget.ptt_id_display} 對話中")
 
     def refresh_chat_display(self):
         """重新渲染右側訊息區域，並根據時間戳記排序"""
@@ -475,12 +492,12 @@ class MainWindow(QMainWindow):
             # 如果是新聯絡人，新增到清單 (帶入原始大小寫 ID 與 暱稱)
             self.add_or_select_contact(sender_id_display, nickname)
         else:
-            # 如果已存在，更新暱稱 (以防對方改過)
+            # 如果已存在，更新暱稱與 ID (以防對方改過大小寫或暱稱)
             for i in range(self.contact_list.count()):
                 item = self.contact_list.item(i)
                 widget = self.contact_list.itemWidget(item)
                 if widget.ptt_id == sender:
-                    widget.set_nickname(nickname)
+                    widget.update_info(sender_id_display, nickname)
                     break
             
         self.chat_histories[sender].append({
