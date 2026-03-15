@@ -56,19 +56,23 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
           pip install nuitka zstandard
+- name: Build with Nuitka
+  run: |
+    # 編譯時 Nuitka 需要直接存取 uPtt 套件，所以設定 PYTHONPATH=src
+    # 明確包含 websockets 與 qasync 以避免運行時動態載入失敗
+    PYTHONPATH=src python -m nuitka \
+      --standalone \
+      --macos-create-app-bundle \
+      --plugin-enable=pyside6 \
+      --include-package=PyPtt \
+      --include-package=websockets \
+      --include-package=qasync \
+      --include-package-data=uPtt.ui.assets \
+      --macos-app-name="uPtt" \
+      --output-dir=dist \
+      --no-pyi-file \
+      src/run_app.py
 
-      - name: Build with Nuitka
-        run: |
-          PYTHONPATH=src python -m nuitka \
-            --standalone \
-            --macos-create-app-bundle \
-            --plugin-enable=pyside6 \
-            --include-package=PyPtt \
-            --include-package-data=uPtt.ui.assets \
-            --macos-app-name="uPtt" \
-            --output-dir=dist \
-            --no-pyi-file \
-            src/run_app.py
 
       - name: Package .app for distribution
         run: |
