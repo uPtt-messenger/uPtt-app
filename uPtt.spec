@@ -22,7 +22,9 @@ a = Analysis(
     ['src/run_app.py'],
     pathex=['src'],
     binaries=[],
-    datas=[],
+    datas=[
+        ('src/uPtt/ui/assets', 'uPtt/ui/assets'),
+    ],
     hiddenimports=hidden_imports,
     hookspath=[],
     hooksconfig={},

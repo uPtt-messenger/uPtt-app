@@ -26,6 +26,10 @@ setuptools.setup(
     license=about['__license__'],
     package_dir={"": "src"},
     packages=setuptools.find_packages(where="src"),
+    package_data={
+        "uPtt.ui": ["assets/*"],
+    },
+    include_package_data=True,
     install_requires=requirements,
     entry_points={
         "console_scripts": [

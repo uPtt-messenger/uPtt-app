@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -20,8 +21,18 @@ from uPtt.ptt import UPttService
 
 logger = logging.getLogger("uPtt.ui.screens")
 
-# 資源目錄定義
-ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
+# 資源目錄定義 (相容 PyInstaller 與 Nuitka)
+if hasattr(sys, '_MEIPASS'):
+    # PyInstaller 執行環境
+    ASSETS_DIR = os.path.join(sys._MEIPASS, "uPtt", "ui", "assets")
+elif 'nuitka' in sys.modules:
+    # Nuitka 執行環境 (通常 __file__ 會指向 .app 內部的正確位置)
+    # 這裡使用 os.path.dirname(__file__) 通常就能在 Nuitka 編譯後找到 assets
+    ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
+else:
+    # 一般開發環境
+    ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
+
 
 def render_svg(path: str, width: int, height: int, dpr: float = 1.0) -> QPixmap:
     """高畫質渲染 SVG 檔案到 QPixmap (支援 High-DPI)"""
