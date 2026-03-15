@@ -18,6 +18,7 @@ class PTTWorker(QObject):
     login_result = Signal(bool, str)  # (成功與否, 訊息)
     new_message_received = Signal(dict)  # {'sender': str, 'text': str, 'time': str, 'full_author': str}
     send_result = Signal(bool, str)  # (成功與否, 錯誤訊息)
+    user_info_result = Signal(dict)  # {'ptt_id': str, 'nickname': str}
     status_updated = Signal(str)
 
     def __init__(self, ptt_service: UPttService):
@@ -145,6 +146,37 @@ class PTTWorker(QObject):
         except Exception as e:
             logger.exception(f"發送訊息過程中發生例外狀況: {e}")
             self.send_result.emit(False, str(e))
+
+    @Slot(str)
+    def get_user_info(self, ptt_id):
+        """主動獲取使用者資訊 (包含暱稱)"""
+        try:
+            logger.info(f"--- 開始查詢使用者資訊: {ptt_id} ---")
+            user_info = self.ptt.call('get_user', {'user_id': ptt_id})
+            
+            if user_info:
+                # 取得帶有暱稱的完整 ID 字串，例如 "TaiwanAILabs (台灣人工智慧實驗室)"
+                full_id_str = user_info.get('ptt_id', ptt_id)
+                
+                nickname = ""
+                # 解析格式: ID (暱稱)
+                if '(' in full_id_str and ')' in full_id_str:
+                    start = full_id_str.find('(') + 1
+                    end = full_id_str.rfind(')')
+                    nickname = full_id_str[start:end].strip()
+                
+                logger.info(f"成功解析使用者資訊: {ptt_id} -> 暱稱='{nickname}'")
+                
+                self.user_info_result.emit({
+                    'ptt_id': ptt_id.lower(),
+                    'nickname': nickname
+                })
+            else:
+                logger.warning(f"查詢失敗: PTT 未回傳 {ptt_id} 的任何資訊")
+        except Exception as e:
+            logger.error(f"獲取使用者 {ptt_id} 資訊過程中發生例外狀況: {e}", exc_info=True)
+        finally:
+            logger.info(f"--- 查詢結束: {ptt_id} ---")
 
     @Slot()
     def stop(self):

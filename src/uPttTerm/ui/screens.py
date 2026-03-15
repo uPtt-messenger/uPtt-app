@@ -25,29 +25,43 @@ class LoginWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setObjectName("login-window")
+        self.setAttribute(Qt.WA_StyledBackground, True)
         self.init_ui()
 
     def init_ui(self):
-        layout = QVBoxLayout(self)
+        # 外部 layout
+        main_layout = QVBoxLayout(self)
+        main_layout.setAlignment(Qt.AlignCenter)
+
+        # 內部容器
+        container = QWidget()
+        container.setObjectName("login-container")
+        container.setFixedWidth(400)
+        layout = QVBoxLayout(container)
         layout.setAlignment(Qt.AlignCenter)
-        layout.setContentsMargins(50, 50, 50, 50)
+        layout.setContentsMargins(40, 40, 40, 40)
         layout.setSpacing(15)
 
-        self.logo_label = QLabel("uPttTerm")
+        # 標題與副標題
+        self.logo_label = QLabel("[ uPtt ]")
         self.logo_label.setObjectName("logo-label")
         self.logo_label.setAlignment(Qt.AlignCenter)
         
+        self.subtitle_label = QLabel("開源批踢踢即時通訊軟體")
+        self.subtitle_label.setObjectName("subtitle-label")
+        self.subtitle_label.setAlignment(Qt.AlignCenter)
+
         self.username_input = QLineEdit()
-        self.username_input.setPlaceholderText("PTT 帳號")
-        self.username_input.setFixedWidth(280)
+        self.username_input.setPlaceholderText("請輸入批踢踢代號")
+        self.username_input.setFixedHeight(45)
         
         self.password_input = QLineEdit()
-        self.password_input.setPlaceholderText("PTT 密碼")
+        self.password_input.setPlaceholderText("請輸入批踢踢密碼")
         self.password_input.setEchoMode(QLineEdit.Password)
-        self.password_input.setFixedWidth(280)
+        self.password_input.setFixedHeight(45)
         
-        self.login_btn = QPushButton("登入 PTT")
-        self.login_btn.setFixedWidth(280)
+        self.login_btn = QPushButton("登入連線 / LOGIN")
+        self.login_btn.setFixedHeight(45)
         self.login_btn.clicked.connect(self.handle_login)
         
         self.error_label = QLabel("")
@@ -56,14 +70,21 @@ class LoginWindow(QWidget):
         self.error_label.hide()
         
         layout.addWidget(self.logo_label)
+        layout.addWidget(self.subtitle_label)
+        layout.addSpacing(10)
         layout.addWidget(self.username_input)
         layout.addWidget(self.password_input)
         layout.addWidget(self.error_label)
         layout.addWidget(self.login_btn)
+
+        main_layout.addWidget(container)
         
         # 綁定 Enter 鍵
         self.username_input.returnPressed.connect(self.password_input.setFocus)
         self.password_input.returnPressed.connect(self.handle_login)
+        
+        # 預設聚焦帳號輸入
+        self.username_input.setFocus()
 
     def handle_login(self):
         user = self.username_input.text().strip()
@@ -85,11 +106,13 @@ class LoginWindow(QWidget):
 class MainWindow(QMainWindow):
     """主聊天畫面"""
     send_requested = Signal(str, str)
+    user_info_requested = Signal(str)
 
     def __init__(self, ptt_service: UPttService):
         super().__init__()
         self.setWindowTitle("uPttTerm")
-        self.setMinimumSize(900, 600)
+        # 初始大小設為適合登入視窗的大小
+        self.setFixedSize(500, 550)
         self.ptt_service = ptt_service
         self.current_chat_id = None
         self.chat_histories: Dict[str, List[Dict]] = {}
@@ -111,10 +134,12 @@ class MainWindow(QMainWindow):
         
         # 連接發信訊號 (跨執行緒會自動排程)
         self.send_requested.connect(self.worker.send_message)
+        self.user_info_requested.connect(self.worker.get_user_info)
         
         # 連接 Worker 訊號
         self.worker.new_message_received.connect(self.on_new_message)
         self.worker.send_result.connect(self.on_send_result)
+        self.worker.user_info_result.connect(self.on_user_info_result)
         self.worker.status_updated.connect(lambda s: logger.info(f"Worker Status: {s}"))
         self.worker.login_result.connect(self.on_login_result)
         
@@ -144,18 +169,59 @@ class MainWindow(QMainWindow):
         self.sidebar.setObjectName("sidebar")
         sidebar_vbox = QVBoxLayout(self.sidebar)
         sidebar_vbox.setContentsMargins(0, 0, 0, 0)
+        sidebar_vbox.setSpacing(0)
+
+        # 側邊欄頂部: 目前使用者資訊
+        self.user_profile = QWidget()
+        self.user_profile.setObjectName("user-profile")
+        self.user_profile.setFixedHeight(50)
+        self.user_profile.setStyleSheet("""
+            background-color: #1A1D20;
+            border-bottom: 1px solid #2D333B;
+        """)
+        user_layout = QHBoxLayout(self.user_profile)
+        user_layout.setContentsMargins(15, 0, 15, 0)
         
-        sidebar_header = QHBoxLayout()
-        sidebar_header.setContentsMargins(10, 10, 10, 10)
+        self.user_id_label = QLabel("未登入")
+        self.user_id_label.setStyleSheet("font-weight: bold; font-size: 13px; color: #E6EDF3;")
+        user_layout.addWidget(self.user_id_label)
+        user_layout.addStretch()
+        
+        sidebar_vbox.addWidget(self.user_profile)
+        
+        sidebar_header = QVBoxLayout() # 改為垂直排列
+        sidebar_header.setContentsMargins(12, 15, 12, 12)
+        sidebar_header.setSpacing(10)
+        
         self.sidebar_title = QLabel("會話清單")
         self.sidebar_title.setObjectName("sidebar-title")
-        self.new_chat_btn = QPushButton("+")
-        self.new_chat_btn.setFixedSize(30, 30)
-        self.new_chat_btn.clicked.connect(self.on_new_chat_clicked)
+        self.sidebar_title.setStyleSheet("font-size: 11px; color: #8B949E; font-weight: bold; text-transform: uppercase;")
+        
+        # 整合式新增對話輸入框
+        self.new_chat_input = QLineEdit()
+        self.new_chat_input.setPlaceholderText("搜尋或新增 ID...")
+        self.new_chat_input.setFixedHeight(32)
+        self.new_chat_input.setObjectName("new-chat-input")
+        self.new_chat_input.setStyleSheet("""
+            QLineEdit#new-chat-input {
+                background-color: #0D1117;
+                border: 1px solid #30363D;
+                border-radius: 4px;
+                padding: 0 8px;
+                color: #C9D1D9;
+                font-size: 13px;
+            }
+            QLineEdit#new-chat-input:focus {
+                border-color: #58A6FF;
+            }
+        """)
+        self.new_chat_input.returnPressed.connect(self.handle_add_chat)
+        
         sidebar_header.addWidget(self.sidebar_title)
-        sidebar_header.addWidget(self.new_chat_btn)
+        sidebar_header.addWidget(self.new_chat_input)
         
         self.contact_list = QListWidget()
+        self.contact_list.setObjectName("contact-list")
         self.contact_list.itemClicked.connect(self.on_contact_selected)
         
         sidebar_vbox.addLayout(sidebar_header)
@@ -168,32 +234,47 @@ class MainWindow(QMainWindow):
         chat_vbox.setContentsMargins(0, 0, 0, 0)
         chat_vbox.setSpacing(0)
         
-        # 歷史訊息滾動區
+        # 歷史訊息滾動區 (最大化空間)
         self.scroll_area = QScrollArea()
         self.scroll_area.setObjectName("messages-scroll")
         self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setContentsMargins(0, 0, 0, 0)
+        
+        # 自動捲動到底部 (監聽捲動範圍變化)
+        self.scroll_area.verticalScrollBar().rangeChanged.connect(
+            lambda: self.scroll_area.verticalScrollBar().setValue(
+                self.scroll_area.verticalScrollBar().maximum()
+            )
+        )
+        
         self.messages_widget = QWidget()
         self.messages_widget.setObjectName("messages-container")
         self.messages_layout = QVBoxLayout(self.messages_widget)
-        self.messages_layout.setAlignment(Qt.AlignTop)
+        self.messages_layout.setAlignment(Qt.AlignBottom)
+        # 左右留一點間距增加閱讀舒適度，上下縮至最小
+        self.messages_layout.setContentsMargins(15, 5, 15, 15)
+        self.messages_layout.setSpacing(6)
         self.scroll_area.setWidget(self.messages_widget)
         
-        # 輸入區
+        # 輸入區 (單行緊湊版)
         self.input_area = QWidget()
         self.input_area.setObjectName("input-area")
         input_vbox = QVBoxLayout(self.input_area)
+        # 移除頂部間距，讓它緊貼訊息區；縮小底部與左右間距
+        input_vbox.setContentsMargins(10, 8, 10, 10)
+        input_vbox.setSpacing(0)
         
-        self.message_edit = QTextEdit()
+        self.message_edit = QLineEdit() # 改用 QLineEdit 實現真正單行
         self.message_edit.setObjectName("message-edit")
-        self.message_edit.setFixedHeight(80)
-        self.message_edit.setPlaceholderText("輸入訊息... (Enter 發送, Shift+Enter 換行)")
-        # 安裝事件過濾器處理 Enter 鍵
-        self.message_edit.installEventFilter(self)
+        self.message_edit.setFixedHeight(36) # 標準單行高度
+        self.message_edit.setPlaceholderText("輸入訊息並按下 Enter 發送...")
+        self.message_edit.returnPressed.connect(self.handle_send)
         
         input_vbox.addWidget(self.message_edit)
         
-        chat_vbox.addWidget(self.scroll_area)
-        chat_vbox.addWidget(self.input_area)
+        chat_vbox.addWidget(self.scroll_area, stretch=1) # 給予最大拉伸權重
+        chat_vbox.addWidget(self.input_area, stretch=0) # 輸入區不拉伸
+        chat_vbox.setSpacing(0)
         
         self.splitter.addWidget(self.sidebar)
         self.splitter.addWidget(self.chat_area)
@@ -226,7 +307,7 @@ class MainWindow(QMainWindow):
 
     def init_shortcuts(self):
         """初始化快捷鍵"""
-        QShortcut(QKeySequence("Ctrl+N"), self, self.on_new_chat_clicked)
+        QShortcut(QKeySequence("Ctrl+N"), self, self.new_chat_input.setFocus)
         QShortcut(QKeySequence("Ctrl+Q"), self, self.fully_quit)
         QShortcut(QKeySequence("Ctrl+W"), self, self.close_current_chat)
 
@@ -243,44 +324,83 @@ class MainWindow(QMainWindow):
                     return True
         return super().eventFilter(obj, event)
 
-    @Slot(bool, str)
-    def on_login_result(self, success, message):
-        if success:
-            self.central_stack.setCurrentIndex(1)
-            self.setWindowTitle(f"uPttTerm - {self.ptt_service.ptt_id}")
-        else:
-            self.login_screen.show_error(message)
+    def mousePressEvent(self, event):
+        """當使用者點擊視窗區域時，自動將焦點移回訊息輸入框"""
+        if self.central_stack.currentIndex() == 1:
+            self.message_edit.setFocus()
+        super().mousePressEvent(event)
 
-    def on_new_chat_clicked(self):
-        target_id, ok = QInputDialog.getText(self, "新增對話", "請輸入 PTT ID:")
-        if ok and target_id:
-            target_id = target_id.strip().lower()
-            self.add_or_select_contact(target_id)
-
-    def add_or_select_contact(self, ptt_id):
-        ptt_id = ptt_id.lower()
-        # 檢查是否已在清單中
+    @Slot(dict)
+    def on_user_info_result(self, data):
+        ptt_id = data['ptt_id']
+        nickname = data['nickname']
+        logger.info(f"收到使用者資訊回傳: ID='{ptt_id}', 暱稱='{nickname}'")
+        
+        # 更新清單中的暱稱
+        found = False
         for i in range(self.contact_list.count()):
             item = self.contact_list.item(i)
             widget = self.contact_list.itemWidget(item)
-            if widget.ptt_id == ptt_id:
+            if widget.ptt_id == ptt_id.lower():
+                widget.set_nickname(nickname)
+                logger.debug(f"成功更新介面清單項目: {ptt_id}")
+                found = True
+                break
+        
+        if not found:
+            logger.warning(f"在目前會話清單中找不到對應 ID: {ptt_id}")
+
+    def handle_add_chat(self):
+        target_id = self.new_chat_input.text().strip()
+        if target_id:
+            self.add_or_select_contact(target_id)
+            self.new_chat_input.clear() # 完成後自動清空
+
+    @Slot(bool, str)
+    def on_login_result(self, success, message):
+        if success:
+            # 登入成功，解除固定大小並調整為聊天視窗大小 (縮小預設寬度)
+            self.setMinimumSize(800, 600)
+            self.setMaximumSize(16777215, 16777215) # 解除最大值限制
+            self.resize(800, 600)
+            
+            # 設定 Splitter 初始比例 (側邊欄較窄)
+            self.splitter.setSizes([180, 620])
+            
+            self.central_stack.setCurrentIndex(1)
+            self.setWindowTitle(f"uPttTerm - {self.ptt_service.ptt_id}")
+            self.user_id_label.setText(f"目前登入: {self.ptt_service.ptt_id}") # 更新目前使用者
+            self.message_edit.setFocus() # 登入後自動聚焦輸入框
+        else:
+            self.login_screen.show_error(message)
+
+    def add_or_select_contact(self, ptt_id, nickname=""):
+        ptt_id_lower = ptt_id.lower()
+        # 檢查是否已在清單中 (不分大小寫邏輯比較)
+        for i in range(self.contact_list.count()):
+            item = self.contact_list.item(i)
+            widget = self.contact_list.itemWidget(item)
+            if widget.ptt_id == ptt_id_lower:
                 self.contact_list.setCurrentItem(item)
                 self.on_contact_selected(item)
                 return
         
-        # 新增至清單
+        # 新增至清單 (雙行整齊版)
         item = QListWidgetItem(self.contact_list)
-        item.setSizeHint(QSize(0, 50))
-        widget = ContactItem(ptt_id)
+        item.setSizeHint(QSize(0, 70))
+        widget = ContactItem(ptt_id, nickname)
         self.contact_list.addItem(item)
         self.contact_list.setItemWidget(item, widget)
         
-        if ptt_id not in self.chat_histories:
-            self.chat_histories[ptt_id] = []
-            self.unread_counts[ptt_id] = 0
+        if ptt_id_lower not in self.chat_histories:
+            self.chat_histories[ptt_id_lower] = []
+            self.unread_counts[ptt_id_lower] = 0
             
         self.contact_list.setCurrentItem(item)
         self.on_contact_selected(item)
+        
+        # 嘗試獲取使用者資訊以更新暱稱
+        self.user_info_requested.emit(ptt_id_lower)
 
     def on_contact_selected(self, item):
         widget = self.contact_list.itemWidget(item)
@@ -289,6 +409,9 @@ class MainWindow(QMainWindow):
         widget.set_unread(0)
         self.refresh_chat_display()
         self.message_edit.setFocus()
+        
+        # 每次切換聯絡人時更新視窗標題
+        self.setWindowTitle(f"uPttTerm - 與 {widget.ptt_id_display} 對話中")
 
     def refresh_chat_display(self):
         """重新渲染右側訊息區域，並根據時間戳記排序"""
@@ -315,7 +438,7 @@ class MainWindow(QMainWindow):
         )
 
     def handle_send(self):
-        text = self.message_edit.toPlainText().strip()
+        text = self.message_edit.text().strip()
         if not text or not self.current_chat_id:
             return
             
@@ -336,12 +459,29 @@ class MainWindow(QMainWindow):
 
     @Slot(dict)
     def on_new_message(self, data):
-        sender = data['sender'].lower()
+        # sender_id_display 是原始大小寫，sender 是用來當字典 Key 的小寫
+        sender_id_display = data['sender']
+        sender = sender_id_display.lower()
+        
+        # 從 full_author 提取暱稱，例如 "CodingMan (小明)"
+        full_author = data.get('full_author', '')
+        nickname = ""
+        if '(' in full_author and ')' in full_author:
+            nickname = full_author[full_author.find('(')+1 : full_author.rfind(')')]
+        
         if sender not in self.chat_histories:
             self.chat_histories[sender] = []
             self.unread_counts[sender] = 0
-            # 如果是新聯絡人，新增到清單
-            self.add_or_select_contact(sender)
+            # 如果是新聯絡人，新增到清單 (帶入原始大小寫 ID 與 暱稱)
+            self.add_or_select_contact(sender_id_display, nickname)
+        else:
+            # 如果已存在，更新暱稱 (以防對方改過)
+            for i in range(self.contact_list.count()):
+                item = self.contact_list.item(i)
+                widget = self.contact_list.itemWidget(item)
+                if widget.ptt_id == sender:
+                    widget.set_nickname(nickname)
+                    break
             
         self.chat_histories[sender].append({
             'text': data['text'], 
@@ -362,10 +502,10 @@ class MainWindow(QMainWindow):
                     widget.set_unread(self.unread_counts[sender])
                     break
         
-        # 桌面通知
+        # 桌面通知 (顯示原始大小寫 ID)
         if not self.isActiveWindow():
             self.tray_icon.showMessage(
-                f"新訊息: {sender}",
+                f"新訊息: {sender_id_display}",
                 data['text'][:50],
                 QSystemTrayIcon.Information,
                 3000
@@ -401,33 +541,25 @@ class MainWindow(QMainWindow):
         try:
             # 1. 停止 Worker (使用訊號通知)
             if hasattr(self, 'worker'):
-                # 這裡可以直接呼叫，因為 Worker 的 stop 有加 @Slot 並受 QThread 事件循環保護
-                # 但更保險的做法是透過 QMetaObject.invokeMethod
                 from PySide6.QtCore import QMetaObject
                 QMetaObject.invokeMethod(self.worker, "stop", Qt.AutoConnection)
             
-            # 2. 等待執行緒結束 (給予 1.5 秒緩衝)
+            # 2. 等待執行緒結束 (給予較長緩衝)
             if hasattr(self, 'ptt_thread') and self.ptt_thread.isRunning():
                 self.ptt_thread.quit()
-                if not self.ptt_thread.wait(1500):
-                    logger.warning("Worker 執行緒未在預期時間內結束，強制終止。")
-                    self.ptt_thread.terminate()
+                if not self.ptt_thread.wait(3000):
+                    logger.warning("Worker 執行緒未在預期時間內結束，跳過等待。")
             
-            # 3. 隱藏系統匣 (避免在工作列留殘影)
+            # 3. 隱藏系統匣
             if hasattr(self, 'tray_icon'):
                 self.tray_icon.hide()
             
-            logger.info("退出程序完成。")
+            logger.info("退出程序完成，關閉應用程式。")
             QApplication.quit()
-            
-            # 如果 QApplication.quit() 沒能成功殺掉進程 (有時發生在 macOS)，作為最後保險：
-            import os
-            os._exit(0)
             
         except Exception as e:
             logger.error(f"退出程式時發生異常: {e}")
-            import os
-            os._exit(1)
+            QApplication.quit()
 
 # 為了讓 QSystemTrayIcon 能找到 QStyle，需要引入 QApplication
 from PySide6.QtWidgets import QApplication, QStyle
