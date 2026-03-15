@@ -7,9 +7,8 @@ sys.path.append(os.getcwd())
 
 from unittest.mock import patch, MagicMock
 import requests
-import sys
 
-from src.uPtt.utils import gen_random_string, msg_to_mail, get_latest_pypi_version, is_running_from_pypi_install, is_update_available, is_server_running
+from src.uPtt.utils import gen_random_string, msg_to_mail, get_latest_pypi_version, is_running_from_pypi_install, is_update_available
 from src.uPtt import contant
 
 def test_gen_random_string_length():
@@ -73,13 +72,3 @@ def test_is_update_available_true(mock_get_latest):
 def test_is_update_available_false(mock_get_latest):
     mock_get_latest.return_value = "1.1.0"
     assert is_update_available() is False
-
-@patch('requests.get')
-def test_is_server_running_true(mock_get):
-    mock_get.return_value.status_code = 200
-    assert is_server_running() is True
-
-@patch('requests.get')
-def test_is_server_running_false(mock_get):
-    mock_get.side_effect = requests.exceptions.ConnectionError()
-    assert is_server_running() is False

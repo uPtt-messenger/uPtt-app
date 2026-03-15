@@ -4,9 +4,11 @@ on:
   push:
     tags:
       - 'v**'
+  workflow_dispatch: # 允許手動觸發測試與編譯
 
 jobs:
-  build:
+  # 第一階段：執行測試
+  test:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,22 +24,60 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
-          pip install pyinstaller
+          pip list # 偵錯用：確認依賴項是否已安裝
 
       - name: Run tests
         run: |
-          PYTHONPATH=src pytest tests/
+          # 這裡不加 PYTHONPATH 了，交給 pytest.ini (pythonpath = .) 處理
+          pytest tests/
 
-      - name: Build with PyInstaller
+  # 第二階段：測試通過後執行編譯
+  build:
+    needs: test # 強制要求 test job 成功後才執行
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
         run: |
-          # PYTHONPATH 確保 PyInstaller 能找到 src 目錄下的模組
-          PYTHONPATH=src pyinstaller uPtt.spec
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install nuitka zstandard
+          pip list # 偵錯用：確認編譯環境依賴項
+
+      - name: Build with Nuitka
+        run: |
+          # 編譯時 Nuitka 需要直接存取 uPtt 套件，所以設定 PYTHONPATH=src
+          PYTHONPATH=src python -m nuitka \
+            --standalone \
+            --macos-create-app-bundle \
+            --plugin-enable=pyside6 \
+            --include-package=PyPtt \
+            --include-package-data=uPtt.ui.assets \
+            --macos-app-name="uPtt" \
+            --output-dir=dist \
+            --no-pyi-file \
+            src/run_app.py
 
       - name: Package .app for distribution
         run: |
           cd dist
-          # 將 .app 目錄打包成 zip，以保留 macOS 特殊的檔案屬性與權限
-          zip -r uPtt.zip uPtt.app
+          if [ -d "uPtt.app" ]; then
+            zip -r uPtt.zip uPtt.app
+          elif [ -d "run_app.app" ]; then
+            mv run_app.app uPtt.app
+            zip -r uPtt.zip uPtt.app
+          else
+            echo "Error: .app bundle not found"
+            exit 1
+          fi
 
       - name: Create Release
         id: create_release

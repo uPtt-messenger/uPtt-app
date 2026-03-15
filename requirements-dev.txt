@@ -4,3 +4,5 @@ twine
 pytest
 pytest-cov
 pytest-asyncio
+nuitka
+zstandard

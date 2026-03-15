@@ -1,4 +1,3 @@
-import json
 import os
 import sys
 
@@ -89,63 +88,6 @@ def is_update_available():
     except Exception as e:
         print(f"Error comparing versions: {e}")
         return False
-
-def login_server(username, password, timeout=5):
-
-    try:
-        r = requests.get(f"http://127.0.0.1:{config.SERVICE_PORT}/api/login",
-        params={
-            'username': username,
-            'password': password
-        }, timeout=timeout)
-    except requests.exceptions.ReadTimeout:
-        return {
-            'error': 'Login request timed out'
-        }
-    except requests.exceptions.ConnectionError as e:
-        return {
-            'error': f'Connection error: {e}'
-        }
-
-    if r.status_code != 200:
-        return {
-            'error': f'Server error: {r.status_code}'
-        }
-    return r.json()
-
-
-def call_server_api(api:str, args:dict=None, timeout=30):
-
-    try:
-        r = requests.get(f"http://127.0.0.1:{config.SERVICE_PORT}/api/call",
-        params={
-            'api': api,
-            'args': json.dumps(args) if args is not None else None
-        }, timeout=timeout)
-    except requests.exceptions.ReadTimeout:
-        return {
-            'error': 'Server request timed out'
-        }
-    except requests.exceptions.ConnectionError as e:
-        return {
-            'error': f'Connection error: {e}'
-        }
-
-    if r.status_code != 200:
-        return {
-            'error': f'Server error: {r.status_code}'
-        }
-    return r.json()
-
-def is_server_running():
-
-    try:
-        # 縮短逾時至 1 秒，避免在啟動檢查時卡死
-        r = requests.get(f"http://127.0.0.1:{config.SERVICE_PORT}/", timeout=1)
-    except (requests.exceptions.ConnectionError, requests.exceptions.ReadTimeout):
-        return False
-
-    return r.status_code == 200
 
 
 
