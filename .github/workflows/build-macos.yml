@@ -4,11 +4,12 @@ on:
   push:
     tags:
       - 'v**'
-  workflow_dispatch: # 允許手動觸發測試與編譯
+  workflow_dispatch:
 
 jobs:
   # 第一階段：執行測試
   test:
+    # 確保在 macOS 執行以避免 Linux 缺失 .so 函式庫問題
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,16 +25,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
-          pip list # 偵錯用：確認依賴項是否已安裝
 
       - name: Run tests
         run: |
-          # 這裡不加 PYTHONPATH 了，交給 pytest.ini (pythonpath = .) 處理
-          pytest tests/
+          # 使用 QT_QPA_PLATFORM=offscreen 確保在無介面環境下能執行 Qt 測試
+          QT_QPA_PLATFORM=offscreen pytest tests/
 
   # 第二階段：測試通過後執行編譯
   build:
-    needs: test # 強制要求 test job 成功後才執行
+    needs: test
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,11 +50,9 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
           pip install nuitka zstandard
-          pip list # 偵錯用：確認編譯環境依賴項
 
       - name: Build with Nuitka
         run: |
-          # 編譯時 Nuitka 需要直接存取 uPtt 套件，所以設定 PYTHONPATH=src
           PYTHONPATH=src python -m nuitka \
             --standalone \
             --macos-create-app-bundle \
