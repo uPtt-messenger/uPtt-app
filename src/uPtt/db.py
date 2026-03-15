@@ -66,7 +66,8 @@ class DatabaseManager:
                         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                         is_read BOOLEAN DEFAULT 0,
                         is_me BOOLEAN NOT NULL,
-                        FOREIGN KEY (account_id, session_id) REFERENCES sessions (account_id, id)
+                        FOREIGN KEY (account_id, session_id) REFERENCES sessions (account_id, id),
+                        UNIQUE(account_id, session_id, sender_id, content, timestamp)
                     )
                 """)
 
@@ -160,12 +161,16 @@ class DatabaseManager:
         session_id_lower = session_id.lower()
         try:
             with self._get_connection() as conn:
-                # 1. 插入訊息
-                conn.execute("""
-                    INSERT INTO messages (account_id, session_id, sender_id, receiver_id, content, timestamp, is_me, is_read)
+                # 1. 插入訊息 (使用 INSERT OR IGNORE 防止重複)
+                cursor = conn.execute("""
+                    INSERT OR IGNORE INTO messages (account_id, session_id, sender_id, receiver_id, content, timestamp, is_me, is_read)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (acc_id_lower, session_id_lower, sender_id.lower(), receiver_id.lower(), 
                       content, timestamp, 1 if is_me else 0, 1 if is_me else 0))
+                
+                # 如果沒有新資料插入 (rows_affected == 0), 代表是重複訊息
+                if cursor.rowcount == 0:
+                    return
 
                 # 2. 更新會話摘要並強制設為可見 (收到新訊息或發送訊息時)
                 if is_me:
