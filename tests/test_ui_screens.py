@@ -44,6 +44,12 @@ def test_login_window_empty_input(qtbot):
     # Use isHidden() or check text because isVisible() can be False in offscreen mode
     assert window.error_label.text() != ""
 
+def test_login_window_version_label(qtbot):
+    from uPtt import __version__
+    window = LoginWindow()
+    qtbot.addWidget(window)
+    assert window.version_label.text() == f"v{__version__}"
+
 @patch('src.uPtt.ui.screens.PTTWorker')
 @patch('src.uPtt.ui.screens.QThread')
 def test_main_window_init(mock_qthread, mock_worker, qtbot, ptt_service_mock):
@@ -85,3 +91,62 @@ def test_on_login_result_failure(mock_qthread, mock_worker, qtbot, ptt_service_m
         # Should stay on login screen
         assert window.central_stack.currentIndex() == 0
         assert window.login_screen.error_label.text() == "Invalid Password"
+
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_main_window_close_chat(mock_qthread, mock_worker, qtbot, ptt_service_mock):
+    with patch('os.path.exists', return_value=True):
+        ptt_service_mock.ptt_id = "MyID"
+        window = MainWindow(ptt_service_mock)
+        qtbot.addWidget(window)
+        
+        # Add a contact
+        window.add_or_select_contact("TestUser")
+        assert window.contact_list.count() == 1
+        assert window.current_chat_id == "testuser"
+        
+        # Close the chat
+        window.close_current_chat()
+        
+        # Should be removed from list and current_chat_id reset
+        assert window.contact_list.count() == 0
+        assert window.current_chat_id is None
+
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_main_window_block_user(mock_qthread, mock_worker, qtbot, ptt_service_mock):
+    with patch('os.path.exists', return_value=True):
+        ptt_service_mock.ptt_id = "MyID"
+        window = MainWindow(ptt_service_mock)
+        qtbot.addWidget(window)
+        
+        window.add_or_select_contact("BadUser")
+        assert "baduser" not in window.blocked_users
+        
+        # Block the user (MOCK QMessageBox to auto-accept if any)
+        window.handle_contact_action("BadUser", "BLOCK")
+        
+        assert "baduser" in window.blocked_users
+        assert window.contact_list.count() == 0
+
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_on_new_message_blocked(mock_qthread, mock_worker, qtbot, ptt_service_mock):
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock)
+        qtbot.addWidget(window)
+        
+        window.blocked_users.add("baduser")
+        
+        # Simulate new message from blocked user
+        msg_data = {
+            'sender': 'BadUser',
+            'text': 'Hello',
+            'time': '12:00',
+            'full_author': 'BadUser (BadGuy)'
+        }
+        window.on_new_message(msg_data)
+        
+        # Should NOT be added to history or list
+        assert "baduser" not in window.chat_histories
+        assert window.contact_list.count() == 0

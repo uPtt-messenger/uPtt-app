@@ -98,6 +98,11 @@ class LoginWindow(QWidget):
         self.error_label.setObjectName("error-label")
         self.error_label.setAlignment(Qt.AlignCenter)
         self.error_label.hide()
+
+        self.version_label = QLabel(f"v{__version__}")
+        self.version_label.setObjectName("version-label")
+        self.version_label.setAlignment(Qt.AlignCenter)
+        self.version_label.setStyleSheet("color: #484F58; font-size: 11px; margin-top: 10px;")
         
         layout.addWidget(self.logo_label)
         layout.addSpacing(10)
@@ -105,6 +110,7 @@ class LoginWindow(QWidget):
         layout.addWidget(self.password_input)
         layout.addWidget(self.error_label)
         layout.addWidget(self.login_btn)
+        layout.addWidget(self.version_label)
 
         main_layout.addWidget(container)
         
@@ -137,7 +143,7 @@ class MainWindow(QMainWindow):
     send_requested = Signal(str, str)
     user_info_requested = Signal(str)
 
-    def __init__(self, ptt_service: UPttService):
+    def __init__(self, ptt_service: UPttService, db):
         super().__init__()
         self.setWindowTitle("uPtt")
         
@@ -149,9 +155,11 @@ class MainWindow(QMainWindow):
         # 初始大小設為適合登入視窗的大小
         self.setFixedSize(500, 550)
         self.ptt_service = ptt_service
+        self.db = db
         self.current_chat_id = None
         self.chat_histories: Dict[str, List[Dict]] = {}
         self.unread_counts: Dict[str, int] = {}
+        self.blocked_users: set = set()
         
         # 初始背景執行緒
         self.init_worker()
@@ -164,7 +172,7 @@ class MainWindow(QMainWindow):
     def init_worker(self):
         """啟動 PTT 背景 Worker"""
         self.ptt_thread = QThread()
-        self.worker = PTTWorker(self.ptt_service)
+        self.worker = PTTWorker(self.ptt_service, self.db)
         self.worker.moveToThread(self.ptt_thread)
         
         # 連接發信訊號 (跨執行緒會自動排程)
@@ -254,6 +262,10 @@ class MainWindow(QMainWindow):
         self.contact_list = QListWidget()
         self.contact_list.setObjectName("contact-list")
         self.contact_list.itemClicked.connect(self.on_contact_selected)
+        
+        # 開啟右鍵選單
+        self.contact_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.contact_list.customContextMenuRequested.connect(self.show_contact_context_menu)
         
         sidebar_vbox.addLayout(sidebar_header)
         sidebar_vbox.addWidget(self.contact_list)
@@ -438,9 +450,41 @@ class MainWindow(QMainWindow):
             self.central_stack.setCurrentIndex(1)
             self.setWindowTitle(f"uPtt - {corrected_id}")
             self.user_id_label.setText(f"登入帳號: {corrected_id}") # 更新目前使用者
+            
+            # --- 從資料庫載入歷史對話清單 ---
+            self.load_sessions_from_db()
+            
             self.message_edit.setFocus() # 登入後自動聚焦輸入框
         else:
             self.login_screen.show_error(message)
+
+    def load_sessions_from_db(self):
+        """從資料庫載入所有可見的歷史對話。"""
+        current_acc = self.ptt_service.ptt_id
+        sessions = self.db.get_all_sessions(current_acc)
+        
+        # 暫時關閉信號以加速加載
+        self.contact_list.blockSignals(True)
+        for s in sessions:
+            # 建立清單項目
+            item = QListWidgetItem(self.contact_list)
+            item.setSizeHint(QSize(0, 70))
+            widget = ContactItem(
+                ptt_id=s['id'], 
+                nickname=s['nickname'] or "", 
+                unread_count=s['unread_count'] or 0
+            )
+            # 更新顯示大小寫
+            widget.update_info(s['display_id'], s['nickname'] or "")
+            self.contact_list.addItem(item)
+            self.contact_list.setItemWidget(item, widget)
+            
+            # 初始化本地快取
+            self.chat_histories[s['id']] = []
+            self.unread_counts[s['id']] = s['unread_count'] or 0
+            
+        self.contact_list.blockSignals(False)
+        logger.info(f"從資料庫載入 {len(sessions)} 個對話會話")
 
     def add_or_select_contact(self, ptt_id, nickname=""):
         ptt_id_lower = ptt_id.lower()
@@ -485,8 +529,25 @@ class MainWindow(QMainWindow):
     def on_contact_selected(self, item):
         widget = self.contact_list.itemWidget(item)
         self.current_chat_id = widget.ptt_id
+        current_acc = self.ptt_service.ptt_id
+        
+        # 標記已讀並重置計數
+        self.db.mark_as_read(current_acc, self.current_chat_id)
         self.unread_counts[self.current_chat_id] = 0
         widget.set_unread(0)
+        
+        # 從資料庫載入歷史訊息
+        messages = self.db.get_messages(current_acc, self.current_chat_id)
+        self.chat_histories[self.current_chat_id] = [
+            {
+                'text': m['content'],
+                'time': datetime.fromisoformat(m['timestamp']).strftime("%H:%M") if isinstance(m['timestamp'], str) else m['timestamp'].strftime("%H:%M"),
+                'timestamp': datetime.fromisoformat(m['timestamp']) if isinstance(m['timestamp'], str) else m['timestamp'],
+                'is_me': bool(m['is_me'])
+            }
+            for m in messages
+        ]
+
         self.refresh_chat_display()
         self.message_edit.setFocus()
         
@@ -543,6 +604,11 @@ class MainWindow(QMainWindow):
         sender_id_display = data['sender']
         sender = sender_id_display.lower()
         
+        # 檢查是否在封鎖名單
+        if sender in self.blocked_users:
+            logger.info(f"忽略來自已封鎖使用者 '{sender}' 的訊息")
+            return
+
         # 從 full_author 提取暱稱，例如 "CodingMan (小明)"
         full_author = data.get('full_author', '')
         nickname = ""
@@ -611,9 +677,90 @@ class MainWindow(QMainWindow):
 
     def close_current_chat(self):
         if self.current_chat_id:
-            # 簡單處理，這裡可以加入確認對話框
-            self.current_chat_id = None
-            self.refresh_chat_display()
+            self.handle_contact_action(self.current_chat_id, "CLOSE")
+
+    def handle_contact_action(self, ptt_id: str, action_type: str):
+        """
+        處理對話動作：CLOSE (關閉)、BLOCK (封鎖)、DELETE (刪除)
+        """
+        ptt_id_lower = ptt_id.lower()
+        current_acc = self.ptt_service.ptt_id
+        logger.info(f"執行對話動作: {action_type} -> {ptt_id_lower}")
+
+        if action_type == "BLOCK":
+            self.blocked_users.add(ptt_id_lower)
+            # 封鎖後也隱藏對話
+            self.db.hide_session(current_acc, ptt_id_lower)
+            self.remove_contact_from_sidebar(ptt_id_lower)
+            QMessageBox.information(self, "已封鎖", f"已將使用者 '{ptt_id}' 加入封鎖名單。")
+            
+        elif action_type == "DELETE":
+            confirm = QMessageBox.question(
+                self, "確認刪除", f"確定要刪除與 '{ptt_id}' 的對話及所有紀錄嗎？\n(這將從本地資料庫徹底移除)",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if confirm == QMessageBox.Yes:
+                # 從資料庫刪除 (需實作或直接下 SQL)
+                try:
+                    with self.db._get_connection() as conn:
+                        conn.execute("DELETE FROM messages WHERE account_id = ? AND session_id = ?", (current_acc, ptt_id_lower))
+                        conn.execute("DELETE FROM sessions WHERE account_id = ? AND id = ?", (current_acc, ptt_id_lower))
+                        conn.commit()
+                except Exception as e:
+                    logger.error(f"資料庫刪除失敗: {e}")
+
+                if ptt_id_lower in self.chat_histories:
+                    del self.chat_histories[ptt_id_lower]
+                if ptt_id_lower in self.unread_counts:
+                    del self.unread_counts[ptt_id_lower]
+                self.remove_contact_from_sidebar(ptt_id_lower)
+                logger.info(f"已從資料庫與介面刪除對話與紀錄: {ptt_id_lower}")
+                
+        elif action_type == "CLOSE":
+            # 僅隱藏，不刪除訊息
+            self.db.hide_session(current_acc, ptt_id_lower)
+            self.remove_contact_from_sidebar(ptt_id_lower)
+
+    def remove_contact_from_sidebar(self, ptt_id_lower: str):
+        """僅從側邊欄清單中移除指定 ID"""
+        for i in range(self.contact_list.count()):
+            item = self.contact_list.item(i)
+            widget = self.contact_list.itemWidget(item)
+            if widget.ptt_id == ptt_id_lower:
+                row = self.contact_list.row(item)
+                self.contact_list.takeItem(row)
+                
+                # 如果正在與此人對話，清空對話顯示
+                if self.current_chat_id == ptt_id_lower:
+                    self.current_chat_id = None
+                    self.refresh_chat_display()
+                    self.setWindowTitle(f"uPtt - {self.ptt_service.ptt_id}")
+                break
+
+    def show_contact_context_menu(self, pos):
+        """顯示聯絡人清單的右鍵選單"""
+        item = self.contact_list.itemAt(pos)
+        if not item:
+            return
+            
+        widget = self.contact_list.itemWidget(item)
+        menu = QMenu(self)
+        
+        close_action = QAction("關閉對話", self)
+        close_action.triggered.connect(lambda: self.handle_contact_action(widget.ptt_id, "CLOSE"))
+        
+        delete_action = QAction("刪除對話", self)
+        delete_action.triggered.connect(lambda: self.handle_contact_action(widget.ptt_id, "DELETE"))
+        
+        block_action = QAction("封鎖使用者", self)
+        block_action.triggered.connect(lambda: self.handle_contact_action(widget.ptt_id, "BLOCK"))
+        
+        menu.addAction(close_action)
+        menu.addAction(delete_action)
+        menu.addSeparator()
+        menu.addAction(block_action)
+        
+        menu.exec(self.contact_list.mapToGlobal(pos))
 
     def fully_quit(self):
         """徹底退出程式，確保 PTT 登出與執行緒釋放"""

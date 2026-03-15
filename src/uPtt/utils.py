@@ -20,6 +20,22 @@ WEEK = 7 * DAY
 
 
 
+def get_app_data_dir():
+    """取得跨平台標準的應用程式資料夾路徑 (macOS, Windows, Linux)。"""
+    app_name = "uPtt"
+    if sys.platform == "win32":
+        path = os.path.join(os.environ.get("APPDATA"), app_name)
+    elif sys.platform == "darwin":
+        path = os.path.expanduser(f"~/Library/Application Support/{app_name}")
+    else:
+        path = os.path.expanduser(f"~/.local/share/{app_name}")
+    
+    # 確保資料夾存在
+    if not os.path.exists(path):
+        os.makedirs(path, exist_ok=True)
+    return path
+
+
 def gen_random_string(length=10):
     """Generate a random string of fixed length."""
     import random

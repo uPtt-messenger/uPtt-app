@@ -7,7 +7,9 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
 from .ptt import UPttService
+from .db import DatabaseManager
 from .ui.screens import MainWindow
+from . import utils
 
 
 # --- 日誌設定 ---
@@ -79,11 +81,16 @@ def main():
     else:
         logger.info("除錯模式已啟用，略過單一實例檢查。")
 
+    # 初始化資料庫 (存放在系統標準資料夾)
+    db_dir = utils.get_app_data_dir()
+    db_path = os.path.join(db_dir, "uptt_data.db")
+    db = DatabaseManager(db_path)
+
     # 初始化 PTT 服務實例
     ptt_service = UPttService()
 
-    # 建立主視窗
-    main_window = MainWindow(ptt_service)
+    # 建立主視窗，將 db 傳入
+    main_window = MainWindow(ptt_service, db)
     main_window.show()
 
     # 當新實例嘗試啟動時，會連線到此 server，我們藉此將主視窗推至最前

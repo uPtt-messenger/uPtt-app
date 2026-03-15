@@ -23,9 +23,10 @@ class PTTWorker(QObject):
     user_info_error = Signal(str, str)  # (ID, 錯誤訊息)
     status_updated = Signal(str)
 
-    def __init__(self, ptt_service: UPttService):
+    def __init__(self, ptt_service: UPttService, db):
         super().__init__()
         self.ptt = ptt_service
+        self.db = db
         self.polling_timer: Optional[QTimer] = None
         self.last_mail_time: Optional[datetime] = None
         self.is_first_polling = True
@@ -36,7 +37,17 @@ class PTTWorker(QObject):
         try:
             success = self.ptt.login(username, password)
             if success:
-                # 這裡的 self.ptt.ptt_id 已經是修正過後的大小寫
+                # 取得登入者的資訊並存入資料庫
+                try:
+                    user_info = self.ptt.get_user_info(username)
+                    self.db.upsert_account(
+                        ptt_id=user_info['ptt_id'], 
+                        display_id=user_info['ptt_id'],
+                        nickname=user_info['nickname']
+                    )
+                except Exception as e:
+                    logger.warning(f"登入後更新帳號資訊失敗: {e}")
+
                 self.login_result.emit(True, "登入成功")
                 # 登入成功後自動開始輪詢
                 self.start_polling()
@@ -105,6 +116,21 @@ class PTTWorker(QObject):
                     end = content.rfind(contant.PTT_MSG_DIVISION_LINE)
                     if start < end:
                         text = content[start:end].strip()
+                        # --- 存入資料庫 (加入 account_id 隔離) ---
+                        current_user = self.ptt.ptt_id
+                        # 1. 確保會話存在
+                        self.db.upsert_session(account_id=current_user, display_id=mail_data['sender_id'])
+                        # 2. 儲存訊息
+                        self.db.save_message(
+                            account_id=current_user,
+                            session_id=mail_data['sender_id'],
+                            sender_id=mail_data['sender_id'],
+                            receiver_id=current_user,
+                            content=text,
+                            timestamp=mail_data['time'],
+                            is_me=False
+                        )
+
                         self.new_message_received.emit({
                             'sender': mail_data['sender_id'],
                             'text': text,
@@ -144,6 +170,21 @@ class PTTWorker(QObject):
                 'backup': False
             })
 
+            # --- 發送成功後存入資料庫 (加入 account_id 隔離) ---
+            current_user = self.ptt.ptt_id
+            # 1. 確保會話存在
+            self.db.upsert_session(account_id=current_user, display_id=receiver_id)
+            # 2. 儲存訊息
+            self.db.save_message(
+                account_id=current_user,
+                session_id=receiver_id,
+                sender_id=current_user,
+                receiver_id=receiver_id,
+                content=text,
+                timestamp=datetime.now(),
+                is_me=True
+            )
+
             logger.info(f"訊息已成功發送至 {receiver_id}")
             self.send_result.emit(True, "")
         except Exception as e:
@@ -157,6 +198,13 @@ class PTTWorker(QObject):
             logger.info(f"--- 開始查詢使用者資訊: {ptt_id} ---")
             info = self.ptt.get_user_info(ptt_id)
             
+            # --- 更新資料庫中的暱稱與顯示 ID (加入 account_id 隔離) ---
+            self.db.upsert_session(
+                account_id=self.ptt.ptt_id, 
+                display_id=info['ptt_id'], 
+                nickname=info['nickname']
+            )
+
             self.user_info_result.emit({
                 'ptt_id': info['ptt_id'],
                 'nickname': info['nickname']
