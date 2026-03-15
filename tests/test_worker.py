@@ -15,8 +15,12 @@ def ptt_service_mock():
     return service
 
 @pytest.fixture
-def worker(ptt_service_mock):
-    return PTTWorker(ptt_service_mock)
+def db_mock():
+    return MagicMock()
+
+@pytest.fixture
+def worker(ptt_service_mock, db_mock):
+    return PTTWorker(ptt_service_mock, db_mock)
 
 def test_do_login_success(qtbot, worker, ptt_service_mock):
     ptt_service_mock.login.return_value = True

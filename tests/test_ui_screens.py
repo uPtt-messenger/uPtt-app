@@ -14,6 +14,10 @@ from src.uPtt.worker import PTTWorker
 def ptt_service_mock():
     return MagicMock(spec=UPttService)
 
+@pytest.fixture
+def db_mock():
+    return MagicMock()
+
 def test_login_window_emit_signal(qtbot):
     window = LoginWindow()
     qtbot.addWidget(window)
@@ -52,10 +56,10 @@ def test_login_window_version_label(qtbot):
 
 @patch('src.uPtt.ui.screens.PTTWorker')
 @patch('src.uPtt.ui.screens.QThread')
-def test_main_window_init(mock_qthread, mock_worker, qtbot, ptt_service_mock):
+def test_main_window_init(mock_qthread, mock_worker, qtbot, ptt_service_mock, db_mock):
     # Mock assets to avoid FileNotFoundError
     with patch('os.path.exists', return_value=True):
-        window = MainWindow(ptt_service_mock)
+        window = MainWindow(ptt_service_mock, db_mock)
         qtbot.addWidget(window)
         
         assert window.windowTitle() == "uPtt"
@@ -65,9 +69,9 @@ def test_main_window_init(mock_qthread, mock_worker, qtbot, ptt_service_mock):
 
 @patch('src.uPtt.ui.screens.PTTWorker')
 @patch('src.uPtt.ui.screens.QThread')
-def test_on_login_result_success(mock_qthread, mock_worker, qtbot, ptt_service_mock):
+def test_on_login_result_success(mock_qthread, mock_worker, qtbot, ptt_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
-        window = MainWindow(ptt_service_mock)
+        window = MainWindow(ptt_service_mock, db_mock)
         qtbot.addWidget(window)
         
         # Simulate successful login signal from worker
@@ -80,9 +84,9 @@ def test_on_login_result_success(mock_qthread, mock_worker, qtbot, ptt_service_m
 
 @patch('src.uPtt.ui.screens.PTTWorker')
 @patch('src.uPtt.ui.screens.QThread')
-def test_on_login_result_failure(mock_qthread, mock_worker, qtbot, ptt_service_mock):
+def test_on_login_result_failure(mock_qthread, mock_worker, qtbot, ptt_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
-        window = MainWindow(ptt_service_mock)
+        window = MainWindow(ptt_service_mock, db_mock)
         qtbot.addWidget(window)
         
         # Simulate failed login
@@ -94,10 +98,10 @@ def test_on_login_result_failure(mock_qthread, mock_worker, qtbot, ptt_service_m
 
 @patch('src.uPtt.ui.screens.PTTWorker')
 @patch('src.uPtt.ui.screens.QThread')
-def test_main_window_close_chat(mock_qthread, mock_worker, qtbot, ptt_service_mock):
+def test_main_window_close_chat(mock_qthread, mock_worker, qtbot, ptt_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         ptt_service_mock.ptt_id = "MyID"
-        window = MainWindow(ptt_service_mock)
+        window = MainWindow(ptt_service_mock, db_mock)
         qtbot.addWidget(window)
         
         # Add a contact
@@ -112,12 +116,13 @@ def test_main_window_close_chat(mock_qthread, mock_worker, qtbot, ptt_service_mo
         assert window.contact_list.count() == 0
         assert window.current_chat_id is None
 
+@patch('src.uPtt.ui.screens.QMessageBox')
 @patch('src.uPtt.ui.screens.PTTWorker')
 @patch('src.uPtt.ui.screens.QThread')
-def test_main_window_block_user(mock_qthread, mock_worker, qtbot, ptt_service_mock):
+def test_main_window_block_user(mock_qthread, mock_worker, mock_qmessagebox, qtbot, ptt_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         ptt_service_mock.ptt_id = "MyID"
-        window = MainWindow(ptt_service_mock)
+        window = MainWindow(ptt_service_mock, db_mock)
         qtbot.addWidget(window)
         
         window.add_or_select_contact("BadUser")
@@ -128,12 +133,13 @@ def test_main_window_block_user(mock_qthread, mock_worker, qtbot, ptt_service_mo
         
         assert "baduser" in window.blocked_users
         assert window.contact_list.count() == 0
+        mock_qmessagebox.information.assert_called_once()
 
 @patch('src.uPtt.ui.screens.PTTWorker')
 @patch('src.uPtt.ui.screens.QThread')
-def test_on_new_message_blocked(mock_qthread, mock_worker, qtbot, ptt_service_mock):
+def test_on_new_message_blocked(mock_qthread, mock_worker, qtbot, ptt_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
-        window = MainWindow(ptt_service_mock)
+        window = MainWindow(ptt_service_mock, db_mock)
         qtbot.addWidget(window)
         
         window.blocked_users.add("baduser")
