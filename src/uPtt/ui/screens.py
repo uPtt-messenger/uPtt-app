@@ -172,12 +172,12 @@ class MainWindow(QMainWindow):
         self.unread_counts: Dict[str, int] = {}
         self.blocked_users: set = set()
         
-        # 初始背景執行緒
-        self.init_worker()
+        # 初始化 UI 與背景執行緒
         self.init_ui()
+        self.init_worker()
         self.init_tray()
         self.init_shortcuts()
-        
+
         self.setStyleSheet(MAIN_STYLE)
 
     def init_worker(self):
@@ -197,7 +197,15 @@ class MainWindow(QMainWindow):
         # 連接發信訊號 (跨執行緒會自動排程)
         self.send_requested.connect(self.worker.send_message)
         self.user_info_requested.connect(self.worker.get_user_info)
-        
+
+        # 這裡也改用訊號連接，確保在背景執行緒登入 (且在登出重啟 Worker 後能重新連向新實例)
+        if hasattr(self, "login_screen"):
+            try:
+                self.login_screen.login_requested.disconnect()
+            except Exception:
+                pass
+            self.login_screen.login_requested.connect(self.worker.do_login)
+
         # 連接 Worker 訊號
         self.worker.new_message_received.connect(self.on_new_message)
         self.worker.send_result.connect(self.on_send_result)
@@ -216,8 +224,6 @@ class MainWindow(QMainWindow):
         
         # 1. 登入畫面
         self.login_screen = LoginWindow()
-        # 這裡也改用訊號連接，確保在背景執行緒登入
-        self.login_screen.login_requested.connect(self.worker.do_login)
         
         # 2. 聊天畫面 (使用 Splitter)
         self.chat_screen = QWidget()
