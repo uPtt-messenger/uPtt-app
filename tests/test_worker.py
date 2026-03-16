@@ -69,12 +69,9 @@ def test_poll_new_mails_parsing(qtbot, worker, ptt_service_mock, db_mock):
     # Mock newest index in search
     def call_side_effect(api, args=None):
         if api == 'get_newest_index':
-            # Check if search_list is used
-            if args and 'search_list' in args:
-                return 1 # Only 1 mail in search results
-            return 100
+            return 5
         if api == 'get_mail':
-            if args and args.get('index') == 1: # 1st mail in search
+            if args and args.get('index') == 1:
                 return {
                     PyPtt.MailField.title: contant.PTT_MSG_TITLE,
                     PyPtt.MailField.author: "SenderID (Nick)",
@@ -97,9 +94,8 @@ def test_poll_new_mails_parsing(qtbot, worker, ptt_service_mock, db_mock):
     assert blocker.args[0]['sender'] == "SenderID"
     assert blocker.args[0]['text'] == "Test Message Content"
     assert blocker.args[0]['time'] == "10:00"
-    # newest implementation uses reversed(mails_to_emit) and emits, 
-    # so we should check if del_mail was called with search_list
-    ptt_service_mock.call.assert_any_call('del_mail', {'index': 1, 'search_list': [(PyPtt.SearchType.KEYWORD, contant.PTT_MSG_TITLE)]})
+    # Current implementation calls del_mail with just the index
+    ptt_service_mock.call.assert_any_call('del_mail', {'index': 1})
 
 def test_stop_worker(worker, ptt_service_mock):
     worker.polling_timer = MagicMock(spec=QTimer)
