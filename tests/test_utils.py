@@ -28,7 +28,15 @@ def test_msg_to_mail():
     ptt_id = "testuser"
     msg = "Hello, this is a test message."
     
-    expected_mail = f"""{ptt_id} 想要使用 {app_name} 跟你聯繫！\n\n想要回覆請至以下網址下載回覆訊息！\n\n{contant.DOWNLOAD_URL}\n\n{contant.PTT_MSG_DIVISION_LINE}\n{msg}\n{contant.PTT_MSG_DIVISION_LINE}\n"""
+    expected_mail = f"""{ptt_id} 想要使用 {app_name} 跟你聯繫！
+
+回覆請至以下網址下載 {app_name} 回覆訊息！
+{contant.DOWNLOAD_URL}
+
+{contant.PTT_MSG_DIVISION_LINE}
+{msg}
+{contant.PTT_MSG_DIVISION_LINE}
+"""
     
     result = msg_to_mail(app_name, ptt_id, msg)
     assert result == expected_mail
