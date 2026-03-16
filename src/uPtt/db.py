@@ -156,7 +156,7 @@ class DatabaseManager:
     # --- 訊息相關 (需傳入 account_id) ---
 
     def save_message(self, account_id: str, session_id: str, sender_id: str, 
-                     receiver_id: str, content: str, timestamp: datetime, is_me: bool):
+                     receiver_id: str, content: str, timestamp: datetime, is_me: bool) -> bool:
         acc_id_lower = account_id.lower()
         session_id_lower = session_id.lower()
         try:
@@ -170,7 +170,7 @@ class DatabaseManager:
                 
                 # 如果沒有新資料插入 (rows_affected == 0), 代表是重複訊息
                 if cursor.rowcount == 0:
-                    return
+                    return False
 
                 # 2. 更新會話摘要並強制設為可見 (收到新訊息或發送訊息時)
                 if is_me:
@@ -192,8 +192,10 @@ class DatabaseManager:
                     """, (content, timestamp, acc_id_lower, session_id_lower))
                 
                 conn.commit()
+                return True
         except sqlite3.Error as e:
             logger.error(f"儲存訊息失敗：{e}")
+            return False
 
     def get_messages(self, account_id: str, session_id: str, limit: int = 50) -> List[Dict[str, Any]]:
         """取得特定帳號與特定對象的歷史訊息。"""

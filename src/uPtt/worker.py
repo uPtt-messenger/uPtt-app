@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 import PyPtt
@@ -29,6 +29,13 @@ class PTTWorker(QObject):
         self.db = db
         self.polling_timer: Optional[QTimer] = None
         self.last_mail_time: Optional[datetime] = None
+        # 從資料庫載入上次輪詢的時間，實現持久化
+        last_poll_str = self.db.get_config('LAST_POLL_TIME')
+        try:
+            self.last_poll_time = datetime.fromisoformat(last_poll_str) if last_poll_str else None
+        except (ValueError, TypeError):
+            self.last_poll_time = None
+            
         self.is_first_polling = True
 
     @Slot(str, str)
@@ -67,87 +74,113 @@ class PTTWorker(QObject):
             logger.info(f"開始輪詢新信件，間隔: {interval / 1000}s")
 
     def _poll_new_mails(self):
-        """輪詢新信件的內部邏輯"""
+        """
+        輪詢新信件的內部邏輯 (超級優化版：帶有時間截止點)
+        除了第一次掃描，後續僅檢查 10-15 秒內的信件，看到舊信即停止。
+        """
         try:
-            newest_idx = self.ptt.call('get_newest_index', {'index_type': PyPtt.NewIndex.MAIL})
-            if not newest_idx:
+            # 記錄本次輪詢開始的時間
+            current_poll_start = datetime.now()
+            
+            # 1. 取得信箱總數
+            total_newest = self.ptt.call('get_newest_index', {'index_type': PyPtt.NewIndex.MAIL})
+            
+            if not total_newest or total_newest == 0:
+                self.last_poll_time = current_poll_start
                 return
 
-            # 初次啟動檢查較多封數
-            lookback = 50 if self.is_first_polling else 10
+            # 2. 定義掃描上限 (防呆用：初次啟動可掃描較多封數以補齊離線訊息)
+            scan_limit = 200 if self.is_first_polling else 50
+            
+            # 3. 建立停止時間 (不論是否為初次啟動，只要有紀錄就啟用截止點)
+            stop_time = None
+            if self.last_poll_time:
+                # 緩衝 10 秒以應對 PTT 伺服器時間誤差
+                stop_time = self.last_poll_time - timedelta(seconds=10)
+            
             self.is_first_polling = False
+            
+            start_idx = total_newest
+            end_idx = max(1, total_newest - scan_limit + 1)
+            
+            logger.debug(f"輪詢掃描中: 總數={total_newest}, 截止時間={stop_time}")
 
-            mails_to_process = []
-            for mail_idx in range(max(1, newest_idx - lookback), newest_idx + 1):
+            mails_to_emit = []
+            
+            # 4. 倒序掃描
+            for mail_idx in range(start_idx, end_idx - 1, -1):
                 mail = self.ptt.call('get_mail', {'index': mail_idx})
-                # 只處理符合特定標題的訊息信 (uPtt 專用)
-                if not mail or mail.get(PyPtt.MailField.title) != contant.PTT_MSG_TITLE:
+                
+                if not mail:
                     continue
 
+                # 取得信件日期
+                msg_date_str = mail.get(PyPtt.MailField.date)
+                try:
+                    mail_time = datetime.strptime(msg_date_str, '%a %b %d %H:%M:%S %Y')
+                except (ValueError, TypeError):
+                    mail_time = datetime.now()
+
+                # --- 核心優化：提早結束判定 ---
+                if stop_time and mail_time < stop_time:
+                    logger.debug(f"已進入舊信區域 (索引 {mail_idx}, 時間 {mail_time}), 停止本次掃描。")
+                    break
+
+                # 本地端過濾標題
+                raw_title = mail.get(PyPtt.MailField.title)
+                title = str(raw_title) if raw_title is not None else ""
+                
+                if contant.PTT_MSG_TITLE not in title:
+                    # 普通信件保留
+                    continue
+
+                # 處理 uPtt 訊息
                 full_author = mail[PyPtt.MailField.author].strip()
                 sender_id = full_author.split(' ')[0]
-
-                # --- 新增過濾邏輯：忽略自己寄出的備份信 ---
-                if self.ptt.ptt_id and sender_id.lower() == self.ptt.ptt_id.lower():
-                    # 如果是自己的備份信，直接刪除但不處理
-                    self.ptt.call('del_mail', {'index': mail_idx})
-                    continue
-
-                try:
-                    msg_time = datetime.strptime(mail[PyPtt.MailField.date], '%a %b %d %H:%M:%S %Y')
-                except ValueError:
-                    continue
-                content = mail[PyPtt.MailField.content]
-
-                mails_to_process.append({
-                    'index': mail_idx,
-                    'sender_id': sender_id,
-                    'full_author': full_author,
-                    'content': content,
-                    'time': msg_time
-                })
-
-            # 依序處理訊息並發射訊號
-            for mail_data in mails_to_process:
-                content = mail_data['content']
-                try:
-                    # 擷取分隔線中間的內容
+                is_backup = (self.ptt.ptt_id and sender_id.lower() == self.ptt.ptt_id.lower())
+                
+                if not is_backup:
+                    content = mail[PyPtt.MailField.content]
                     start = content.find(contant.PTT_MSG_DIVISION_LINE) + len(contant.PTT_MSG_DIVISION_LINE)
                     end = content.rfind(contant.PTT_MSG_DIVISION_LINE)
-                    if start < end:
+                    
+                    if start >= 0 and end > start:
                         text = content[start:end].strip()
-                        # --- 存入資料庫 (加入 account_id 隔離) ---
                         current_user = self.ptt.ptt_id
-                        # 1. 確保會話存在
-                        self.db.upsert_session(account_id=current_user, display_id=mail_data['sender_id'])
-                        # 2. 儲存訊息
-                        self.db.save_message(
+                        self.db.upsert_session(account_id=current_user, display_id=sender_id)
+                        is_new = self.db.save_message(
                             account_id=current_user,
-                            session_id=mail_data['sender_id'],
-                            sender_id=mail_data['sender_id'],
+                            session_id=sender_id,
+                            sender_id=sender_id,
                             receiver_id=current_user,
                             content=text,
-                            timestamp=mail_data['time'],
+                            timestamp=mail_time,
                             is_me=False
                         )
 
-                        self.new_message_received.emit({
-                            'sender': mail_data['sender_id'],
-                            'text': text,
-                            'time': mail_data['time'].strftime("%H:%M"),
-                            'full_author': mail_data['full_author'],
-                            'timestamp': mail_data['time']
-                        })
-                    self.last_mail_time = mail_data['time']
-                except Exception as e:
-                    logger.error(f"解析信件失敗: {e}")
+                        if is_new:
+                            mails_to_emit.append({
+                                'sender': sender_id,
+                                'text': text,
+                                'time': mail_time.strftime("%H:%M"),
+                                'full_author': full_author,
+                                'timestamp': mail_time
+                            })
+                
+                # 處理完即刪除
+                self.ptt.call('del_mail', {'index': mail_idx})
 
-            # 處理完後刪除信件 (避免 PTT 空間爆滿)
-            for mail_data in sorted(mails_to_process, key=lambda x: x['index'], reverse=True):
-                self.ptt.call('del_mail', {'index': mail_data['index']})
+            # 5. 更新本次輪詢成功結束的時間並存入資料庫
+            self.last_poll_time = current_poll_start
+            self.db.set_config('LAST_POLL_TIME', current_poll_start.isoformat())
+
+            # 6. 發射訊號
+            for mail_data in reversed(mails_to_emit):
+                self.new_message_received.emit(mail_data)
+                self.last_mail_time = mail_data['timestamp']
 
         except Exception as e:
-            logger.error(f"輪詢發生錯誤: {e}")
+            logger.exception(f"輪詢信件發生錯誤: {e}")
             self.status_updated.emit(f"輪詢錯誤: {e}")
 
     @Slot(str, str)
