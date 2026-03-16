@@ -182,6 +182,14 @@ class MainWindow(QMainWindow):
 
     def init_worker(self):
         """啟動 PTT 背景 Worker"""
+        # 確保清理舊的訊號連線 (避免重複)
+        try:
+            self.send_requested.disconnect()
+            self.user_info_requested.disconnect()
+        except Exception:
+            # 如果尚未連線過會噴錯，這裡直接略過
+            pass
+
         self.ptt_thread = QThread()
         self.worker = PTTWorker(self.ptt_service, self.db)
         self.worker.moveToThread(self.ptt_thread)
@@ -353,10 +361,13 @@ class MainWindow(QMainWindow):
         tray_menu = QMenu()
         show_action = QAction("顯示聊天", self)
         show_action.triggered.connect(self.showNormal)
+        logout_action = QAction("登出", self)
+        logout_action.triggered.connect(self.handle_logout)
         quit_action = QAction("關閉", self)
         quit_action.triggered.connect(self.fully_quit)
         
         tray_menu.addAction(show_action)
+        tray_menu.addAction(logout_action)
         tray_menu.addSeparator()
         tray_menu.addAction(quit_action)
         
@@ -772,6 +783,62 @@ class MainWindow(QMainWindow):
         menu.addAction(block_action)
         
         menu.exec(self.contact_list.mapToGlobal(pos))
+
+    def handle_logout(self):
+        """登出並回到登入畫面"""
+        confirm = QMessageBox.question(
+            self, "確認登出", "確定要登出目前的帳號嗎？",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if confirm == QMessageBox.No:
+            return
+
+        logger.info("執行登出程序...")
+        try:
+            # 1. 停止目前的 Worker 與執行緒
+            if hasattr(self, 'worker'):
+                # 停止輪詢與連線
+                from PySide6.QtCore import QMetaObject
+                QMetaObject.invokeMethod(self.worker, "stop", Qt.AutoConnection)
+            
+            if hasattr(self, 'ptt_thread') and self.ptt_thread.isRunning():
+                self.ptt_thread.quit()
+                if not self.ptt_thread.wait(2000):
+                    self.ptt_thread.terminate()
+
+            # 2. 徹底重設 PTT 服務實例 (重啟 PyPtt.Service)
+            self.ptt_service.close()
+            self.ptt_service.__init__()
+
+            # 3. 清除 UI 狀態
+            self.contact_list.clear()
+            self.chat_histories.clear()
+            self.unread_counts.clear()
+            self.current_chat_id = None
+            self.refresh_chat_display()
+            self.user_id_label.setText("未登入")
+            self.setWindowTitle("uPtt")
+            
+            # 4. 重設視窗為登入大小
+            self.setMinimumSize(0, 0)
+            self.setMaximumSize(16777215, 16777215)
+            self.setFixedSize(500, 550)
+            
+            # 5. 切換畫面
+            self.central_stack.setCurrentIndex(0)
+            self.login_screen.login_btn.setEnabled(True)
+            self.login_screen.login_btn.setText("登入連線 / LOGIN")
+            self.login_screen.password_input.clear()
+            self.login_screen.username_input.setFocus()
+            
+            # 6. 重新初始化新的 Worker 與執行緒 (準備下次登入)
+            self.init_worker()
+            
+            logger.info("登出成功，已回到登入視窗。")
+            
+        except Exception as e:
+            logger.error(f"登出時發生異常: {e}")
+            QMessageBox.critical(self, "登出錯誤", f"登出時發生非預期錯誤: {e}")
 
     def fully_quit(self):
         """徹底退出程式，確保 PTT 登出與執行緒釋放"""
