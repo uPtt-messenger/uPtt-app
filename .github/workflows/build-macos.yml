@@ -1,9 +1,9 @@
-name: Build macOS App
+name: CI/CD Workflow
 
 on:
   push:
-    tags:
-      - 'v**'
+    branches:
+      - '**'
   workflow_dispatch:
 
 jobs:
@@ -37,9 +37,10 @@ jobs:
           # 使用 QT_QPA_PLATFORM=offscreen 確保在無介面環境下能執行 Qt 測試
           QT_QPA_PLATFORM=offscreen pytest tests/
 
-  # 第二階段：測試通過後執行編譯
+  # 第二階段：測試通過後，針對 main 與 beta 分支執行編譯
   build:
     needs: test
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/beta')
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,6 +51,31 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
       
+      # 處理版本號與發佈設定
+      - name: Configure Version and Release
+        id: config
+        run: |
+          # 取得原始版本號
+          VERSION=$(grep "__version__ =" src/uPtt/__init__.py | cut -d '"' -f 2)
+          IS_PRERELEASE=false
+          
+          if [ "${{ github.ref }}" = "refs/heads/beta" ]; then
+            # Beta 分支：加上 beta 字樣與流水號
+            NEW_VERSION="${VERSION}beta${{ github.run_number }}"
+            # 使用 sed 修改 __init__.py 中的版本號 (macOS sed 與 Linux 略有不同)
+            sed -i '' "s/__version__ = \".*\"/__version__ = \"$NEW_VERSION\"/" src/uPtt/__init__.py
+            VERSION=$NEW_VERSION
+            IS_PRERELEASE=true
+            echo "RELEASE_TITLE=uPtt Beta v$VERSION" >> $GITHUB_ENV
+          else
+            # Main 分支：正式版
+            echo "RELEASE_TITLE=uPtt Official v$VERSION" >> $GITHUB_ENV
+          fi
+          
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "IS_PRERELEASE=$IS_PRERELEASE" >> $GITHUB_OUTPUT
+          echo "Final Version to build: $VERSION"
+
       # Nuitka 快取：加速 C 語言編譯過程
       - name: Nuitka Cache
         uses: actions/cache@v4
@@ -85,7 +111,6 @@ jobs:
             --no-pyi-file \
             src/run_app.py
 
-
       - name: Package .app for distribution
         run: |
           cd dist
@@ -104,5 +129,9 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: dist/uPtt.zip
+          tag_name: v${{ steps.config.outputs.VERSION }}
+          name: ${{ env.RELEASE_TITLE }}
+          prerelease: ${{ steps.config.outputs.IS_PRERELEASE }}
+          draft: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
