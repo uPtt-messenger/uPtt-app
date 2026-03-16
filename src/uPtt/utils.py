@@ -50,8 +50,7 @@ def gen_random_string(length=10):
 def msg_to_mail(app_name, ptt_id, msg):
     mail = f"""{ptt_id} 想要使用 {app_name} 跟你聯繫！
 
-想要回覆請至以下網址下載回覆訊息！
-
+回覆請至以下網址下載 {app_name} 回覆訊息！
 {contant.DOWNLOAD_URL}
 
 {contant.PTT_MSG_DIVISION_LINE}
