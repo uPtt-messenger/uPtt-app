@@ -138,10 +138,10 @@ jobs:
         run: |
           cd dist
           if [ -d "uPtt.app" ]; then
-            zip -r uPtt.zip uPtt.app
+            zip -r uPtt-macOS.zip uPtt.app
           elif [ -d "run_app.app" ]; then
             mv run_app.app uPtt.app
-            zip -r uPtt.zip uPtt.app
+            zip -r uPtt-macOS.zip uPtt.app
           else
             echo "Error: .app bundle not found"
             exit 1
@@ -151,7 +151,7 @@ jobs:
         id: create_release
         uses: softprops/action-gh-release@v1
         with:
-          files: dist/uPtt.zip
+          files: dist/uPtt-macOS.zip
           tag_name: v${{ steps.config.outputs.VERSION }}
           name: ${{ env.RELEASE_TITLE }}
           prerelease: ${{ steps.config.outputs.IS_PRERELEASE }}
