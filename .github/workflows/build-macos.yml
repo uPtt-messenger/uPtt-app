@@ -93,6 +93,28 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
           pip install nuitka zstandard
+          brew install librsvg
+
+      - name: Generate macOS Icon
+        run: |
+          ASSETS_DIR="src/uPtt/ui/assets"
+          ICON_SVG="$ASSETS_DIR/logo_icon.svg"
+          ICONSET="$ASSETS_DIR/logo.iconset"
+          mkdir -p "$ICONSET"
+          
+          # 產生 macOS 要求的各種尺寸 PNG
+          # 格式: icon_尺寸x尺寸.png 以及 icon_尺寸x尺寸@2x.png (兩倍解析度)
+          for size in 16 32 128 256 512; do
+            rsvg-convert -w $size -h $size "$ICON_SVG" -o "$ICONSET/icon_${size}x${size}.png"
+            double_size=$((size * 2))
+            rsvg-convert -w $double_size -h $double_size "$ICON_SVG" -o "$ICONSET/icon_${size}x${size}@2x.png"
+          done
+          
+          # 使用 iconutil 產生 icns 檔案
+          iconutil -c icns "$ICONSET" -o "$ASSETS_DIR/logo_icon.icns"
+          
+          # 清理暫存目錄
+          rm -rf "$ICONSET"
           
       - name: Build with Nuitka
         run: |
@@ -107,6 +129,7 @@ jobs:
             --include-package=qasync \
             --include-package-data=uPtt.ui.assets \
             --macos-app-name="uPtt" \
+            --macos-app-icon=src/uPtt/ui/assets/logo_icon.icns \
             --output-dir=dist \
             --no-pyi-file \
             src/run_app.py
