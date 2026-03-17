@@ -647,6 +647,8 @@ class MainWindow(QMainWindow):
             self.chat_histories[sender] = []
             self.unread_counts[sender] = 0
             # 如果是新聯絡人，新增到清單 (帶入原始大小寫 ID 與 暱稱)
+            # add_or_select_contact 內部會呼叫 on_contact_selected，
+            # 後者已從 DB 載入訊息並呼叫 refresh_chat_display，不需再 append。
             self.add_or_select_contact(sender_id_display, nickname)
         else:
             # 如果已存在，更新暱稱與 ID (以防對方改過大小寫或暱稱)
@@ -656,26 +658,26 @@ class MainWindow(QMainWindow):
                 if widget.ptt_id == sender:
                     widget.update_info(sender_id_display, nickname)
                     break
-            
-        self.chat_histories[sender].append({
-            'text': data['text'], 
-            'time': data['time'], 
-            'timestamp': data.get('timestamp', datetime.now()), # 優先使用 Worker 傳來的時間
-            'is_me': False
-        })
-        
-        if self.current_chat_id == sender:
-            self.refresh_chat_display()
-        else:
-            self.unread_counts[sender] += 1
-            # 更新清單中的未讀計數
-            for i in range(self.contact_list.count()):
-                item = self.contact_list.item(i)
-                widget = self.contact_list.itemWidget(item)
-                if widget.ptt_id == sender:
-                    widget.set_unread(self.unread_counts[sender])
-                    break
-        
+
+            self.chat_histories[sender].append({
+                'text': data['text'],
+                'time': data['time'],
+                'timestamp': data.get('timestamp', datetime.now()),
+                'is_me': False
+            })
+
+            if self.current_chat_id == sender:
+                self.refresh_chat_display()
+            else:
+                self.unread_counts[sender] += 1
+                # 更新清單中的未讀計數
+                for i in range(self.contact_list.count()):
+                    item = self.contact_list.item(i)
+                    widget = self.contact_list.itemWidget(item)
+                    if widget.ptt_id == sender:
+                        widget.set_unread(self.unread_counts[sender])
+                        break
+
         # 桌面通知 (顯示原始大小寫 ID)
         if not self.isActiveWindow():
             self.tray_icon.showMessage(

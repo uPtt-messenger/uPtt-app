@@ -141,9 +141,9 @@ def test_on_new_message_blocked(mock_qthread, mock_worker, qtbot, ptt_service_mo
     with patch('os.path.exists', return_value=True):
         window = MainWindow(ptt_service_mock, db_mock)
         qtbot.addWidget(window)
-        
+
         window.blocked_users.add("baduser")
-        
+
         # Simulate new message from blocked user
         msg_data = {
             'sender': 'BadUser',
@@ -152,7 +152,45 @@ def test_on_new_message_blocked(mock_qthread, mock_worker, qtbot, ptt_service_mo
             'full_author': 'BadUser (BadGuy)'
         }
         window.on_new_message(msg_data)
-        
+
         # Should NOT be added to history or list
         assert "baduser" not in window.chat_histories
         assert window.contact_list.count() == 0
+
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_on_new_message_new_contact_no_duplicate(mock_qthread, mock_worker, qtbot, ptt_service_mock, db_mock):
+    """新聯絡人第一次傳訊息時，訊息不應重複出現在 chat_histories"""
+    from datetime import datetime
+    with patch('os.path.exists', return_value=True):
+        ptt_service_mock.ptt_id = "MyID"
+
+        # 模擬 DB 已有這則訊息（worker 先存入 DB 後才發射 signal）
+        msg_time = datetime(2026, 3, 17, 7, 59, 0)
+        db_mock.get_messages.return_value = [{
+            'content': '安安，Mac 封測中',
+            'timestamp': msg_time,
+            'is_me': 0,
+            'sender_id': 'codingman',
+            'receiver_id': 'myid',
+        }]
+        db_mock.get_all_sessions.return_value = []
+
+        window = MainWindow(ptt_service_mock, db_mock)
+        qtbot.addWidget(window)
+
+        # 確認 codingman 不在 chat_histories（全新聯絡人）
+        assert 'codingman' not in window.chat_histories
+
+        msg_data = {
+            'sender': 'CodingMan',
+            'text': '安安，Mac 封測中',
+            'time': '07:59',
+            'full_author': 'CodingMan (bug maker)',
+            'timestamp': msg_time,
+        }
+        window.on_new_message(msg_data)
+
+        # 修復後：chat_histories 只應有 1 筆（由 on_contact_selected 從 DB 載入）
+        assert 'codingman' in window.chat_histories
+        assert len(window.chat_histories['codingman']) == 1
