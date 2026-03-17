@@ -1,88 +1,81 @@
-# uPtt
+<p align="center">
+  <img src="src/uPtt/ui/assets/logo_horizontal.svg" alt="uPtt Logo" width="400">
+</p>
 
-[![PyPI version](https://badge.fury.io/py/uPtt.svg)](https://badge.fury.io/py/uPtt)
-[![Python Version](https://img.shields.io/pypi/pyversions/uPtt.svg)](https://pypi.org/project/uPtt/)
+<h1 align="center">uPtt Messenger</h1>
 
-這是一個使用 Python 開發的終端機介面（TUI）應用程式，讓使用者可以只透過批踢踢伺服器與另一位使用者進行**即時聊天**。
+<p align="center">
+  <a href="https://github.com/uPtt-messenger/uPttTerm/releases"><img src="https://img.shields.io/github/v/release/uPtt-messenger/uPttTerm?label=latest%20release" alt="GitHub release"></a>
+  <a href="https://pypi.org/project/uPtt/"><img src="https://img.shields.io/pypi/pyversions/uPtt.svg" alt="Python Version"></a>
+  <a href="https://github.com/uPtt-messenger/uPttTerm/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0--only-blue.svg" alt="License"></a>
+</p>
 
-## 實際畫面
+---
+
+**uPtt** 是一個使用 Python (PySide6) 開發的**圖形介面 (GUI)** 應用程式。旨在讓使用者能直接透過 PTT (批踢踢實業坊) 伺服器，與其他使用者進行**即時私訊聊天**，無需再切換回傳統的終端機畫面。
+
+## ✨ 功能特色
+
+- [x] **即時聊天：** 透過 PTT 內建私訊系統實現流暢的對話。
+- [x] **圖形化介面：** 基於 PySide6 打造，提供更直覺的操作體驗。
+- [x] **自動登入：** 支援安全儲存憑據，快速進入聊天室。
+- [x] **聯絡人管理：** 輕鬆新增、搜尋並管理您的 PTT 好友。
+- [ ] **新訊息通知：** 即時桌面通知，不錯過任何訊息。
+- [ ] **新信件通知：** 整合 PTT 站內信提醒功能。
+
+## 📸 實際畫面
 
 ### 登入視窗
-<img width="480" height="701" alt="image" src="https://github.com/user-attachments/assets/784da131-f637-4c82-8408-146a32643a21" />
+<img width="480" alt="Login Screen" src="https://i.meee.com.tw/0RXU0Vt.png" />
 
-### 對話視窗
-<img width="435" height="448" alt="image" src="https://github.com/user-attachments/assets/65680862-f313-4cc8-a2e3-f04fcc625940" />
+## 📋 需求條件
 
-## 需求
+- 一個有效的 **PTT 帳號**
+- 作業系統：Windows / macOS
 
-- Python 3.10 以上
-- 一個有效的 PTT 帳號
+## 🚀 下載與安裝
 
-## 安裝與使用
+### 取得最新發行版
 
-### PyPi
+請前往 [GitHub Releases](https://github.com/uPtt-messenger/uPttTerm/releases) 下載適用於您作業系統的最新版本：
 
-1.  建立並啟動虛擬環境（可選）：
-    ```bash
-    python -m venv .venv
-    source .venv/bin/activate  # Linux 或 macOS
-    .venv\Scripts\activate     # Windows
-    ```
-    
-2.  安裝套件
-    ```bash
-    # 正式版本
-    pip install uPtt
-    
-    # 測試版本
-    pip install --extra-index-url https://test.pypi.org/simple/ uPtt
-    ```
-    
+1. **Windows/macOS:** 下載對應的壓縮檔或安裝檔，解壓縮後即可執行。
 
-## 使用方式
+---
 
-1.  在終端機中執行應用程式：
-    ```bash
-    uptt
-    ```
+## 🛠 開發與測試
 
-2.  依照提示輸入您的 PTT ID 與密碼以登入。
+Test with Python 3.12。
 
-3.  輸入您想對話的使用者 ID。
+如果您想參與開發或自行編譯，請參考以下步驟：
 
-4.  成功後，即可開始聊天。在輸入區輸入訊息後按 `Enter` 即可發送。
+1. **複製專案：**
+   ```bash
+   git clone https://github.com/uPtt-messenger/uPttTerm.git
+   cd uPttTerm
+   ```
 
-5.  若要離開程式，請在輸入區輸入 `/exit` 並按 `Enter`，或直接按下 `Ctrl+C`。
+2. **安裝相依套件：**
+   ```bash
+   pip install -r requirements.txt
+   pip install -r requirements-dev.txt
+   ```
 
-## 開發測試
+3. **執行應用程式：**
+   ```bash
+   python3 src/run_app.py
+   ```
 
-1.  下載原始碼並進入專案目錄：
-    ```bash
-    git clone
-    ```
-    
-2. 建立並啟動虛擬環境（可選）：
-    ```bash
-    python -m venv .venv
-    source .venv/bin/activate  # Linux 或 macOS
-    .venv\Scripts\activate     # Windows
-    ```
-   
-3. 安裝開發需求：
-    ```bash
-    pip install -r requirements.txt
-    pip install -r requirements-dev.txt
-    ```
+4. **執行單元測試：**
+   ```bash
+   pytest --cov=src/uPtt tests/
+   ```
 
-4. 執行應用程式：
-    ```bash
-    PYTHONPATH=src python3 -m uPtt.app
-    ```
+## 📜 授權條款
 
+本專案採用 [GPL-3.0-only](https://github.com/uPtt-messenger/uPttTerm/blob/main/LICENSE) 授權。
 
-## 功能特色
-
-- [x] 即時聊天功能
-- [x] 終端機介面
-- [ ] 新訊息通知
-- [ ] 新信件通知
+---
+<p align="center">
+  由 <a href="mailto:pttcodingman@gmail.com">CodingMan</a> 製作
+</p>
