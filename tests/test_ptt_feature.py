@@ -1,6 +1,8 @@
 import pytest
+import time
 from unittest.mock import MagicMock, patch
 from src.uPtt.ptt import UPttService
+import PyPtt
 
 class MockNoSuchUser(Exception):
     pass
@@ -72,3 +74,72 @@ def test_login_id_correction():
         assert success is True
         assert service.ptt_id == "CorrectID"
         mock_get_info.assert_called_once_with("correctid")
+
+def test_login_failure():
+    service = UPttService()
+    with patch.object(service.service, 'call', side_effect=Exception("Login failed")):
+        with pytest.raises(Exception, match="Login failed"):
+            service.login("user", "pass")
+
+def test_login_get_info_failure():
+    service = UPttService()
+    with patch.object(service.service, 'call'), \
+         patch.object(service, 'get_user_info', side_effect=Exception("API error")):
+        # Should still return True
+        success = service.login("user", "pass")
+        assert success is True
+        assert service.ptt_id == "user"
+
+def test_call_require_login():
+    service = UPttService()
+    with pytest.raises(PyPtt.RequireLogin):
+        service.call("some_api")
+
+def test_call_logout():
+    service = UPttService()
+    service.ptt_id = "user"
+    service.ptt_pw = "pass"
+    with patch.object(service.service, 'call') as mock_call:
+        res = service.call("logout")
+        assert res is True
+        assert service.ptt_id is None
+        assert service.ptt_pw is None
+        mock_call.assert_called_with("logout")
+
+def test_call_retry_success():
+    service = UPttService()
+    service.ptt_id = "user"
+    service.ptt_pw = "pass"
+    service.retry_delay = 0.1
+    
+    with patch.object(service.service, 'call') as mock_call:
+        # First call fails, second (re-login) succeeds, third (retry) succeeds
+        mock_call.side_effect = [Exception("Conn Error"), None, "Success"]
+        
+        res = service.call("get_user", {"user_id": "test"})
+        assert res == "Success"
+        assert mock_call.call_count == 3
+
+def test_call_retry_failure():
+    service = UPttService()
+    service.ptt_id = "user"
+    service.ptt_pw = "pass"
+    service.retry_delay = 0.1
+    service.max_retry = 2
+    
+    with patch.object(service.service, 'call') as mock_call:
+        mock_call.side_effect = Exception("Permanent Error")
+        
+        with pytest.raises(Exception, match="Permanent Error"):
+            service.call("get_user", {"user_id": "test"})
+        
+        # 1st attempt + 1st re-login + 2nd attempt
+        assert mock_call.call_count == 3
+
+def test_close():
+    service = UPttService()
+    with patch.object(service, 'call') as mock_call, \
+         patch.object(service.service, 'close') as mock_close:
+        service.close()
+        mock_call.assert_called_with("logout")
+        mock_close.assert_called_once()
