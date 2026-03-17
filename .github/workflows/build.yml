@@ -118,7 +118,7 @@ jobs:
             --macos-app-name="uPtt" \
             --macos-app-icon=src/uPtt/ui/assets/logo_icon.icns \
             --output-dir=dist \
-            --accept-downloads \
+            --no-pyi-file \
             src/run_app.py
 
       - name: Package .app for distribution
@@ -205,7 +205,8 @@ jobs:
             --include-package-data=uPtt.ui.assets `
             --windows-icon-from-ico=src/uPtt/ui/assets/logo_icon.ico `
             --output-dir=dist `
-            --accept-downloads `
+            --assume-yes-for-downloads `
+            --no-pyi-file `
             src/run_app.py
 
       - name: Package for distribution
