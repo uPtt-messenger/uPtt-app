@@ -118,7 +118,7 @@ jobs:
             --macos-app-name="uPtt" \
             --macos-app-icon=src/uPtt/ui/assets/logo_icon.icns \
             --output-dir=dist \
-            --no-pyi-file \
+            --accept-downloads \
             src/run_app.py
 
       - name: Package .app for distribution
@@ -197,7 +197,7 @@ jobs:
           $env:PYTHONPATH = "src"
           python -m nuitka `
             --standalone `
-            --windows-disable-console `
+            --windows-console-mode=disable `
             --plugin-enable=pyside6 `
             --include-package=PyPtt `
             --include-package=websockets `
@@ -205,7 +205,7 @@ jobs:
             --include-package-data=uPtt.ui.assets `
             --windows-icon-from-ico=src/uPtt/ui/assets/logo_icon.ico `
             --output-dir=dist `
-            --no-pyi-file `
+            --accept-downloads `
             src/run_app.py
 
       - name: Package for distribution

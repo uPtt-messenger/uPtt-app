@@ -318,7 +318,7 @@ class MainWindow(QMainWindow):
         self.messages_widget = QWidget()
         self.messages_widget.setObjectName("messages-container")
         self.messages_layout = QVBoxLayout(self.messages_widget)
-        self.messages_layout.setAlignment(Qt.AlignBottom)
+        # 移除對齊底端，改用 addStretch() 撐開空間以確保子元件寬度正確
         # 左右留一點間距增加閱讀舒適度，上下縮至最小
         self.messages_layout.setContentsMargins(15, 5, 15, 15)
         self.messages_layout.setSpacing(6)
@@ -596,6 +596,9 @@ class MainWindow(QMainWindow):
         history = self.chat_histories.get(self.current_chat_id, [])
         # --- 新增排序邏輯：確保訊息依照時間戳記從小到大排列 ---
         history.sort(key=lambda x: x.get('timestamp', datetime.min))
+        
+        # 底部對齊：先加一個彈性空間，將訊息推向下方
+        self.messages_layout.addStretch(1)
         
         for msg in history:
             bubble = ChatBubble(msg['text'], msg['time'], msg['is_me'])

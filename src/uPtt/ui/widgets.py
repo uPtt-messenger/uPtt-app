@@ -23,7 +23,7 @@ class ChatBubble(QWidget):
         
         self.bubble_container = QFrame()
         self.bubble_container.setStyleSheet(get_bubble_style(is_me))
-        self.bubble_container.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Preferred)
+        self.bubble_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         
         self.content_layout = QVBoxLayout(self.bubble_container)
         self.content_layout.setContentsMargins(10, 6, 10, 6)
@@ -32,7 +32,7 @@ class ChatBubble(QWidget):
         self.message_label = QLabel(text)
         self.message_label.setWordWrap(True)
         self.message_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.message_label.setMaximumWidth(500)
+        # 移除硬編碼寬度，改由 resizeEvent 動態控制
         self.message_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         self.content_layout.addWidget(self.message_label)
         
@@ -49,7 +49,46 @@ class ChatBubble(QWidget):
             self.main_layout.addWidget(self.time_label)
             self.main_layout.addStretch()
             
-        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+
+    def resizeEvent(self, event):
+        """
+        根據容器寬度動態調整氣泡最大寬度 (80%)，並防止提前換行。
+        """
+        super().resizeEvent(event)
+        total_w = event.size().width()
+        if total_w <= 0:
+            return
+            
+        # 1. 計算氣泡容器的最大可用寬度 (視窗寬度的 80%)
+        max_bubble_w = int(total_w * 0.8)
+        
+        # 2. 暫時關閉換行，計算文字在「理想狀態」下所需的寬度
+        # 這能獲取文字最長一行的寬度，避免 QLabel 提前縮小
+        self.message_label.setWordWrap(False)
+        text_ideal_w = self.message_label.sizeHint().width()
+        
+        # 3. 判斷是否需要換行 (考慮到氣泡內邊距與緩衝，約 25px)
+        label_max_allowed_w = max_bubble_w - 25
+        
+        if text_ideal_w > label_max_allowed_w:
+            # 文字太長，開啟換行並限制在 80%
+            self.message_label.setWordWrap(True)
+            self.message_label.setFixedWidth(label_max_allowed_w)
+        else:
+            # 文字尚短，關閉換行並讓寬度剛好貼合文字
+            self.message_label.setWordWrap(False)
+            self.message_label.setFixedWidth(text_ideal_w)
+            
+        # 4. 關鍵：手動將最小高度設定為 sizeHint 的高度，強迫垂直佈局擴張
+        # 因為 wordWrap 改變後，layout 可能不會主動偵測新的高度需求
+        h = self.message_label.sizeHint().height()
+        self.message_label.setMinimumHeight(h)
+        
+        # 通知所有層級佈局需要重新計算
+        self.message_label.updateGeometry()
+        self.bubble_container.updateGeometry()
+        self.updateGeometry()
 
 class ContactItem(QWidget):
     """
