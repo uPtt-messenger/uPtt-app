@@ -23,9 +23,10 @@ jobs:
         uses: trufflesecurity/trufflehog@main
         with:
           path: ./
-          base: ${{ github.event.repository.default_branch }}
-          head: HEAD
+          base: ${{ github.event.before }}
+          head: ${{ github.sha }}
           extra_args: --only-verified
+
 
   # 第一階段：執行測試 (在 Linux 執行以節省資源)
   test:
