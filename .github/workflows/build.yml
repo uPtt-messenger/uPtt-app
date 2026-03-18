@@ -11,8 +11,21 @@ on:
   workflow_dispatch:
 
 jobs:
+  # 秘密掃描：檢查是否有金鑰或密碼洩漏在提交紀錄中
+  secret_scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Gitleaks Scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   # 第一階段：執行測試 (在 Linux 執行以節省資源)
   test:
+    needs: [secret_scan]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
