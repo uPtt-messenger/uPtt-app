@@ -41,9 +41,21 @@ jobs:
           # 使用 QT_QPA_PLATFORM=offscreen 確保在無介面環境下能執行 Qt 測試
           QT_QPA_PLATFORM=offscreen pytest tests/
 
-  # 第二階段：測試通過後，針對 main 與 beta 分支執行編譯
+  # 測試通過後，針對 main 與 beta 分支執行編譯
+  prepare:
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/beta')
+    runs-on: ubuntu-latest
+    outputs:
+      beta_suffix: ${{ steps.gen.outputs.suffix }}
+    steps:
+      - id: gen
+        run: |
+          # 產生 4 位數的小寫字母與數字隨機字串作為 Beta 後綴
+          SUFFIX=$(cat /dev/urandom | tr -dc 'a-z0-9' | fold -w 4 | head -n 1)
+          echo "suffix=$SUFFIX" >> $GITHUB_OUTPUT
+
   build-macos:
-    needs: test
+    needs: [test, prepare]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/beta')
     runs-on: macos-latest
     steps:
@@ -64,8 +76,8 @@ jobs:
           IS_PRERELEASE=false
           
           if [ "${{ github.ref }}" = "refs/heads/beta" ]; then
-            # Beta 分支：加上 beta 字樣與流水號
-            NEW_VERSION="${VERSION}beta${{ github.run_number }}"
+            # Beta 分支：加上 beta 字樣與隨機後綴
+            NEW_VERSION="${VERSION}beta${{ needs.prepare.outputs.beta_suffix }}"
             # 使用 Python 跨平台修改版本號
             python3 -c "import sys; c = open('src/uPtt/__init__.py').read().replace('__version__ = \"' + sys.argv[1] + '\"', '__version__ = \"' + sys.argv[2] + '\"'); open('src/uPtt/__init__.py', 'w').write(c)" "$VERSION" "$NEW_VERSION"
             VERSION=$NEW_VERSION
@@ -143,7 +155,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-windows:
-    needs: test
+    needs: [test, prepare]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/beta')
     runs-on: windows-latest
     steps:
@@ -164,7 +176,7 @@ jobs:
           IS_PRERELEASE=false
           
           if [ "${{ github.ref }}" = "refs/heads/beta" ]; then
-            NEW_VERSION="${VERSION}beta${{ github.run_number }}"
+            NEW_VERSION="${VERSION}beta${{ needs.prepare.outputs.beta_suffix }}"
             python -c "import sys; c = open('src/uPtt/__init__.py').read().replace('__version__ = \"' + sys.argv[1] + '\"', '__version__ = \"' + sys.argv[2] + '\"'); open('src/uPtt/__init__.py', 'w').write(c)" "$VERSION" "$NEW_VERSION"
             VERSION=$NEW_VERSION
             IS_PRERELEASE=true
@@ -196,7 +208,7 @@ jobs:
         run: |
           $env:PYTHONPATH = "src"
           python -m nuitka `
-            --standalone `
+            --onefile `
             --windows-console-mode=disable `
             --plugin-enable=pyside6 `
             --include-package=PyPtt `
@@ -204,6 +216,7 @@ jobs:
             --include-package=qasync `
             --include-package-data=uPtt.ui.assets `
             --windows-icon-from-ico=src/uPtt/ui/assets/logo_icon.ico `
+            --output-filename=uPtt.exe `
             --output-dir=dist `
             --assume-yes-for-downloads `
             --no-pyi-file `
@@ -213,9 +226,8 @@ jobs:
         shell: pwsh
         run: |
           cd dist
-          if (Test-Path "run_app.dist") {
-              Rename-Item "run_app.dist" "uPtt"
-              Compress-Archive -Path "uPtt" -DestinationPath "uPtt-Windows.zip"
+          if (Test-Path "uPtt.exe") {
+              Compress-Archive -Path "uPtt.exe" -DestinationPath "uPtt-Windows.zip"
           }
 
       - name: Create or Update Release
