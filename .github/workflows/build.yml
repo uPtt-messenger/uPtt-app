@@ -42,20 +42,8 @@ jobs:
           QT_QPA_PLATFORM=offscreen pytest tests/
 
   # 測試通過後，針對 main 與 beta 分支執行編譯
-  prepare:
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/beta')
-    runs-on: ubuntu-latest
-    outputs:
-      beta_suffix: ${{ steps.gen.outputs.suffix }}
-    steps:
-      - id: gen
-        run: |
-          # 產生 4 位數的小寫字母與數字隨機字串作為 Beta 後綴
-          SUFFIX=$(cat /dev/urandom | tr -dc 'a-z0-9' | fold -w 4 | head -n 1)
-          echo "suffix=$SUFFIX" >> $GITHUB_OUTPUT
-
   build-macos:
-    needs: [test, prepare]
+    needs: [test]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/beta')
     runs-on: macos-latest
     steps:
@@ -76,8 +64,9 @@ jobs:
           IS_PRERELEASE=false
           
           if [ "${{ github.ref }}" = "refs/heads/beta" ]; then
-            # Beta 分支：加上 beta 字樣與隨機後綴
-            NEW_VERSION="${VERSION}beta${{ needs.prepare.outputs.beta_suffix }}"
+            # Beta 分支：加上 beta 字樣與 Commit SHA 前四碼
+            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-4)
+            NEW_VERSION="${VERSION}beta${SHORT_SHA}"
             # 使用 Python 跨平台修改版本號
             python3 -c "import sys; c = open('src/uPtt/__init__.py').read().replace('__version__ = \"' + sys.argv[1] + '\"', '__version__ = \"' + sys.argv[2] + '\"'); open('src/uPtt/__init__.py', 'w').write(c)" "$VERSION" "$NEW_VERSION"
             VERSION=$NEW_VERSION
@@ -155,7 +144,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-windows:
-    needs: [test, prepare]
+    needs: [test]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/beta')
     runs-on: windows-latest
     steps:
@@ -176,7 +165,8 @@ jobs:
           IS_PRERELEASE=false
           
           if [ "${{ github.ref }}" = "refs/heads/beta" ]; then
-            NEW_VERSION="${VERSION}beta${{ needs.prepare.outputs.beta_suffix }}"
+            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-4)
+            NEW_VERSION="${VERSION}beta${SHORT_SHA}"
             python -c "import sys; c = open('src/uPtt/__init__.py').read().replace('__version__ = \"' + sys.argv[1] + '\"', '__version__ = \"' + sys.argv[2] + '\"'); open('src/uPtt/__init__.py', 'w').write(c)" "$VERSION" "$NEW_VERSION"
             VERSION=$NEW_VERSION
             IS_PRERELEASE=true
