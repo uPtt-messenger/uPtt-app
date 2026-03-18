@@ -1,81 +1,88 @@
 <p align="center">
-  <img src="src/uPtt/ui/assets/logo_horizontal.svg" alt="uPtt Logo" width="400">
+  <img src="src/uPtt/ui/assets/logo_horizontal.svg" alt="uPtt Logo" width="450">
 </p>
 
-<h1 align="center">uPtt Messenger</h1>
+<p align="center">
+  <strong>讓 PTT 的溫柔，在現代桌面重新綻放</strong><br>
+  一個為「批踢踢實業坊」量身打造的現代化即時通訊終端。
+</p>
 
 <p align="center">
-  <a href="https://github.com/uPtt-messenger/uPttTerm/releases"><img src="https://img.shields.io/github/v/release/uPtt-messenger/uPttTerm?label=latest%20release" alt="GitHub release"></a>
-  <a href="https://pypi.org/project/uPtt/"><img src="https://img.shields.io/pypi/pyversions/uPtt.svg" alt="Python Version"></a>
-  <a href="https://github.com/uPtt-messenger/uPttTerm/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0--only-blue.svg" alt="License"></a>
+  <a href="https://github.com/uPtt-messenger/uPttTerm/releases"><img src="https://img.shields.io/github/v/release/uPtt-messenger/uPttTerm?label=最新發布版本&color=blue" alt="GitHub release"></a>
+  <a href="https://github.com/uPtt-messenger/uPttTerm/blob/main/LICENSE"><img src="https://img.shields.io/badge/授權條款-GPL--3.0-green.svg" alt="License"></a>
+  <img src="https://img.shields.io/badge/平台-Windows%20|%20macOS-lightgrey" alt="Platform">
 </p>
 
 ---
 
-**uPtt** 是一個使用 Python (PySide6) 開發的**圖形介面 (GUI)** 應用程式。旨在讓使用者能直接透過 PTT (批踢踢實業坊) 伺服器，與其他使用者進行**即時私訊聊天**，無需再切換回傳統的終端機畫面。
+### 🌟 專案願景：跨越三十年的技術橋樑
 
-## ✨ 功能特色
+PTT（批踢踢）是台灣最具生命力的網路社群，但傳統的 Telnet 黑白畫面與站內信系統，在即時通訊盛行的今天顯得有些孤獨。
 
-- [x] **即時聊天：** 透過 PTT 內建私訊系統實現流暢的對話。
-- [x] **圖形化介面：** 基於 PySide6 打造，提供更直覺的操作體驗。
-- [x] **自動登入：** 支援安全儲存憑據，快速進入聊天室。
-- [x] **聯絡人管理：** 輕鬆新增、搜尋並管理您的 PTT 好友。
-- [ ] **新訊息通知：** 即時桌面通知，不錯過任何訊息。
-- [ ] **新信件通知：** 整合 PTT 站內信提醒功能。
+**uPtt** 的誕生，是為了讓這份舊時代的技術得以延續。我們運用 Python 與現代化圖形介面（GUI）技術，將 PTT 站內信系統重塑為如同 Telegram 或 LINE 一般的**流暢聊天體驗**。無需學習複雜的鍵盤指令，讓您在 PTT 上的對話如同呼吸般自然。
 
-## 📸 實際畫面
+---
 
-### 登入視窗
-<img width="480" alt="Login Screen" src="https://i.meee.com.tw/0RXU0Vt.png" />
+## ✨ 核心功能：舊傳統與新科技的完美結合
 
-## 📋 需求條件
+### 🚀 即時通訊體驗 (Instant Messaging)
+*   **郵件轉對話：** 自動將瑣碎的「站內信」轉換為直覺的「對話氣泡」，溝通不再斷斷續續。
+*   **智慧輪詢 (Smart Polling)：** 採用精準的背景偵測技術，確保訊息即時傳達，同時將系統負載降至最低。
+*   **多帳號管理：** 獨家資料庫隔離技術，支援多個 PTT 帳號切換，對話紀錄井然有序。
 
-- 一個有效的 **PTT 帳號**
-- 作業系統：Windows / macOS
+### 🎨 現代化視覺美學 (Modern UI/UX)
+*   **Retina 級解析度：** 全向量 SVG 圖示渲染，無論在 4K 螢幕或 MacBook 的 Retina 螢幕上都絕對銳利。
+*   **極簡暗色模式：** 傳承 PTT 的黑色靈魂，搭配精緻的字體層次，給您最舒適的閱讀體驗。
+*   **極速本地快取：** 歷史訊息秒開，無需等待 PTT 伺服器緩慢載入。
 
-## 🚀 下載與安裝
+### 🛡️ 安全與隱私 (Security)
+*   **本地加密存儲：** 您的對話紀錄與帳號資訊僅保存在您的電腦中，絕不上傳第三方伺服器。
+*   **原生通訊協議：** 直接與 PTT 官方伺服器連線，純淨、安全。
+
+---
+
+## 📸 介面預覽
+
+### 現代化的登入體驗
+<img width="520" alt="Login Screen" src="https://i.meee.com.tw/0RXU0Vt.png" />
+
+---
+
+## ⚠️ 重要運行機制說明
+
+為了提供如同通訊軟體的流暢體驗，uPtt 採用了以下機制：
+
+1.  **訊息即時處理：** 系統成功解析訊息並存入本地資料庫後，會**自動刪除**該筆 PTT 站內信，以維持信箱整潔。
+2.  **安全性建議：** 本程式內建嚴謹的判斷邏輯，僅處理 uPtt 專屬格式。若您對自動刪除機制有所疑慮，請在 PTT 系統設定中開啟「外部信箱備份」。
+
+---
+
+## 🚀 如何開始使用？
 
 ### 取得最新發行版
+無需安裝繁瑣的程式碼環境，請前往 [GitHub Releases](https://github.com/uPtt-messenger/uPttTerm/releases) 下載對應版本：
 
-請前往 [GitHub Releases](https://github.com/uPtt-messenger/uPttTerm/releases) 下載適用於您作業系統的最新版本：
+*   **Windows:** 下載 `.exe` 執行檔，執行後即可啟動。
+*   **macOS:** 下載 `.dmg` 映像檔，將 `uPtt` 拖移至「應用程式」資料夾即可使用。
 
-1. **Windows/macOS:** 下載對應的壓縮檔或安裝檔，解壓縮後即可執行。
+---
+
+## 🛠 開發者資訊
+
+本專案使用 **Python 3.12** 與 **PySide6** 開發。如果您想參與開發或自行編譯，請參考：
+
+1.  **複製專案：** `git clone https://github.com/uPtt-messenger/uPttTerm.git`
+2.  **安裝依賴：** `pip install -r requirements.txt`
+3.  **執行：** `python3 src/run_app.py`
+4.  **測試：** `pytest --cov=src/uPtt tests/`
 
 ---
 
-## 🛠 開發與測試
+## 📜 授權與感謝
 
-Test with Python 3.12。
+*   本專案採用 **GPL-3.0** 授權。
+*   特別感謝 [PyPtt](https://github.com/Ptt-Official-App/PyPtt) 提供強大的 PTT 操作支援 ~~這其實也是 CodingMan 開發的~~。
 
-如果您想參與開發或自行編譯，請參考以下步驟：
-
-1. **複製專案：**
-   ```bash
-   git clone https://github.com/uPtt-messenger/uPttTerm.git
-   cd uPttTerm
-   ```
-
-2. **安裝相依套件：**
-   ```bash
-   pip install -r requirements.txt
-   pip install -r requirements-dev.txt
-   ```
-
-3. **執行應用程式：**
-   ```bash
-   python3 src/run_app.py
-   ```
-
-4. **執行單元測試：**
-   ```bash
-   pytest --cov=src/uPtt tests/
-   ```
-
-## 📜 授權條款
-
-本專案採用 [GPL-3.0-only](https://github.com/uPtt-messenger/uPttTerm/blob/main/LICENSE) 授權。
-
----
 <p align="center">
-  由 <a href="mailto:pttcodingman@gmail.com">CodingMan</a> 製作
+  由 <a href="mailto:pttcodingman@gmail.com">CodingMan</a> 帶著對 PTT 的熱愛製作
 </p>
