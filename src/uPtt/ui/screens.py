@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QTextEdit, QSystemTrayIcon, QMenu, QMessageBox, QInputDialog
 )
 from PySide6.QtCore import Qt, Signal, Slot, QThread, QSize, QEvent
-from PySide6.QtGui import QIcon, QAction, QShortcut, QKeySequence, QPixmap, QPainter
+from PySide6.QtGui import QIcon, QAction, QShortcut, QKeySequence, QPixmap, QPainter, QFontMetrics
 from PySide6.QtSvg import QSvgRenderer
 
 from uPtt import __version__, contant
@@ -236,7 +236,8 @@ class MainWindow(QMainWindow):
         # 左側: 會話清單
         self.sidebar = QWidget()
         self.sidebar.setObjectName("sidebar")
-        self.sidebar.setFixedWidth(220) # 增加寬度並固定，為長 ID 提供空間
+        self.sidebar.setMinimumWidth(200)
+        self.sidebar.setMaximumWidth(450)
         sidebar_vbox = QVBoxLayout(self.sidebar)
         sidebar_vbox.setContentsMargins(0, 0, 0, 0)
         sidebar_vbox.setSpacing(0)
@@ -420,6 +421,7 @@ class MainWindow(QMainWindow):
             if widget.ptt_id == ptt_id.lower():
                 widget.update_info(ptt_id, nickname)
                 logger.debug(f"成功更新介面清單項目: {ptt_id}")
+                self.update_sidebar_width() # 更新寬度
                 found = True
                 break
         if not found:
@@ -471,9 +473,6 @@ class MainWindow(QMainWindow):
             self.setMaximumSize(16777215, 16777215) # 解除最大值限制
             self.resize(800, 600)
             
-            # 設定 Splitter 初始比例 (側邊欄較窄)
-            self.splitter.setSizes([180, 620])
-            
             corrected_id = self.ptt_service.ptt_id
             self.central_stack.setCurrentIndex(1)
             self.setWindowTitle(f"uPtt - {corrected_id}")
@@ -513,6 +512,53 @@ class MainWindow(QMainWindow):
             
         self.contact_list.blockSignals(False)
         logger.info(f"從資料庫載入 {len(sessions)} 個對話會話")
+        
+        # 載入完成後，根據內容調整寬度
+        self.update_sidebar_width()
+
+    def update_sidebar_width(self):
+        """根據清單內容的最長文字寬度，動態調整側邊欄大小。"""
+        if self.contact_list.count() == 0:
+            self.splitter.setSizes([200, 600])
+            return
+
+        max_w = 180 # 基本寬度
+        
+        # 取得字體度量物件，用於精確計算像素寬度
+        # ID 使用 bold 15px, 暱稱使用 11px
+        id_font = self.font()
+        id_font.setPointSize(15)
+        id_font.setBold(True)
+        id_metrics = QFontMetrics(id_font)
+        
+        nick_font = self.font()
+        nick_font.setPointSize(11)
+        nick_metrics = QFontMetrics(nick_font)
+
+        for i in range(self.contact_list.count()):
+            item = self.contact_list.item(i)
+            widget = self.contact_list.itemWidget(item)
+            if widget:
+                # 計算 ID 寬度
+                id_w = id_metrics.horizontalAdvance(widget.ptt_id_display)
+                
+                # 計算暱稱寬度 (包含括號)
+                nick_text = widget.nickname_label.text()
+                nick_w = nick_metrics.horizontalAdvance(nick_text)
+                
+                # 取較寬者，並加上間距、未讀標記、以及捲軸預留空間 (約 95px)
+                # 12(左邊距) + 10(元件間距) + 24(未讀標記) + 12(右邊距) + 20(捲軸預留) + 17(安全緩衝)
+                item_w = max(id_w, nick_w) + 80
+                if item_w > max_w:
+                    max_w = item_w
+        
+        # 限制在合理範圍內
+        final_w = max(150, min(max_w, 450))
+        logger.debug(f"動態調整側邊欄寬度至: {final_w}px (內容最寬: {max_w}px)")
+        
+        # 取得目前視窗實際寬度，以精確分配比例
+        current_total_w = self.width()
+        self.splitter.setSizes([final_w, current_total_w - final_w])
 
     def add_or_select_contact(self, ptt_id, nickname=""):
         ptt_id_lower = ptt_id.lower()
@@ -553,6 +599,7 @@ class MainWindow(QMainWindow):
         
         # 嘗試獲取使用者資訊以更新暱稱與正確大小寫
         self.user_info_requested.emit(ptt_id_lower)
+        self.update_sidebar_width() # 立即嘗試更新一次寬度
 
     def on_contact_selected(self, item):
         widget = self.contact_list.itemWidget(item)

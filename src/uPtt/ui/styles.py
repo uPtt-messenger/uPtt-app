@@ -1,9 +1,9 @@
 # --- uPtt QSS 樣式表 ---
 
 MAIN_STYLE = """
-/* 全域字體與背景 (暗色系) */
+/* 全域字體與背景 (暗色系) - 全面採用等寬字體 */
 QWidget {
-    font-family: "SF Mono", "PingFang TC", "Microsoft JhengHei", sans-serif;
+    font-family: "SF Mono", "Consolas", "Courier New", "PingFang TC", "Microsoft JhengHei", monospace;
     font-size: 14px;
     background-color: #121416;
     color: #D1D5DA;
@@ -18,10 +18,6 @@ QWidget {
     background-color: #1A1D20;
     border: 1px solid #2A2E33;
     border-radius: 12px;
-}
-
-#login-window QLabel {
-    font-family: "SF Mono", "Consolas", "Courier New", monospace;
 }
 
 #logo-label {
@@ -45,7 +41,6 @@ QWidget {
     border-radius: 6px;
     background-color: #141619;
     color: #D1D5DA;
-    font-family: "SF Mono", "Consolas", "Courier New", monospace;
     font-size: 15px;
 }
 
@@ -66,7 +61,6 @@ QWidget {
     border-radius: 6px;
     font-weight: bold;
     font-size: 15px;
-    font-family: "SF Mono", "Consolas", "Courier New", monospace;
     letter-spacing: 1px;
 }
 
@@ -123,7 +117,7 @@ QPushButton:disabled {
     background-color: #1A1D20;
     border-right: 1px solid #2A2E33;
     min-width: 160px;
-    max-width: 250px;
+    max-width: 300px;
 }
 
 #sidebar-title {
@@ -171,7 +165,7 @@ QListWidget::item:selected {
     padding: 0px;
 }
 
-QTextEdit#message-edit {
+#message-edit {
     border: 1px solid #2A2E33;
     border-radius: 4px;
     background-color: #121416;
