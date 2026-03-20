@@ -142,10 +142,10 @@ class DatabaseManager:
                     INSERT INTO sessions (account_id, id, display_id, nickname, is_visible)
                     VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(account_id, id) DO UPDATE SET
-                        display_id = excluded.display_id,
+                        display_id = CASE WHEN excluded.display_id != lower(excluded.display_id) THEN excluded.display_id ELSE sessions.display_id END,
                         nickname = CASE WHEN excluded.nickname != '' THEN excluded.nickname ELSE sessions.nickname END,
                         is_visible = CASE WHEN ? THEN 1 ELSE sessions.is_visible END
-                """, (acc_id_lower, contact_id_lower, display_id, nickname, 1 if set_visible else 1, 1 if set_visible else 0))
+                """, (acc_id_lower, contact_id_lower, display_id, nickname, 1 if set_visible else 0, 1 if set_visible else 0))
                 conn.commit()
         except sqlite3.Error as e:
             logger.error(f"更新會話失敗：{e}")
