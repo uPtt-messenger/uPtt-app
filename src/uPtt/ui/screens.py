@@ -476,7 +476,7 @@ class MainWindow(QMainWindow):
             corrected_id = self.ptt_service.ptt_id
             self.central_stack.setCurrentIndex(1)
             self.setWindowTitle(f"uPtt - {corrected_id}")
-            self.user_id_label.setText(f"登入帳號: {corrected_id}") # 更新目前使用者
+            self.user_id_label.setText(f"{corrected_id} 登入中") # 更新目前使用者
             
             # --- 從資料庫載入歷史對話清單 ---
             self.load_sessions_from_db()
@@ -700,6 +700,7 @@ class MainWindow(QMainWindow):
             # add_or_select_contact 內部會呼叫 on_contact_selected，
             # 後者已從 DB 載入訊息並呼叫 refresh_chat_display，不需再 append。
             self.add_or_select_contact(sender_id_display, nickname)
+            self._move_contact_to_top(sender)
         else:
             # 如果已存在，更新暱稱與 ID (以防對方改過大小寫或暱稱)
             for i in range(self.contact_list.count()):
@@ -727,6 +728,8 @@ class MainWindow(QMainWindow):
                     if widget.ptt_id == sender:
                         widget.set_unread(self.unread_counts[sender])
                         break
+
+            self._move_contact_to_top(sender)
 
         # 桌面通知 (顯示原始大小寫 ID)
         if not self.isActiveWindow():
@@ -800,6 +803,31 @@ class MainWindow(QMainWindow):
             # 僅隱藏，不刪除訊息
             self.db.hide_session(current_acc, ptt_id_lower)
             self.remove_contact_from_sidebar(ptt_id_lower)
+
+    def _move_contact_to_top(self, sender: str):
+        """將指定聯絡人移至清單頂端 (sender 為小寫)"""
+        for i in range(self.contact_list.count()):
+            item = self.contact_list.item(i)
+            widget = self.contact_list.itemWidget(item)
+            if widget.ptt_id == sender:
+                if i == 0:
+                    return
+                was_selected = (self.contact_list.currentItem() == item)
+                ptt_id_display = widget.ptt_id_display
+                label_text = widget.nickname_label.text()
+                nickname = label_text[1:-1] if label_text.startswith("(") and label_text.endswith(")") else label_text
+                self.contact_list.takeItem(i)
+                new_item = QListWidgetItem()
+                new_item.setSizeHint(QSize(0, 70))
+                new_widget = ContactItem(ptt_id_display, nickname)
+                self.contact_list.insertItem(0, new_item)
+                self.contact_list.setItemWidget(new_item, new_widget)
+                unread = self.unread_counts.get(sender, 0)
+                if unread > 0:
+                    new_widget.set_unread(unread)
+                if was_selected:
+                    self.contact_list.setCurrentItem(new_item)
+                return
 
     def remove_contact_from_sidebar(self, ptt_id_lower: str):
         """僅從側邊欄清單中移除指定 ID"""
