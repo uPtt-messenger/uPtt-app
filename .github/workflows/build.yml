@@ -217,7 +217,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
-          pip install nuitka zstandard
+          pip install nuitka zstandard pefile
 
       - name: Generate Windows Icon
         shell: pwsh
@@ -250,6 +250,7 @@ jobs:
             --output-filename=uPtt.exe `
             --output-dir=dist `
             --assume-yes-for-downloads `
+            --windows-dependency-tool=pefile `
             --no-pyi-file `
             src/run_app.py
 
