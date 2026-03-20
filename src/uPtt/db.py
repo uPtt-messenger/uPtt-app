@@ -93,6 +93,16 @@ class DatabaseManager:
                 except sqlite3.OperationalError:
                     pass  # 欄位已存在
 
+                # 遷移：為舊資料庫新增信件類型與主旨欄位
+                try:
+                    cursor.execute("ALTER TABLE messages ADD COLUMN mail_type TEXT DEFAULT 'uptt'")
+                except sqlite3.OperationalError:
+                    pass  # 欄位已存在
+                try:
+                    cursor.execute("ALTER TABLE messages ADD COLUMN subject TEXT DEFAULT ''")
+                except sqlite3.OperationalError:
+                    pass  # 欄位已存在
+
                 conn.commit()
                 logger.info(f"資料庫初始化成功 (已啟用帳號隔離)：{self.db_path}")
         except sqlite3.Error as e:
@@ -193,18 +203,19 @@ class DatabaseManager:
 
     # --- 訊息相關 (需傳入 account_id) ---
 
-    def save_message(self, account_id: str, session_id: str, sender_id: str, 
-                     receiver_id: str, content: str, timestamp: datetime, is_me: bool) -> bool:
+    def save_message(self, account_id: str, session_id: str, sender_id: str,
+                     receiver_id: str, content: str, timestamp: datetime, is_me: bool,
+                     mail_type: str = 'uptt', subject: str = '') -> bool:
         acc_id_lower = account_id.lower()
         session_id_lower = session_id.lower()
         try:
             with self._get_connection() as conn:
                 # 1. 插入訊息 (使用 INSERT OR IGNORE 防止重複)
                 cursor = conn.execute("""
-                    INSERT OR IGNORE INTO messages (account_id, session_id, sender_id, receiver_id, content, timestamp, is_me, is_read)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (acc_id_lower, session_id_lower, sender_id.lower(), receiver_id.lower(), 
-                      content, timestamp, 1 if is_me else 0, 1 if is_me else 0))
+                    INSERT OR IGNORE INTO messages (account_id, session_id, sender_id, receiver_id, content, timestamp, is_me, is_read, mail_type, subject)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (acc_id_lower, session_id_lower, sender_id.lower(), receiver_id.lower(),
+                      content, timestamp, 1 if is_me else 0, 1 if is_me else 0, mail_type, subject))
                 
                 # 如果沒有新資料插入 (rows_affected == 0), 代表是重複訊息
                 if cursor.rowcount == 0:

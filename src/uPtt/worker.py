@@ -130,20 +130,45 @@ class PTTWorker(QObject):
                 raw_title = mail.get(PyPtt.MailField.title)
                 title = str(raw_title) if raw_title is not None else ""
                 
-                if contant.PTT_MSG_TITLE not in title:
-                    # 普通信件保留
-                    continue
-
-                # 處理 uPtt 訊息
                 full_author = mail[PyPtt.MailField.author].strip()
                 sender_id = full_author.split(' ')[0]
                 is_backup = (self.ptt.ptt_id and sender_id.lower() == self.ptt.ptt_id.lower())
-                
+
+                if contant.PTT_MSG_TITLE not in title:
+                    # 一般站內信：儲存為 mail_type='mail' 並顯示
+                    if not is_backup:
+                        content = mail[PyPtt.MailField.content]
+                        current_user = self.ptt.ptt_id
+                        self.db.upsert_session(account_id=current_user, display_id=sender_id)
+                        is_new = self.db.save_message(
+                            account_id=current_user,
+                            session_id=sender_id,
+                            sender_id=sender_id,
+                            receiver_id=current_user,
+                            content=content,
+                            timestamp=mail_time,
+                            is_me=False,
+                            mail_type='mail',
+                            subject=title
+                        )
+                        if is_new:
+                            mails_to_emit.append({
+                                'sender': sender_id,
+                                'text': content,
+                                'time': mail_time.strftime("%H:%M"),
+                                'full_author': full_author,
+                                'timestamp': mail_time,
+                                'mail_type': 'mail',
+                                'subject': title
+                            })
+                    continue
+
+                # 處理 uPtt 訊息
                 if not is_backup:
                     content = mail[PyPtt.MailField.content]
                     start = content.find(contant.PTT_MSG_DIVISION_LINE) + len(contant.PTT_MSG_DIVISION_LINE)
                     end = content.rfind(contant.PTT_MSG_DIVISION_LINE)
-                    
+
                     if start >= 0 and end > start:
                         text = content[start:end].strip()
                         current_user = self.ptt.ptt_id
@@ -155,7 +180,8 @@ class PTTWorker(QObject):
                             receiver_id=current_user,
                             content=text,
                             timestamp=mail_time,
-                            is_me=False
+                            is_me=False,
+                            mail_type='uptt'
                         )
 
                         if is_new:
@@ -164,9 +190,11 @@ class PTTWorker(QObject):
                                 'text': text,
                                 'time': mail_time.strftime("%H:%M"),
                                 'full_author': full_author,
-                                'timestamp': mail_time
+                                'timestamp': mail_time,
+                                'mail_type': 'uptt',
+                                'subject': ''
                             })
-                
+
                 # 處理完即刪除
                 self.ptt.call('del_mail', {'index': mail_idx})
 

@@ -2,7 +2,8 @@ import logging
 from datetime import datetime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QFrame, QSizePolicy, QStyle, QListWidgetItem, QListWidget, QAbstractItemView
+    QFrame, QSizePolicy, QStyle, QListWidgetItem, QListWidget, QAbstractItemView,
+    QPushButton, QDialog, QTextEdit
 )
 from PySide6.QtCore import Qt, QSize, Signal
 from uPtt.ui.styles import get_bubble_style
@@ -90,11 +91,150 @@ class ChatBubble(QWidget):
         self.bubble_container.updateGeometry()
         self.updateGeometry()
 
+class MailCard(QWidget):
+    """
+    傳統信件卡片，用於顯示非 uPtt 的一般站內信。
+    有明顯邊框、標題欄與 ✉️ 圖示；超過 5 行時顯示「展開全文」按鈕。
+    """
+    MAX_LINES = 5
+
+    def __init__(self, subject: str, text: str, time_str: str, parent=None):
+        super().__init__(parent)
+        self.full_text = text
+        self.subject = subject
+
+        main_layout = QHBoxLayout(self)
+        main_layout.setContentsMargins(0, 2, 0, 2)
+        main_layout.setSpacing(0)
+
+        card = QFrame()
+        card.setStyleSheet("""
+            QFrame {
+                background-color: #1A2332;
+                border: 1px solid #3D4F63;
+                border-radius: 8px;
+            }
+        """)
+        card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(12, 8, 12, 8)
+        card_layout.setSpacing(6)
+
+        # 標題列：✉️ 圖示 + 主旨 + 時間
+        header_layout = QHBoxLayout()
+        header_layout.setSpacing(6)
+
+        icon_label = QLabel("✉️")
+        icon_label.setStyleSheet("font-size: 14px; border: none;")
+        icon_label.setFixedWidth(20)
+
+        subject_label = QLabel(subject if subject else "(無主旨)")
+        subject_label.setStyleSheet("""
+            font-weight: bold;
+            font-size: 13px;
+            color: #A0C4B4;
+            border: none;
+        """)
+        subject_label.setWordWrap(False)
+
+        time_label = QLabel(time_str)
+        time_label.setStyleSheet("color: #5C6773; font-size: 10px; border: none;")
+        time_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+        header_layout.addWidget(icon_label)
+        header_layout.addWidget(subject_label, 1)
+        header_layout.addWidget(time_label)
+
+        # 分隔線
+        divider = QFrame()
+        divider.setFrameShape(QFrame.HLine)
+        divider.setStyleSheet("background-color: #3D4F63; border: none; max-height: 1px;")
+
+        # 內文預覽 (最多 MAX_LINES 行)
+        lines = text.splitlines()
+        preview_text = "\n".join(lines[:self.MAX_LINES])
+        content_label = QLabel(preview_text if preview_text else " ")
+        content_label.setWordWrap(True)
+        content_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        content_label.setStyleSheet("color: #CDD5DF; font-size: 13px; border: none;")
+
+        card_layout.addLayout(header_layout)
+        card_layout.addWidget(divider)
+        card_layout.addWidget(content_label)
+
+        # 若超過 MAX_LINES 行，顯示「展開全文」按鈕
+        if len(lines) > self.MAX_LINES:
+            expand_btn = QPushButton("展開全文 ▾")
+            expand_btn.setStyleSheet("""
+                QPushButton {
+                    color: #A0C4B4;
+                    background: transparent;
+                    border: none;
+                    font-size: 12px;
+                    text-align: left;
+                    padding: 0;
+                }
+                QPushButton:hover {
+                    color: #C5DDD4;
+                    text-decoration: underline;
+                }
+            """)
+            expand_btn.setCursor(Qt.PointingHandCursor)
+            expand_btn.clicked.connect(self._show_full_content)
+            card_layout.addWidget(expand_btn)
+
+        main_layout.addWidget(card)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+
+    def _show_full_content(self):
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"✉️  {self.subject if self.subject else '信件內容'}")
+        dialog.setMinimumSize(520, 420)
+        dialog.setStyleSheet("background-color: #0D1117; color: #CDD5DF;")
+
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(10)
+
+        text_edit = QTextEdit()
+        text_edit.setReadOnly(True)
+        text_edit.setPlainText(self.full_text)
+        text_edit.setStyleSheet("""
+            QTextEdit {
+                background-color: #161B22;
+                color: #CDD5DF;
+                border: 1px solid #3D4F63;
+                border-radius: 4px;
+                font-size: 13px;
+                font-family: "SF Mono", "Consolas", "Courier New", monospace;
+                padding: 8px;
+            }
+        """)
+
+        close_btn = QPushButton("關閉")
+        close_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2D3748;
+                color: #CDD5DF;
+                border: 1px solid #4A5568;
+                border-radius: 4px;
+                padding: 6px 20px;
+                font-size: 13px;
+            }
+            QPushButton:hover { background-color: #4A5568; }
+        """)
+        close_btn.clicked.connect(dialog.accept)
+
+        layout.addWidget(text_edit)
+        layout.addWidget(close_btn, alignment=Qt.AlignRight)
+        dialog.exec()
+
+
 class ContactItem(QWidget):
     """
     自訂會話清單項目 (全能適配、極致緊緻專業版)。
     """
-    def __init__(self, ptt_id: str, nickname: str = "", unread_count: int = 0, is_pinned: bool = False, parent=None):
+    def __init__(self, ptt_id: str, nickname: str = "", unread_count: int = 0, is_pinned: bool = False, last_msg_time: str = "", parent=None):
         super().__init__(parent)
         self.ptt_id_display = ptt_id
         self.ptt_id = ptt_id.lower()
@@ -119,6 +259,7 @@ class ContactItem(QWidget):
         # 1. 中央文字區域 (ID + 暱稱) - 左對齊以容納長 ID
         text_container = QWidget()
         text_container.setStyleSheet("background: transparent;")
+        text_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         text_layout = QVBoxLayout(text_container)
         text_layout.setContentsMargins(0, 0, 0, 0)
         text_layout.setSpacing(2)
@@ -137,28 +278,40 @@ class ContactItem(QWidget):
         self.nickname_label = QLabel(f"({nickname})" if nickname else "")
         self.nickname_label.setFixedHeight(14)
         self.nickname_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.nickname_label.setWordWrap(False)
         self.nickname_label.setStyleSheet("""
             font-size: 11px;
             color: #8B949E;
             background: transparent;
         """)
-        self.nickname_label.setWordWrap(False)
 
         text_layout.addWidget(self.id_label)
         text_layout.addWidget(self.nickname_label)
 
-        main_layout.addWidget(text_container, alignment=Qt.AlignVCenter)
+        main_layout.addWidget(text_container, 1, Qt.AlignVCenter)
 
-        # 2. 彈性空間：將未讀標記推向右側
-        main_layout.addStretch()
+        # 2. 右側：時間（上）+ 未讀紅點（下）
+        right_container = QWidget()
+        right_container.setStyleSheet("background: transparent;")
+        right_container.setFixedWidth(38)
+        right_vbox = QVBoxLayout(right_container)
+        right_vbox.setContentsMargins(0, 0, 0, 0)
+        right_vbox.setSpacing(3)
+        right_vbox.setAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
 
-        # 3. 右側未讀標記
-        self.unread_label = QLabel(f"{unread_count}" if unread_count > 0 else "")
+        self.time_label = QLabel(last_msg_time)
+        self.time_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.time_label.setStyleSheet("font-size: 10px; color: #5C6773; background: transparent;")
+
+        self.unread_label = QLabel()
         self.unread_label.setFixedSize(24, 24)
         self.unread_label.setAlignment(Qt.AlignCenter)
-        self.update_unread_style(unread_count)
 
-        main_layout.addWidget(self.unread_label, alignment=Qt.AlignVCenter)
+        right_vbox.addWidget(self.time_label)
+        right_vbox.addWidget(self.unread_label, alignment=Qt.AlignHCenter)
+
+        self.update_unread_style(unread_count)
+        main_layout.addWidget(right_container, alignment=Qt.AlignVCenter)
 
         # 設定固定高度
         self.setFixedHeight(62)
@@ -170,7 +323,7 @@ class ContactItem(QWidget):
         if ptt_id_display:
             self.ptt_id_display = ptt_id_display
             self.id_label.setText(ptt_id_display)
-        
+
         if nickname:
             self.nickname_label.setText(f"({nickname})")
         else:
@@ -201,7 +354,11 @@ class ContactItem(QWidget):
             'nickname': nickname,
             'unread_count': self.unread_count,
             'is_pinned': self.is_pinned,
+            'last_msg_time': self.time_label.text(),
         }
+
+    def set_last_msg_time(self, time_str: str):
+        self.time_label.setText(time_str)
 
     def update_unread_style(self, count: int):
         self.unread_count = count
@@ -303,6 +460,7 @@ class ContactListWidget(QListWidget):
                 nickname=data['nickname'],
                 unread_count=data['unread_count'],
                 is_pinned=data['is_pinned'],
+                last_msg_time=data.get('last_msg_time', ''),
             )
             self.addItem(new_item)
             self.setItemWidget(new_item, new_widget)

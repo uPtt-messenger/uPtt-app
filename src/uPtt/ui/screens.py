@@ -15,11 +15,24 @@ from PySide6.QtSvg import QSvgRenderer
 
 from uPtt import __version__, contant
 from uPtt.ui.styles import MAIN_STYLE
-from uPtt.ui.widgets import ChatBubble, ContactItem, ContactListWidget
+from uPtt.ui.widgets import ChatBubble, MailCard, ContactItem, ContactListWidget
 from uPtt.worker import PTTWorker
 from uPtt.ptt import UPttService
 
 logger = logging.getLogger("uPtt.ui.screens")
+
+
+def _format_contact_time(time_str: str) -> str:
+    """將 DATETIME 字串格式化為聯絡人列表用的簡短時間（今天顯示 HH:MM，其他顯示 M/D）。"""
+    if not time_str:
+        return ""
+    try:
+        dt = datetime.fromisoformat(str(time_str))
+        if dt.date() == datetime.now().date():
+            return dt.strftime("%H:%M")
+        return f"{dt.month}/{dt.day}"
+    except (ValueError, TypeError):
+        return ""
 
 # 資源目錄定義 (相容 PyInstaller 與 Nuitka)
 if hasattr(sys, '_MEIPASS'):
@@ -506,6 +519,7 @@ class MainWindow(QMainWindow):
                 nickname=s['nickname'] or "",
                 unread_count=s['unread_count'] or 0,
                 is_pinned=is_pinned,
+                last_msg_time=_format_contact_time(s.get('last_message_time', '')),
             )
             # 更新顯示大小寫
             widget.update_info(s['display_id'], s['nickname'] or "")
@@ -531,14 +545,14 @@ class MainWindow(QMainWindow):
         max_w = 180 # 基本寬度
         
         # 取得字體度量物件，用於精確計算像素寬度
-        # ID 使用 bold 15px, 暱稱使用 11px
+        # ID 使用 bold 15px, 暱稱使用 11px (QSS font-size 是 px，需用 setPixelSize)
         id_font = self.font()
-        id_font.setPointSize(15)
+        id_font.setPixelSize(15)
         id_font.setBold(True)
         id_metrics = QFontMetrics(id_font)
-        
+
         nick_font = self.font()
-        nick_font.setPointSize(11)
+        nick_font.setPixelSize(11)
         nick_metrics = QFontMetrics(nick_font)
 
         for i in range(self.contact_list.count()):
@@ -547,14 +561,14 @@ class MainWindow(QMainWindow):
             if widget:
                 # 計算 ID 寬度
                 id_w = id_metrics.horizontalAdvance(widget.ptt_id_display)
-                
+
                 # 計算暱稱寬度 (包含括號)
                 nick_text = widget.nickname_label.text()
                 nick_w = nick_metrics.horizontalAdvance(nick_text)
-                
-                # 取較寬者，並加上間距、未讀標記、以及捲軸預留空間 (約 95px)
-                # 12(左邊距) + 10(元件間距) + 24(未讀標記) + 12(右邊距) + 20(捲軸預留) + 17(安全緩衝)
-                item_w = max(id_w, nick_w) + 80
+
+                # 固定佔用: 8(左邊距) + 3(pin_bar) + 10(spacing) + 10(spacing)
+                #           + 38(right_container) + 12(右邊距) + 15(scrollbar) + 20(緩衝)
+                item_w = max(id_w, nick_w) + 116
                 if item_w > max_w:
                     max_w = item_w
         
@@ -624,7 +638,9 @@ class MainWindow(QMainWindow):
                 'text': m['content'],
                 'time': datetime.fromisoformat(m['timestamp']).strftime("%H:%M") if isinstance(m['timestamp'], str) else m['timestamp'].strftime("%H:%M"),
                 'timestamp': datetime.fromisoformat(m['timestamp']) if isinstance(m['timestamp'], str) else m['timestamp'],
-                'is_me': bool(m['is_me'])
+                'is_me': bool(m['is_me']),
+                'mail_type': m.get('mail_type', 'uptt'),
+                'subject': m.get('subject', '')
             }
             for m in messages
         ]
@@ -654,8 +670,11 @@ class MainWindow(QMainWindow):
         self.messages_layout.addStretch(1)
         
         for msg in history:
-            bubble = ChatBubble(msg['text'], msg['time'], msg['is_me'])
-            self.messages_layout.addWidget(bubble)
+            if msg.get('mail_type') == 'mail':
+                widget = MailCard(msg.get('subject', ''), msg['text'], msg['time'])
+            else:
+                widget = ChatBubble(msg['text'], msg['time'], msg['is_me'])
+            self.messages_layout.addWidget(widget)
         
         # 滾動到底部
         self.scroll_area.verticalScrollBar().setValue(
@@ -678,7 +697,14 @@ class MainWindow(QMainWindow):
         })
         self.refresh_chat_display()
         self.message_edit.clear()
-        
+
+        # 更新聯絡人列表上的最後訊息時間
+        for i in range(self.contact_list.count()):
+            w = self.contact_list.itemWidget(self.contact_list.item(i))
+            if w and w.ptt_id == self.current_chat_id:
+                w.set_last_msg_time(now_str)
+                break
+
         # 2. 透過訊號觸發 Worker 背景發送 (跨執行緒安全)
         self.send_requested.emit(self.current_chat_id, text)
 
@@ -708,19 +734,23 @@ class MainWindow(QMainWindow):
             self.add_or_select_contact(sender_id_display, nickname)
             self._move_contact_to_top(sender)
         else:
-            # 如果已存在，更新暱稱與 ID (以防對方改過大小寫或暱稱)
+            # 如果已存在，更新暱稱、ID 與最後訊息時間
+            now_time = datetime.now().strftime("%H:%M")
             for i in range(self.contact_list.count()):
                 item = self.contact_list.item(i)
                 widget = self.contact_list.itemWidget(item)
                 if widget.ptt_id == sender:
                     widget.update_info(sender_id_display, nickname)
+                    widget.set_last_msg_time(now_time)
                     break
 
             self.chat_histories[sender].append({
                 'text': data['text'],
                 'time': data['time'],
                 'timestamp': data.get('timestamp', datetime.now()),
-                'is_me': False
+                'is_me': False,
+                'mail_type': data.get('mail_type', 'uptt'),
+                'subject': data.get('subject', '')
             })
 
             if self.current_chat_id == sender:
@@ -832,6 +862,7 @@ class MainWindow(QMainWindow):
                     ptt_id=data['ptt_id_display'],
                     nickname=data['nickname'],
                     is_pinned=False,
+                    last_msg_time=data.get('last_msg_time', ''),
                 )
                 self.contact_list.insertItem(pinned_count, new_item)
                 self.contact_list.setItemWidget(new_item, new_widget)
@@ -900,6 +931,7 @@ class MainWindow(QMainWindow):
                     nickname=data['nickname'],
                     unread_count=data['unread_count'],
                     is_pinned=True,
+                    last_msg_time=data.get('last_msg_time', ''),
                 )
                 self.contact_list.insertItem(insert_pos, new_item)
                 self.contact_list.setItemWidget(new_item, new_widget)
@@ -926,6 +958,7 @@ class MainWindow(QMainWindow):
                     nickname=data['nickname'],
                     unread_count=data['unread_count'],
                     is_pinned=False,
+                    last_msg_time=data.get('last_msg_time', ''),
                 )
                 self.contact_list.insertItem(insert_pos, new_item)
                 self.contact_list.setItemWidget(new_item, new_widget)
