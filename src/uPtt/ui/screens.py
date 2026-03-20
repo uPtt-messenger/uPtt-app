@@ -15,7 +15,7 @@ from PySide6.QtSvg import QSvgRenderer
 
 from uPtt import __version__, contant
 from uPtt.ui.styles import MAIN_STYLE
-from uPtt.ui.widgets import ChatBubble, ContactItem
+from uPtt.ui.widgets import ChatBubble, ContactItem, ContactListWidget
 from uPtt.worker import PTTWorker
 from uPtt.ptt import UPttService
 
@@ -171,6 +171,7 @@ class MainWindow(QMainWindow):
         self.chat_histories: Dict[str, List[Dict]] = {}
         self.unread_counts: Dict[str, int] = {}
         self.blocked_users: set = set()
+        self.pinned_ids: set = set()
         
         # 初始化 UI 與背景執行緒
         self.init_ui()
@@ -285,10 +286,11 @@ class MainWindow(QMainWindow):
         self.new_chat_input.returnPressed.connect(self.handle_add_chat)
         sidebar_header.addWidget(self.new_chat_input)
         
-        self.contact_list = QListWidget()
+        self.contact_list = ContactListWidget()
         self.contact_list.setObjectName("contact-list")
         self.contact_list.itemClicked.connect(self.on_contact_selected)
-        
+        self.contact_list.items_reordered.connect(self._on_items_reordered)
+
         # 開啟右鍵選單
         self.contact_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.contact_list.customContextMenuRequested.connect(self.show_contact_context_menu)
@@ -489,29 +491,33 @@ class MainWindow(QMainWindow):
         """從資料庫載入所有可見的歷史對話。"""
         current_acc = self.ptt_service.ptt_id
         sessions = self.db.get_all_sessions(current_acc)
-        
+
         # 暫時關閉信號以加速加載
         self.contact_list.blockSignals(True)
         for s in sessions:
-            # 建立清單項目
+            is_pinned = bool(s.get('is_pinned', 0))
+            if is_pinned:
+                self.pinned_ids.add(s['id'])
+
             item = QListWidgetItem(self.contact_list)
             item.setSizeHint(QSize(0, 70))
             widget = ContactItem(
-                ptt_id=s['id'], 
-                nickname=s['nickname'] or "", 
-                unread_count=s['unread_count'] or 0
+                ptt_id=s['id'],
+                nickname=s['nickname'] or "",
+                unread_count=s['unread_count'] or 0,
+                is_pinned=is_pinned,
             )
             # 更新顯示大小寫
             widget.update_info(s['display_id'], s['nickname'] or "")
             self.contact_list.addItem(item)
             self.contact_list.setItemWidget(item, widget)
-            
+
             # 初始化本地快取
             self.chat_histories[s['id']] = []
             self.unread_counts[s['id']] = s['unread_count'] or 0
-            
+
         self.contact_list.blockSignals(False)
-        logger.info(f"從資料庫載入 {len(sessions)} 個對話會話")
+        logger.info(f"從資料庫載入 {len(sessions)} 個對話會話 (其中 {len(self.pinned_ids)} 個已釘選)")
         
         # 載入完成後，根據內容調整寬度
         self.update_sidebar_width()
@@ -805,22 +811,29 @@ class MainWindow(QMainWindow):
             self.remove_contact_from_sidebar(ptt_id_lower)
 
     def _move_contact_to_top(self, sender: str):
-        """將指定聯絡人移至清單頂端 (sender 為小寫)"""
+        """將指定非釘選聯絡人移至非釘選區頂端 (sender 為小寫)"""
+        if sender in self.pinned_ids:
+            return  # 釘選的聯絡人不需移動
+
+        pinned_count = len(self.pinned_ids)
+
         for i in range(self.contact_list.count()):
             item = self.contact_list.item(i)
             widget = self.contact_list.itemWidget(item)
-            if widget.ptt_id == sender:
-                if i == 0:
-                    return
+            if widget and widget.ptt_id == sender:
+                if i == pinned_count:
+                    return  # 已在非釘選區頂端
                 was_selected = (self.contact_list.currentItem() == item)
-                ptt_id_display = widget.ptt_id_display
-                label_text = widget.nickname_label.text()
-                nickname = label_text[1:-1] if label_text.startswith("(") and label_text.endswith(")") else label_text
+                data = widget.get_data()
                 self.contact_list.takeItem(i)
                 new_item = QListWidgetItem()
                 new_item.setSizeHint(QSize(0, 70))
-                new_widget = ContactItem(ptt_id_display, nickname)
-                self.contact_list.insertItem(0, new_item)
+                new_widget = ContactItem(
+                    ptt_id=data['ptt_id_display'],
+                    nickname=data['nickname'],
+                    is_pinned=False,
+                )
+                self.contact_list.insertItem(pinned_count, new_item)
                 self.contact_list.setItemWidget(new_item, new_widget)
                 unread = self.unread_counts.get(sender, 0)
                 if unread > 0:
@@ -831,13 +844,14 @@ class MainWindow(QMainWindow):
 
     def remove_contact_from_sidebar(self, ptt_id_lower: str):
         """僅從側邊欄清單中移除指定 ID"""
+        self.pinned_ids.discard(ptt_id_lower)
         for i in range(self.contact_list.count()):
             item = self.contact_list.item(i)
             widget = self.contact_list.itemWidget(item)
             if widget.ptt_id == ptt_id_lower:
                 row = self.contact_list.row(item)
                 self.contact_list.takeItem(row)
-                
+
                 # 如果正在與此人對話，清空對話顯示
                 if self.current_chat_id == ptt_id_lower:
                     self.current_chat_id = None
@@ -845,29 +859,118 @@ class MainWindow(QMainWindow):
                     self.setWindowTitle(f"uPtt - {self.ptt_service.ptt_id}")
                 break
 
+    def toggle_pin(self, ptt_id: str):
+        """釘選或取消釘選指定聯絡人。"""
+        ptt_id_lower = ptt_id.lower()
+        current_acc = self.ptt_service.ptt_id
+
+        if ptt_id_lower in self.pinned_ids:
+            # 取消釘選
+            self.pinned_ids.discard(ptt_id_lower)
+            self.db.set_pin_session(current_acc, ptt_id_lower, False)
+            self._move_pinned_to_unpinned_area(ptt_id_lower)
+            logger.info(f"取消釘選: {ptt_id_lower}")
+        else:
+            # 釘選：加在釘選區末尾
+            pin_order = len(self.pinned_ids)
+            self.pinned_ids.add(ptt_id_lower)
+            self.db.set_pin_session(current_acc, ptt_id_lower, True, pin_order)
+            self._move_to_pinned_area(ptt_id_lower)
+            logger.info(f"釘選: {ptt_id_lower} (order={pin_order})")
+
+    def _move_to_pinned_area(self, ptt_id_lower: str):
+        """將項目移至釘選區末尾並標記為釘選。"""
+        insert_pos = len(self.pinned_ids) - 1  # 已加入 pinned_ids，所以減 1
+
+        for i in range(self.contact_list.count()):
+            item = self.contact_list.item(i)
+            widget = self.contact_list.itemWidget(item)
+            if widget and widget.ptt_id == ptt_id_lower:
+                if i == insert_pos:
+                    widget.set_pinned(True)
+                    return
+                was_selected = (self.contact_list.currentItem() == item)
+                data = widget.get_data()
+                self.contact_list.takeItem(i)
+
+                new_item = QListWidgetItem()
+                new_item.setSizeHint(QSize(0, 70))
+                new_widget = ContactItem(
+                    ptt_id=data['ptt_id_display'],
+                    nickname=data['nickname'],
+                    unread_count=data['unread_count'],
+                    is_pinned=True,
+                )
+                self.contact_list.insertItem(insert_pos, new_item)
+                self.contact_list.setItemWidget(new_item, new_widget)
+                if was_selected:
+                    self.contact_list.setCurrentItem(new_item)
+                return
+
+    def _move_pinned_to_unpinned_area(self, ptt_id_lower: str):
+        """將取消釘選的項目移至非釘選區頂端。"""
+        insert_pos = len(self.pinned_ids)  # 已從 pinned_ids 移除
+
+        for i in range(self.contact_list.count()):
+            item = self.contact_list.item(i)
+            widget = self.contact_list.itemWidget(item)
+            if widget and widget.ptt_id == ptt_id_lower:
+                was_selected = (self.contact_list.currentItem() == item)
+                data = widget.get_data()
+                self.contact_list.takeItem(i)
+
+                new_item = QListWidgetItem()
+                new_item.setSizeHint(QSize(0, 70))
+                new_widget = ContactItem(
+                    ptt_id=data['ptt_id_display'],
+                    nickname=data['nickname'],
+                    unread_count=data['unread_count'],
+                    is_pinned=False,
+                )
+                self.contact_list.insertItem(insert_pos, new_item)
+                self.contact_list.setItemWidget(new_item, new_widget)
+                if was_selected:
+                    self.contact_list.setCurrentItem(new_item)
+                return
+
+    def _on_items_reordered(self, new_order: list):
+        """拖放排序後，儲存釘選項目的新順序至資料庫。"""
+        pinned_in_order = [pid for pid in new_order if pid in self.pinned_ids]
+        if pinned_in_order:
+            current_acc = self.ptt_service.ptt_id
+            self.db.update_pin_orders(current_acc, pinned_in_order)
+            logger.info(f"已更新釘選排序: {pinned_in_order}")
+
     def show_contact_context_menu(self, pos):
         """顯示聯絡人清單的右鍵選單"""
         item = self.contact_list.itemAt(pos)
         if not item:
             return
-            
+
         widget = self.contact_list.itemWidget(item)
         menu = QMenu(self)
-        
+
+        # 釘選 / 取消釘選
+        is_pinned = widget.ptt_id in self.pinned_ids
+        pin_action = QAction("取消釘選" if is_pinned else "釘選對話", self)
+        pin_action.triggered.connect(lambda: self.toggle_pin(widget.ptt_id))
+
         close_action = QAction("關閉對話", self)
         close_action.triggered.connect(lambda: self.handle_contact_action(widget.ptt_id, "CLOSE"))
-        
+
         delete_action = QAction("刪除對話", self)
         delete_action.triggered.connect(lambda: self.handle_contact_action(widget.ptt_id, "DELETE"))
-        
+
         block_action = QAction("封鎖使用者", self)
         block_action.triggered.connect(lambda: self.handle_contact_action(widget.ptt_id, "BLOCK"))
-        
+
+        menu.addAction(pin_action)
+        menu.addSeparator()
         menu.addAction(close_action)
         menu.addAction(delete_action)
         menu.addSeparator()
         menu.addAction(block_action)
-        
+
         menu.exec(self.contact_list.mapToGlobal(pos))
 
     def handle_logout(self):
@@ -900,6 +1003,7 @@ class MainWindow(QMainWindow):
             self.contact_list.clear()
             self.chat_histories.clear()
             self.unread_counts.clear()
+            self.pinned_ids.clear()
             self.current_chat_id = None
             self.refresh_chat_display()
             self.user_id_label.setText("未登入")

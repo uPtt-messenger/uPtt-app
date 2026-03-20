@@ -1,10 +1,10 @@
 import logging
 from datetime import datetime
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-    QFrame, QSizePolicy, QStyle, QListWidgetItem
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QFrame, QSizePolicy, QStyle, QListWidgetItem, QListWidget, QAbstractItemView
 )
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, Signal
 from uPtt.ui.styles import get_bubble_style
 
 logger = logging.getLogger("uPtt.ui.widgets")
@@ -94,18 +94,27 @@ class ContactItem(QWidget):
     """
     自訂會話清單項目 (全能適配、極致緊緻專業版)。
     """
-    def __init__(self, ptt_id: str, nickname: str = "", unread_count: int = 0, parent=None):
+    def __init__(self, ptt_id: str, nickname: str = "", unread_count: int = 0, is_pinned: bool = False, parent=None):
         super().__init__(parent)
         self.ptt_id_display = ptt_id
         self.ptt_id = ptt_id.lower()
-        
+        self.is_pinned = is_pinned
+        self.unread_count = unread_count
+
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setStyleSheet("background: transparent;")
 
         # 主佈局：左右排列
         main_layout = QHBoxLayout(self)
-        main_layout.setContentsMargins(12, 0, 12, 0) 
+        main_layout.setContentsMargins(8, 0, 12, 0)
         main_layout.setSpacing(10)
+
+        # 0. 釘選指示條 (左側細條)
+        self.pin_bar = QFrame()
+        self.pin_bar.setFixedWidth(3)
+        self.pin_bar.setFixedHeight(30)
+        self._update_pin_style()
+        main_layout.addWidget(self.pin_bar, alignment=Qt.AlignVCenter)
 
         # 1. 中央文字區域 (ID + 暱稱) - 左對齊以容納長 ID
         text_container = QWidget()
@@ -113,31 +122,31 @@ class ContactItem(QWidget):
         text_layout = QVBoxLayout(text_container)
         text_layout.setContentsMargins(0, 0, 0, 0)
         text_layout.setSpacing(2)
-        
+
         # ID 標籤 (左對齊)
         self.id_label = QLabel(self.ptt_id_display)
         self.id_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.id_label.setStyleSheet("""
-            font-weight: bold; 
-            font-size: 15px; 
-            color: #F0F6FC; 
+            font-weight: bold;
+            font-size: 15px;
+            color: #F0F6FC;
             background: transparent;
         """)
-        
+
         # 暱稱標籤 (左對齊)
         self.nickname_label = QLabel(f"({nickname})" if nickname else "")
-        self.nickname_label.setFixedHeight(14) 
+        self.nickname_label.setFixedHeight(14)
         self.nickname_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.nickname_label.setStyleSheet("""
-            font-size: 11px; 
-            color: #8B949E; 
+            font-size: 11px;
+            color: #8B949E;
             background: transparent;
         """)
         self.nickname_label.setWordWrap(False)
 
         text_layout.addWidget(self.id_label)
         text_layout.addWidget(self.nickname_label)
-        
+
         main_layout.addWidget(text_container, alignment=Qt.AlignVCenter)
 
         # 2. 彈性空間：將未讀標記推向右側
@@ -148,9 +157,9 @@ class ContactItem(QWidget):
         self.unread_label.setFixedSize(24, 24)
         self.unread_label.setAlignment(Qt.AlignCenter)
         self.update_unread_style(unread_count)
-        
+
         main_layout.addWidget(self.unread_label, alignment=Qt.AlignVCenter)
-        
+
         # 設定固定高度
         self.setFixedHeight(62)
 
@@ -172,7 +181,30 @@ class ContactItem(QWidget):
     def set_nickname(self, nickname: str):
         self.update_info(self.ptt_id_display, nickname)
 
+    def _update_pin_style(self):
+        if self.is_pinned:
+            self.pin_bar.setStyleSheet("background-color: #A0C4B4; border-radius: 1px;")
+        else:
+            self.pin_bar.setStyleSheet("background: transparent;")
+
+    def set_pinned(self, is_pinned: bool):
+        self.is_pinned = is_pinned
+        self._update_pin_style()
+
+    def get_data(self) -> dict:
+        """返回此項目的完整資料，供重建時使用。"""
+        nick_text = self.nickname_label.text()
+        nickname = nick_text[1:-1] if nick_text.startswith("(") and nick_text.endswith(")") else nick_text
+        return {
+            'ptt_id': self.ptt_id,
+            'ptt_id_display': self.ptt_id_display,
+            'nickname': nickname,
+            'unread_count': self.unread_count,
+            'is_pinned': self.is_pinned,
+        }
+
     def update_unread_style(self, count: int):
+        self.unread_count = count
         if count > 0:
             self.unread_label.setText(f"{count}")
             self.unread_label.setStyleSheet("""
@@ -188,3 +220,101 @@ class ContactItem(QWidget):
 
     def set_unread(self, count: int):
         self.update_unread_style(count)
+
+
+class ContactListWidget(QListWidget):
+    """支援拖放排序的聯絡人清單，釘選項目限於釘選區內拖動。"""
+    items_reordered = Signal(list)  # 發送完整的新 ptt_id 順序清單 (小寫)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDragDropMode(QAbstractItemView.InternalMove)
+        self.setDefaultDropAction(Qt.MoveAction)
+        self.setSelectionMode(QAbstractItemView.SingleSelection)
+
+    def _pinned_count(self) -> int:
+        """回傳清單頂端連續釘選項目的數量。"""
+        count = 0
+        for i in range(self.count()):
+            w = self.itemWidget(self.item(i))
+            if w and w.is_pinned:
+                count += 1
+            else:
+                break
+        return count
+
+    def dropEvent(self, event):
+        source_item = self.currentItem()
+        if not source_item:
+            event.ignore()
+            return
+
+        source_row = self.row(source_item)
+        source_widget = self.itemWidget(source_item)
+        if not source_widget:
+            event.ignore()
+            return
+
+        # 計算目標列
+        drop_pos = event.position().toPoint()
+        target_item = self.itemAt(drop_pos)
+        target_row = self.row(target_item) if target_item else self.count() - 1
+
+        # 限制拖放範圍：釘選只能在釘選區內，非釘選只能在非釘選區內
+        pinned_count = self._pinned_count()
+        if source_widget.is_pinned:
+            target_row = max(0, min(target_row, max(0, pinned_count - 1)))
+        else:
+            target_row = max(pinned_count, min(target_row, self.count() - 1))
+
+        if target_row == source_row:
+            event.ignore()
+            return
+
+        # 記錄目前選取的項目 ID
+        selected_ptt_id = None
+        current = self.currentItem()
+        if current:
+            w = self.itemWidget(current)
+            if w:
+                selected_ptt_id = w.ptt_id
+
+        # 擷取所有項目資料後執行移動
+        items_data = []
+        for i in range(self.count()):
+            w = self.itemWidget(self.item(i))
+            if w:
+                items_data.append(w.get_data())
+
+        moved = items_data.pop(source_row)
+        items_data.insert(target_row, moved)
+
+        # 清除並重建清單
+        while self.count() > 0:
+            self.takeItem(0)
+
+        for data in items_data:
+            new_item = QListWidgetItem()
+            new_item.setSizeHint(QSize(0, 70))
+            new_widget = ContactItem(
+                ptt_id=data['ptt_id_display'],
+                nickname=data['nickname'],
+                unread_count=data['unread_count'],
+                is_pinned=data['is_pinned'],
+            )
+            self.addItem(new_item)
+            self.setItemWidget(new_item, new_widget)
+
+        # 還原選取狀態
+        if selected_ptt_id:
+            for i in range(self.count()):
+                w = self.itemWidget(self.item(i))
+                if w and w.ptt_id == selected_ptt_id:
+                    self.setCurrentItem(self.item(i))
+                    break
+
+        new_order = [d['ptt_id'] for d in items_data]
+        self.items_reordered.emit(new_order)
+        event.accept()

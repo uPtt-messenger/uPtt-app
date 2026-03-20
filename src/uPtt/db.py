@@ -82,7 +82,17 @@ class DatabaseManager:
                 # 索引優化
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_messages_lookup ON messages(account_id, session_id)")
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_messages_time ON messages(timestamp)")
-                
+
+                # 遷移：為舊資料庫新增釘選相關欄位
+                try:
+                    cursor.execute("ALTER TABLE sessions ADD COLUMN is_pinned BOOLEAN DEFAULT 0")
+                except sqlite3.OperationalError:
+                    pass  # 欄位已存在
+                try:
+                    cursor.execute("ALTER TABLE sessions ADD COLUMN pin_order INTEGER DEFAULT 0")
+                except sqlite3.OperationalError:
+                    pass  # 欄位已存在
+
                 conn.commit()
                 logger.info(f"資料庫初始化成功 (已啟用帳號隔離)：{self.db_path}")
         except sqlite3.Error as e:
@@ -141,17 +151,45 @@ class DatabaseManager:
             logger.error(f"隱藏會話失敗：{e}")
 
     def get_all_sessions(self, account_id: str) -> List[Dict[str, Any]]:
-        """取得特定帳號的所有「可見」會話清單。"""
+        """取得特定帳號的所有「可見」會話清單。釘選項目排在最前面。"""
         try:
             with self._get_connection() as conn:
                 rows = conn.execute("""
-                    SELECT * FROM sessions 
+                    SELECT * FROM sessions
                     WHERE account_id = ? AND is_visible = 1
-                    ORDER BY last_message_time DESC, id ASC
+                    ORDER BY is_pinned DESC,
+                             CASE WHEN is_pinned=1 THEN pin_order ELSE 9999999 END ASC,
+                             last_message_time DESC,
+                             id ASC
                 """, (account_id.lower(),)).fetchall()
                 return [dict(row) for row in rows]
         except sqlite3.Error:
             return []
+
+    def set_pin_session(self, account_id: str, session_id: str, is_pinned: bool, pin_order: int = 0):
+        """設定會話的釘選狀態與順序。"""
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    "UPDATE sessions SET is_pinned = ?, pin_order = ? WHERE account_id = ? AND id = ?",
+                    (1 if is_pinned else 0, pin_order, account_id.lower(), session_id.lower())
+                )
+                conn.commit()
+        except sqlite3.Error as e:
+            logger.error(f"更新釘選狀態失敗：{e}")
+
+    def update_pin_orders(self, account_id: str, pinned_ids_in_order: List[str]):
+        """更新釘選項目的排序，pinned_ids_in_order 為已排序的小寫 ID 清單。"""
+        try:
+            with self._get_connection() as conn:
+                for order, session_id in enumerate(pinned_ids_in_order):
+                    conn.execute(
+                        "UPDATE sessions SET pin_order = ? WHERE account_id = ? AND id = ? AND is_pinned = 1",
+                        (order, account_id.lower(), session_id.lower())
+                    )
+                conn.commit()
+        except sqlite3.Error as e:
+            logger.error(f"更新釘選排序失敗：{e}")
 
     # --- 訊息相關 (需傳入 account_id) ---
 
