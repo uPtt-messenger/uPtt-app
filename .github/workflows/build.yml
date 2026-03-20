@@ -20,7 +20,8 @@ jobs:
         with:
           fetch-depth: 0
       - name: TruffleHog OSS
-        uses: trufflesecurity/trufflehog@main
+        uses: trufflesecurity/trufflehog@v3
+        if: github.event.before != '0000000000000000000000000000000000000000'
         with:
           path: ./
           base: ${{ github.event.before }}
@@ -86,7 +87,7 @@ jobs:
             SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-4)
             NEW_VERSION="${VERSION}beta${SHORT_SHA}"
             # 使用 Python 跨平台修改版本號
-            python3 -c "import sys; c = open('src/uPtt/__init__.py').read().replace('__version__ = \"' + sys.argv[1] + '\"', '__version__ = \"' + sys.argv[2] + '\"'); open('src/uPtt/__init__.py', 'w').write(c)" "$VERSION" "$NEW_VERSION"
+            python -c "import sys; c = open('src/uPtt/__init__.py').read().replace('__version__ = \"' + sys.argv[1] + '\"', '__version__ = \"' + sys.argv[2] + '\"'); open('src/uPtt/__init__.py', 'w').write(c)" "$VERSION" "$NEW_VERSION"
             VERSION=$NEW_VERSION
             IS_PRERELEASE=true
             echo "RELEASE_TITLE=uPtt Beta v$VERSION" >> $GITHUB_ENV
@@ -99,13 +100,21 @@ jobs:
           echo "IS_PRERELEASE=$IS_PRERELEASE" >> $GITHUB_OUTPUT
           echo "Final Version to build: $VERSION"
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
           pip install nuitka zstandard
-          brew install librsvg
+
+      - name: Cache Homebrew downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/Homebrew/downloads
+          key: brew-librsvg-${{ runner.arch }}
+
+      - name: Install librsvg
+        run: brew install librsvg
 
       - name: Generate macOS Icon
         run: |
@@ -124,6 +133,13 @@ jobs:
           iconutil -c icns "$ICONSET" -o "$ASSETS_DIR/logo_icon.icns"
           rm -rf "$ICONSET"
           
+      - name: Cache Nuitka (macOS)
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/Nuitka
+          key: nuitka-macos-${{ runner.arch }}-${{ hashFiles('src/**/*.py', 'requirements.txt') }}
+          restore-keys: nuitka-macos-${{ runner.arch }}-
+
       - name: Build with Nuitka
         run: |
           PYTHONPATH=src python -m nuitka \
@@ -210,6 +226,13 @@ jobs:
           # 使用 Windows Runner 內建的 ImageMagick 轉換 SVG 到 ICO
           # 包含多種尺寸以確保在各種顯示模式下都清晰
           & magick convert -background none "$ASSETS_DIR/logo_icon.svg" -define icon:auto-resize=16,32,48,64,128,256 "$ASSETS_DIR/logo_icon.ico"
+
+      - name: Cache Nuitka (Windows)
+        uses: actions/cache@v4
+        with:
+          path: C:\Users\runneradmin\AppData\Local\Nuitka\Nuitka\Cache
+          key: nuitka-windows-${{ runner.arch }}-v1
+          restore-keys: nuitka-windows-${{ runner.arch }}-
 
       - name: Build with Nuitka
         shell: pwsh
