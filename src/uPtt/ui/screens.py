@@ -16,6 +16,7 @@ from PySide6.QtSvg import QSvgRenderer
 from uPtt import __version__, contant
 from uPtt.ui.styles import MAIN_STYLE
 from uPtt.ui.widgets import ChatBubble, MailCard, ContactItem, ContactListWidget
+from uPtt.utils import encode_reply, decode_reply
 from uPtt.worker import PTTWorker
 from uPtt.ptt import UPttService
 
@@ -185,6 +186,7 @@ class MainWindow(QMainWindow):
         self.unread_counts: Dict[str, int] = {}
         self.blocked_users: set = set()
         self.pinned_ids: set = set()
+        self.reply_to: Optional[Dict] = None  # {'sender': str, 'preview': str}
         
         # 初始化 UI 與背景執行緒
         self.init_ui()
@@ -348,12 +350,44 @@ class MainWindow(QMainWindow):
         input_vbox.setContentsMargins(10, 8, 10, 10)
         input_vbox.setSpacing(0)
         
+        # 回覆預覽條 (預設隱藏)
+        self.reply_bar = QWidget()
+        self.reply_bar.setObjectName("reply-bar")
+        self.reply_bar.hide()
+        self.reply_bar.setStyleSheet("""
+            QWidget#reply-bar {
+                background-color: #161B22;
+                border-top: 1px solid #A0C4B4;
+                border-left: 3px solid #A0C4B4;
+            }
+        """)
+        reply_bar_layout = QHBoxLayout(self.reply_bar)
+        reply_bar_layout.setContentsMargins(8, 4, 8, 4)
+        reply_bar_layout.setSpacing(8)
+
+        self.reply_bar_label = QLabel()
+        self.reply_bar_label.setStyleSheet("color: #8B949E; font-size: 12px;")
+        self.reply_bar_label.setWordWrap(False)
+
+        cancel_reply_btn = QPushButton("✕")
+        cancel_reply_btn.setFixedSize(20, 20)
+        cancel_reply_btn.setStyleSheet("""
+            QPushButton { color: #8B949E; background: transparent; border: none; font-size: 14px; }
+            QPushButton:hover { color: #CDD5DF; }
+        """)
+        cancel_reply_btn.setCursor(Qt.PointingHandCursor)
+        cancel_reply_btn.clicked.connect(self.cancel_reply)
+
+        reply_bar_layout.addWidget(self.reply_bar_label, 1)
+        reply_bar_layout.addWidget(cancel_reply_btn)
+
         self.message_edit = QLineEdit() # 改用 QLineEdit 實現真正單行
         self.message_edit.setObjectName("message-edit")
         self.message_edit.setFixedHeight(36) # 標準單行高度
         self.message_edit.setPlaceholderText("輸入訊息並按下 Enter 發送...")
         self.message_edit.returnPressed.connect(self.handle_send)
-        
+
+        input_vbox.addWidget(self.reply_bar)
         input_vbox.addWidget(self.message_edit)
         
         chat_vbox.addWidget(self.scroll_area, stretch=1) # 給予最大拉伸權重
@@ -633,21 +667,26 @@ class MainWindow(QMainWindow):
         
         # 從資料庫載入歷史訊息
         messages = self.db.get_messages(current_acc, self.current_chat_id)
-        self.chat_histories[self.current_chat_id] = [
-            {
-                'text': m['content'],
-                'time': datetime.fromisoformat(m['timestamp']).strftime("%H:%M") if isinstance(m['timestamp'], str) else m['timestamp'].strftime("%H:%M"),
-                'timestamp': datetime.fromisoformat(m['timestamp']) if isinstance(m['timestamp'], str) else m['timestamp'],
+        parsed = []
+        for m in messages:
+            ts = datetime.fromisoformat(m['timestamp']) if isinstance(m['timestamp'], str) else m['timestamp']
+            reply_info, actual_text = decode_reply(m['content'])
+            parsed.append({
+                'text': actual_text,
+                'time': ts.strftime("%H:%M"),
+                'timestamp': ts,
                 'is_me': bool(m['is_me']),
                 'mail_type': m.get('mail_type', 'uptt'),
-                'subject': m.get('subject', '')
-            }
-            for m in messages
-        ]
+                'subject': m.get('subject', ''),
+                'reply_info': reply_info,
+            })
+        self.chat_histories[self.current_chat_id] = parsed
 
+        # 切換聯絡人時清除回覆狀態
+        self.cancel_reply()
         self.refresh_chat_display()
         self.message_edit.setFocus()
-        
+
         # 每次切換聯絡人時更新視窗標題
         self.setWindowTitle(f"uPtt - 與 {widget.ptt_id_display} 對話中")
 
@@ -673,7 +712,9 @@ class MainWindow(QMainWindow):
             if msg.get('mail_type') == 'mail':
                 widget = MailCard(msg.get('subject', ''), msg['text'], msg['time'])
             else:
-                widget = ChatBubble(msg['text'], msg['time'], msg['is_me'])
+                widget = ChatBubble(msg['text'], msg['time'], msg['is_me'],
+                                    reply_info=msg.get('reply_info'))
+                widget.reply_requested.connect(self.set_reply_to)
             self.messages_layout.addWidget(widget)
         
         # 滾動到底部
@@ -681,19 +722,58 @@ class MainWindow(QMainWindow):
             self.scroll_area.verticalScrollBar().maximum()
         )
 
+    def set_reply_to(self, text: str, is_me: bool):
+        """設定目前要回覆的訊息，顯示回覆預覽條。"""
+        if not self.current_chat_id:
+            return
+        if is_me:
+            quoted_sender = self.ptt_service.ptt_id.lower()
+            display_id = self.ptt_service.ptt_id
+        else:
+            quoted_sender = self.current_chat_id
+            display_id = self._get_contact_display_id(self.current_chat_id)
+
+        preview = text[:80].replace('\n', ' ')
+        self.reply_to = {'sender': quoted_sender, 'preview': preview}
+        self.reply_bar_label.setText(f"↩ @{display_id}: {text[:60].replace(chr(10), ' ')}")
+        self.reply_bar.show()
+        self.message_edit.setFocus()
+
+    def cancel_reply(self):
+        """取消回覆，隱藏預覽條。"""
+        self.reply_to = None
+        self.reply_bar.hide()
+
+    def _get_contact_display_id(self, ptt_id_lower: str) -> str:
+        for i in range(self.contact_list.count()):
+            w = self.contact_list.itemWidget(self.contact_list.item(i))
+            if w and w.ptt_id == ptt_id_lower:
+                return w.ptt_id_display
+        return ptt_id_lower
+
     def handle_send(self):
         text = self.message_edit.text().strip()
         if not text or not self.current_chat_id:
             return
-            
+
+        # 若有待回覆訊息，編碼回覆前綴
+        reply_info = None
+        if self.reply_to:
+            encoded_text = encode_reply(self.reply_to['sender'], self.reply_to['preview'], text)
+            reply_info = self.reply_to.copy()
+            self.cancel_reply()
+        else:
+            encoded_text = text
+
         # 1. 立即顯示在 UI (這部分仍在主執行緒)
         now = datetime.now()
         now_str = now.strftime("%H:%M")
         self.chat_histories[self.current_chat_id].append({
-            'text': text, 
-            'time': now_str, 
-            'timestamp': now,  # 儲存完整的 datetime
-            'is_me': True
+            'text': text,
+            'time': now_str,
+            'timestamp': now,
+            'is_me': True,
+            'reply_info': reply_info,
         })
         self.refresh_chat_display()
         self.message_edit.clear()
@@ -706,7 +786,7 @@ class MainWindow(QMainWindow):
                 break
 
         # 2. 透過訊號觸發 Worker 背景發送 (跨執行緒安全)
-        self.send_requested.emit(self.current_chat_id, text)
+        self.send_requested.emit(self.current_chat_id, encoded_text)
 
     @Slot(dict)
     def on_new_message(self, data):
@@ -744,13 +824,15 @@ class MainWindow(QMainWindow):
                     widget.set_last_msg_time(now_time)
                     break
 
+            reply_info, actual_text = decode_reply(data['text'])
             self.chat_histories[sender].append({
-                'text': data['text'],
+                'text': actual_text,
                 'time': data['time'],
                 'timestamp': data.get('timestamp', datetime.now()),
                 'is_me': False,
                 'mail_type': data.get('mail_type', 'uptt'),
-                'subject': data.get('subject', '')
+                'subject': data.get('subject', ''),
+                'reply_info': reply_info,
             })
 
             if self.current_chat_id == sender:

@@ -3,9 +3,10 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QFrame, QSizePolicy, QStyle, QListWidgetItem, QListWidget, QAbstractItemView,
-    QPushButton, QDialog, QTextEdit
+    QPushButton, QDialog, QTextEdit, QMenu
 )
 from PySide6.QtCore import Qt, QSize, Signal
+from PySide6.QtGui import QAction
 from uPtt.ui.styles import get_bubble_style
 
 logger = logging.getLogger("uPtt.ui.widgets")
@@ -14,33 +15,62 @@ class ChatBubble(QWidget):
     """
     自訂對話氣泡元件 (極致緊湊與貼合版)。
     """
-    def __init__(self, text: str, time_str: str, is_me: bool = False, parent=None):
+    reply_requested = Signal(str, bool)  # (message_text, is_me)
+
+    def __init__(self, text: str, time_str: str, is_me: bool = False,
+                 reply_info: dict = None, parent=None):
         super().__init__(parent)
         self.is_me = is_me
-        
+        self._text = text
+
         self.main_layout = QHBoxLayout(self)
         self.main_layout.setContentsMargins(0, 1, 0, 1)
         self.main_layout.setSpacing(4)
-        
+
         self.bubble_container = QFrame()
         self.bubble_container.setStyleSheet(get_bubble_style(is_me))
         self.bubble_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
-        
+
         self.content_layout = QVBoxLayout(self.bubble_container)
         self.content_layout.setContentsMargins(10, 6, 10, 6)
-        self.content_layout.setSpacing(0)
-        
+        self.content_layout.setSpacing(4)
+
+        # 若有回覆引用資訊，在訊息上方加一個引用區塊
+        if reply_info:
+            quote_frame = QFrame()
+            quote_frame.setStyleSheet("""
+                QFrame {
+                    background-color: rgba(160, 196, 180, 0.08);
+                    border-left: 2px solid #A0C4B4;
+                    border-radius: 2px;
+                }
+            """)
+            quote_layout = QVBoxLayout(quote_frame)
+            quote_layout.setContentsMargins(6, 3, 6, 3)
+            quote_layout.setSpacing(1)
+
+            sender_label = QLabel(f"@{reply_info['sender']}")
+            sender_label.setStyleSheet("color: #A0C4B4; font-size: 11px; font-weight: bold; background: transparent;")
+
+            preview_label = QLabel(reply_info['preview'])
+            preview_label.setStyleSheet("color: #8B949E; font-size: 11px; background: transparent;")
+            preview_label.setWordWrap(True)
+
+            quote_layout.addWidget(sender_label)
+            quote_layout.addWidget(preview_label)
+            self.content_layout.addWidget(quote_frame)
+
         self.message_label = QLabel(text)
         self.message_label.setWordWrap(True)
         self.message_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         # 移除硬編碼寬度，改由 resizeEvent 動態控制
         self.message_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         self.content_layout.addWidget(self.message_label)
-        
+
         self.time_label = QLabel(time_str)
         self.time_label.setStyleSheet("color: #5C6773; font-size: 10px;")
         self.time_label.setAlignment(Qt.AlignBottom)
-        
+
         if is_me:
             self.main_layout.addStretch()
             self.main_layout.addWidget(self.time_label)
@@ -49,8 +79,25 @@ class ChatBubble(QWidget):
             self.main_layout.addWidget(self.bubble_container)
             self.main_layout.addWidget(self.time_label)
             self.main_layout.addStretch()
-            
+
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+
+        # 右鍵選單：需同時設定在 bubble_container 與 message_label 上，
+        # 因為 TextSelectableByMouse 會攔截右鍵事件，不讓它冒泡到父元件
+        for widget in (self, self.bubble_container, self.message_label):
+            widget.setContextMenuPolicy(Qt.CustomContextMenu)
+            widget.customContextMenuRequested.connect(self._show_context_menu_from_child)
+
+    def _show_context_menu_from_child(self, pos):
+        # 將子元件座標轉換為全域座標後顯示選單
+        self._show_context_menu(self.sender().mapToGlobal(pos))
+
+    def _show_context_menu(self, global_pos):
+        menu = QMenu(self)
+        reply_action = QAction("回覆", self)
+        reply_action.triggered.connect(lambda: self.reply_requested.emit(self._text, self.is_me))
+        menu.addAction(reply_action)
+        menu.exec(global_pos)
 
     def resizeEvent(self, event):
         """

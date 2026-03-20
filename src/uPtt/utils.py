@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 
 import requests
@@ -46,6 +47,24 @@ def gen_random_string(length=10):
 
 
 # convert msg to PTT mail format
+
+_REPLY_RE = re.compile(r'^\[re:@([^\|\]]+)\|([^\]]*)\]\n(.*)', re.DOTALL)
+_REPLY_PREVIEW_MAX = 80
+
+
+def encode_reply(sender_id: str, preview: str, actual_msg: str) -> str:
+    """將回覆資訊編碼進訊息內容中。"""
+    preview_flat = preview.replace('\n', ' ').replace('|', ' ').replace(']', ' ')[:_REPLY_PREVIEW_MAX]
+    return f'[re:@{sender_id}|{preview_flat}]\n{actual_msg}'
+
+
+def decode_reply(content: str):
+    """解析訊息中的回覆資訊。回傳 (reply_info_dict 或 None, actual_text)。"""
+    m = _REPLY_RE.match(content)
+    if m:
+        return {'sender': m.group(1), 'preview': m.group(2)}, m.group(3)
+    return None, content
+
 
 def msg_to_mail(app_name, ptt_id, msg):
     mail = f"""{ptt_id} 想要使用 {app_name} 跟你聯繫！

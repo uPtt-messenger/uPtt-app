@@ -222,23 +222,28 @@ class DatabaseManager:
                     return False
 
                 # 2. 更新會話摘要並強制設為可見 (收到新訊息或發送訊息時)
+                # 若為回覆訊息格式，摘要只顯示實際內容部分
+                summary = content
+                if summary.startswith('[re:@') and ']\n' in summary:
+                    summary = summary[summary.index(']\n') + 2:]
+
                 if is_me:
                     conn.execute("""
-                        UPDATE sessions SET 
-                            last_message_text = ?, 
+                        UPDATE sessions SET
+                            last_message_text = ?,
                             last_message_time = ?,
                             is_visible = 1
                         WHERE account_id = ? AND id = ?
-                    """, (content, timestamp, acc_id_lower, session_id_lower))
+                    """, (summary, timestamp, acc_id_lower, session_id_lower))
                 else:
                     conn.execute("""
-                        UPDATE sessions SET 
-                            last_message_text = ?, 
+                        UPDATE sessions SET
+                            last_message_text = ?,
                             last_message_time = ?,
                             unread_count = unread_count + 1,
                             is_visible = 1
                         WHERE account_id = ? AND id = ?
-                    """, (content, timestamp, acc_id_lower, session_id_lower))
+                    """, (summary, timestamp, acc_id_lower, session_id_lower))
                 
                 conn.commit()
                 return True
