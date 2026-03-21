@@ -12,6 +12,7 @@ on:
 
 jobs:
   # 秘密掃描：使用 TruffleHog 檢查是否有敏感資訊洩漏
+  # 無論任何檔案異動都必須執行，README 等文件也可能意外包含敏感資訊
   secret-scan:
     runs-on: ubuntu-latest
     steps:
@@ -28,10 +29,29 @@ jobs:
           head: ${{ github.sha }}
           extra_args: --only-verified
 
+  # 偵測是否有需要測試與編譯的檔案異動
+  # 純文件異動 (README、*.md) 時，後續 test / build jobs 會自動跳過
+  changes:
+    needs: [secret-scan]
+    runs-on: ubuntu-latest
+    outputs:
+      src: ${{ steps.filter.outputs.src }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            src:
+              - 'src/**'
+              - 'tests/**'
+              - 'requirements*.txt'
+              - '.github/workflows/**'
 
   # 第一階段：執行測試 (在 Linux 執行以節省資源)
   test:
-    needs: [secret-scan]
+    needs: [changes]
+    if: needs.changes.outputs.src == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -62,7 +82,8 @@ jobs:
 
   # 靜態安全分析 + 依賴套件漏洞掃描
   security-analysis:
-    needs: [secret-scan]
+    needs: [changes]
+    if: needs.changes.outputs.src == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
