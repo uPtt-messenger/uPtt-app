@@ -5,10 +5,10 @@ from src.uPtt.ui.styles import get_bubble_style
 
 def test_get_bubble_style():
     style_me = get_bubble_style(True)
-    assert "background-color: #313D36;" in style_me
-    
+    assert "background-color: #1C3A2E;" in style_me
+
     style_other = get_bubble_style(False)
-    assert "background-color: #23272B;" in style_other
+    assert "background-color: #21262D;" in style_other
 
 def test_chat_bubble_me(qtbot):
     bubble = ChatBubble("Hello Me", "10:00", is_me=True)

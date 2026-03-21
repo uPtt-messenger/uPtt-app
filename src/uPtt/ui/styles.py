@@ -1,211 +1,268 @@
 # --- uPtt QSS 樣式表 ---
 
 MAIN_STYLE = """
-/* 全域字體與背景 (暗色系) - 全面採用等寬字體 */
+/* 全域字體與背景 */
 QWidget {
     font-family: "SF Mono", "Consolas", "Courier New", "PingFang TC", "Microsoft JhengHei", monospace;
     font-size: 14px;
-    background-color: #121416;
-    color: #D1D5DA;
+    background-color: #0D1117;
+    color: #E6EDF3;
 }
 
-/* 登入視窗 (柔和暗黑終端機風格) */
+/* 登入視窗 */
 #login-window {
-    background-color: #121416;
+    background-color: #0D1117;
 }
 
-#login-container {
-    background-color: #1A1D20;
-    border: 1px solid #2A2E33;
-    border-radius: 12px;
-}
-
-#logo-label {
-    font-size: 26px;
-    font-weight: bold;
-    color: #A0C4B4; /* Muted sage green */
-    margin-bottom: 5px;
-    letter-spacing: 2px;
-}
-
-#subtitle-label {
-    font-size: 14px;
-    color: #8B9BAC;
-    margin-bottom: 20px;
-    letter-spacing: 1px;
-}
 
 #login-window QLineEdit {
-    padding: 10px 15px;
-    border: 1px solid #2A2E33;
-    border-radius: 6px;
-    background-color: #141619;
-    color: #D1D5DA;
-    font-size: 15px;
-}
-
-#login-window QLineEdit::placeholder {
-    color: #5C6773;
+    padding: 9px 13px;
+    border: 1px solid #2D333B;
+    border-radius: 7px;
+    background-color: #161B22;
+    color: #E6EDF3;
+    font-size: 14px;
 }
 
 #login-window QLineEdit:focus {
-    border: 1px solid #7E9CB9; /* Muted pastel blue */
-    background-color: #16191D;
+    border: 1px solid #A0C4B4;
+    background-color: #161B22;
 }
 
-#login-window QPushButton {
-    padding: 12px;
-    background-color: #2D3B35; /* Dark sage green */
-    color: #A0C4B4; /* Muted sage green */
-    border: 1px solid #3E5149;
-    border-radius: 6px;
-    font-weight: bold;
-    font-size: 15px;
-    letter-spacing: 1px;
-}
-
-#login-window QPushButton:hover {
-    background-color: #3E5149;
-    color: #B5D4C6;
-}
-
-#login-window QPushButton:disabled {
-    background-color: #1A1D20;
-    border: 1px solid #2A2E33;
-    color: #4B5563;
-}
-
-#login-window #error-label {
-    color: #C27474; /* Soft muted red */
-    font-size: 13px;
-    font-weight: normal;
-}
-
-/* 全域輸入框與按鈕 (保留供主視窗使用) */
-QLineEdit {
-    padding: 8px;
-    border: 1px solid #2A2E33;
-    border-radius: 4px;
-    background-color: #121416;
-    color: #D1D5DA;
-}
-
-QLineEdit:focus {
-    border: 1px solid #7E9CB9;
-}
-
-QPushButton {
-    padding: 10px;
+/* 登入按鈕 */
+#login-window #login-btn {
     background-color: #2D3B35;
     color: #A0C4B4;
     border: 1px solid #3E5149;
-    border-radius: 4px;
+    border-radius: 8px;
+    font-weight: bold;
+    font-size: 14px;
+    letter-spacing: 2px;
+}
+
+#login-window #login-btn:hover {
+    background-color: #3A4D43;
+    color: #B5D4C6;
+    border-color: #4E6358;
+}
+
+#login-window #login-btn:disabled {
+    background-color: #1C2128;
+    border: 1px solid #21262D;
+    color: #484F58;
+}
+
+#login-window #error-label {
+    color: #C27474;
+    font-size: 12px;
+}
+
+/* 全域 QLineEdit */
+QLineEdit {
+    padding: 8px 12px;
+    border: 1px solid #30363D;
+    border-radius: 6px;
+    background-color: #0D1117;
+    color: #E6EDF3;
+}
+
+QLineEdit:focus {
+    border: 1px solid #A0C4B4;
+}
+
+QLineEdit::placeholder {
+    color: #484F58;
+}
+
+/* 全域 QPushButton */
+QPushButton {
+    padding: 8px 14px;
+    background-color: #21262D;
+    color: #A0C4B4;
+    border: 1px solid #30363D;
+    border-radius: 6px;
     font-weight: bold;
 }
 
 QPushButton:hover {
-    background-color: #3E5149;
+    background-color: #2D3B35;
+    border-color: #3E5149;
 }
 
 QPushButton:disabled {
-    background-color: #1A1D20;
-    color: #4B5563;
+    background-color: #161B22;
+    color: #484F58;
+    border-color: #21262D;
 }
 
-/* 主視窗 */
+/* 側邊欄 */
 #sidebar {
-    background-color: #1A1D20;
-    border-right: 1px solid #2A2E33;
+    background-color: #161B22;
+    border-right: 1px solid #21262D;
     min-width: 160px;
     max-width: 300px;
 }
 
-#sidebar-title {
-    font-weight: bold;
-    padding: 10px;
-    background-color: #121416;
-    border-bottom: 1px solid #2A2E33;
-    color: #A0C4B4;
+#user-profile {
+    background-color: #161B22;
+    border-bottom: 1px solid #21262D;
 }
 
+/* 對話清單 */
 QListWidget {
     border: none;
     background-color: transparent;
+    outline: none;
 }
 
 QListWidget::item {
-    padding: 10px;
-    border-bottom: 1px solid #23272B;
+    border: none;
+    padding: 0px;
+    margin: 0px;
 }
 
 QListWidget::item:selected {
-    background-color: #2D3B35;
-    color: #B5D4C6;
+    background-color: #21262D;
 }
 
+QListWidget::item:hover:!selected {
+    background-color: #1C2128;
+}
+
+/* 搜尋/新增輸入框 */
+QLineEdit#new-chat-input {
+    background-color: #0D1117;
+    border: 1px solid #30363D;
+    border-radius: 6px;
+    padding: 0 8px;
+    color: #C9D1D9;
+    font-size: 13px;
+}
+
+QLineEdit#new-chat-input:focus {
+    border-color: #A0C4B4;
+}
+
+/* 聊天區域 */
 #chat-area {
-    background-color: #0F1113;
+    background-color: #0D1117;
 }
 
-/* 對話氣泡 */
+/* 聊天標題列 */
+#chat-header {
+    background-color: #161B22;
+    border-bottom: 1px solid #21262D;
+}
+
+/* 訊息捲動區 */
 #messages-scroll {
-    background-color: #0F1113;
+    background-color: #0D1117;
     border: none;
 }
 
 #messages-container {
-    background-color: #0F1113;
+    background-color: #0D1117;
 }
 
-/* 訊息輸入區 (極致緊湊) */
+/* 訊息輸入區 */
 #input-area {
-    background-color: #1A1D20;
-    border-top: 1px solid #2A2E33;
-    margin: 0px;
-    padding: 0px;
+    background-color: #161B22;
+    border-top: 1px solid #21262D;
 }
 
-#message-edit {
-    border: 1px solid #2A2E33;
-    border-radius: 4px;
-    background-color: #121416;
-    color: #D1D5DA;
-    padding: 5px; /* 僅保留必要的文字內距 */
-    margin: 0px;
+QLineEdit#message-edit {
+    border: 1px solid #30363D;
+    border-radius: 8px;
+    background-color: #0D1117;
+    color: #E6EDF3;
+    padding: 8px 12px;
+    font-size: 14px;
 }
 
-/* 移除滾動條周圍可能的空白 */
+QLineEdit#message-edit:focus {
+    border-color: #A0C4B4;
+}
+
+/* 回覆預覽條 */
+QWidget#reply-bar {
+    background-color: #161B22;
+    border-top: 1px solid #30363D;
+    border-left: 3px solid #A0C4B4;
+}
+
+/* 捲軸 */
 QScrollArea {
     border: none;
     background-color: transparent;
 }
 
-/* 系統匣選單 */
+QScrollBar:vertical {
+    border: none;
+    background: transparent;
+    width: 5px;
+    margin: 0;
+}
+
+QScrollBar::handle:vertical {
+    background: #30363D;
+    border-radius: 2px;
+    min-height: 24px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: #484F58;
+}
+
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+
+QScrollBar::add-page:vertical,
+QScrollBar::sub-page:vertical {
+    background: transparent;
+}
+
+/* 右鍵選單 */
 QMenu {
-    background-color: #1A1D20;
-    border: 1px solid #2A2E33;
-    color: #D1D5DA;
+    background-color: #161B22;
+    border: 1px solid #30363D;
+    border-radius: 6px;
+    padding: 4px;
+    color: #E6EDF3;
+}
+
+QMenu::item {
+    padding: 6px 16px;
+    border-radius: 4px;
 }
 
 QMenu::item:selected {
-    background-color: #2D3B35;
-    color: #B5D4C6;
+    background-color: #21262D;
+    color: #A0C4B4;
+}
+
+QMenu::separator {
+    height: 1px;
+    background: #30363D;
+    margin: 4px 0;
 }
 """
 
-# 對話氣泡的 HTML/CSS 範本 (暗色系)
+
+# 對話氣泡的 inline 樣式
 def get_bubble_style(is_me: bool) -> str:
     if is_me:
         return """
-            background-color: #313D36; /* Dark sage green */
+            background-color: #1C3A2E;
             color: #D1E5DC;
-            border-radius: 12px;
-            border-top-right-radius: 2px;
+            border-radius: 14px;
+            border-top-right-radius: 3px;
         """
     else:
         return """
-            background-color: #23272B; /* Slightly lighter than background */
-            color: #D1D5DA;
-            border-radius: 12px;
-            border-top-left-radius: 2px;
+            background-color: #21262D;
+            color: #E6EDF3;
+            border-radius: 14px;
+            border-top-left-radius: 3px;
         """

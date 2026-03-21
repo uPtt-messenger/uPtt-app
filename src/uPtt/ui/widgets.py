@@ -279,7 +279,7 @@ class MailCard(QWidget):
 
 class ContactItem(QWidget):
     """
-    自訂會話清單項目 (全能適配、極致緊緻專業版)。
+    自訂會話清單項目。
     """
     def __init__(self, ptt_id: str, nickname: str = "", unread_count: int = 0, is_pinned: bool = False, last_msg_time: str = "", parent=None):
         super().__init__(parent)
@@ -293,17 +293,32 @@ class ContactItem(QWidget):
 
         # 主佈局：左右排列
         main_layout = QHBoxLayout(self)
-        main_layout.setContentsMargins(8, 0, 12, 0)
-        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(8, 0, 10, 0)
+        main_layout.setSpacing(0)
 
         # 0. 釘選指示條 (左側細條)
         self.pin_bar = QFrame()
         self.pin_bar.setFixedWidth(3)
-        self.pin_bar.setFixedHeight(30)
+        self.pin_bar.setFixedHeight(32)
         self._update_pin_style()
         main_layout.addWidget(self.pin_bar, alignment=Qt.AlignVCenter)
+        main_layout.addSpacing(8)
 
-        # 1. 中央文字區域 (ID + 暱稱) - 左對齊以容納長 ID
+        # 1. 頭像圓圈
+        self.avatar_label = QLabel(ptt_id[0].upper() if ptt_id else "?")
+        self.avatar_label.setFixedSize(36, 36)
+        self.avatar_label.setAlignment(Qt.AlignCenter)
+        self.avatar_label.setStyleSheet("""
+            background-color: #2D3B35;
+            color: #A0C4B4;
+            border-radius: 18px;
+            font-weight: bold;
+            font-size: 14px;
+        """)
+        main_layout.addWidget(self.avatar_label, alignment=Qt.AlignVCenter)
+        main_layout.addSpacing(10)
+
+        # 2. 中央文字區域 (ID + 暱稱)
         text_container = QWidget()
         text_container.setStyleSheet("background: transparent;")
         text_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -311,17 +326,15 @@ class ContactItem(QWidget):
         text_layout.setContentsMargins(0, 0, 0, 0)
         text_layout.setSpacing(2)
 
-        # ID 標籤 (左對齊)
         self.id_label = QLabel(self.ptt_id_display)
         self.id_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.id_label.setStyleSheet("""
             font-weight: bold;
-            font-size: 15px;
-            color: #F0F6FC;
+            font-size: 14px;
+            color: #E6EDF3;
             background: transparent;
         """)
 
-        # 暱稱標籤 (左對齊)
         self.nickname_label = QLabel(f"({nickname})" if nickname else "")
         self.nickname_label.setFixedHeight(14)
         self.nickname_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -336,8 +349,9 @@ class ContactItem(QWidget):
         text_layout.addWidget(self.nickname_label)
 
         main_layout.addWidget(text_container, 1, Qt.AlignVCenter)
+        main_layout.addSpacing(4)
 
-        # 2. 右側：時間（上）+ 未讀紅點（下）
+        # 3. 右側：時間（上）+ 未讀紅點（下）
         right_container = QWidget()
         right_container.setStyleSheet("background: transparent;")
         right_container.setFixedWidth(38)
@@ -348,10 +362,10 @@ class ContactItem(QWidget):
 
         self.time_label = QLabel(last_msg_time)
         self.time_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.time_label.setStyleSheet("font-size: 10px; color: #5C6773; background: transparent;")
+        self.time_label.setStyleSheet("font-size: 10px; color: #484F58; background: transparent;")
 
         self.unread_label = QLabel()
-        self.unread_label.setFixedSize(24, 24)
+        self.unread_label.setFixedSize(22, 22)
         self.unread_label.setAlignment(Qt.AlignCenter)
 
         right_vbox.addWidget(self.time_label)
@@ -370,12 +384,13 @@ class ContactItem(QWidget):
         if ptt_id_display:
             self.ptt_id_display = ptt_id_display
             self.id_label.setText(ptt_id_display)
+            self.avatar_label.setText(ptt_id_display[0].upper())
 
         if nickname:
             self.nickname_label.setText(f"({nickname})")
         else:
             self.nickname_label.setText("")
-            
+
         logger.debug(f"UI 已更新資訊: {self.ptt_id} -> ID={ptt_id_display}, Nick={nickname}")
 
     def set_nickname(self, nickname: str):
@@ -414,8 +429,8 @@ class ContactItem(QWidget):
             self.unread_label.setStyleSheet("""
                 background-color: #C27474;
                 color: white;
-                border-radius: 10px;
-                font-size: 10px;
+                border-radius: 11px;
+                font-size: 9px;
                 font-weight: bold;
             """)
         else:

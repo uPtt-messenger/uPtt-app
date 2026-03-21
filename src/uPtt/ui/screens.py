@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QMainWindow, QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QStackedWidget, QListWidget, QListWidgetItem, QSplitter,
     QScrollArea, QTextEdit, QSystemTrayIcon, QMenu, QMessageBox, QInputDialog
 )
@@ -80,69 +80,98 @@ class LoginWindow(QWidget):
         self.init_ui()
 
     def init_ui(self):
-        # 外部 layout
         main_layout = QVBoxLayout(self)
         main_layout.setAlignment(Qt.AlignCenter)
 
-        # 內部容器
-        container = QWidget()
-        container.setObjectName("login-container")
-        container.setFixedWidth(400)
-        layout = QVBoxLayout(container)
-        layout.setAlignment(Qt.AlignCenter)
-        layout.setContentsMargins(40, 40, 40, 40)
-        layout.setSpacing(15)
+        # ── 表單容器 (無卡片，直接浮在背景上) ─────────────────────
+        form = QWidget()
+        form.setFixedWidth(320)
+        form.setStyleSheet("background: transparent;")
+        form_layout = QVBoxLayout(form)
+        form_layout.setContentsMargins(0, 0, 0, 0)
+        form_layout.setSpacing(0)
 
-        # 標題與副標題 (改用高畫質 SVG 渲染)
+        # Logo
         self.logo_label = QLabel()
         self.logo_label.setObjectName("logo-label")
         self.logo_label.setAlignment(Qt.AlignCenter)
-        
         logo_path = os.path.join(ASSETS_DIR, "logo_horizontal.svg")
         if os.path.exists(logo_path):
-            # 獲取當前螢幕的像素比例 (macOS 通常為 2.0)
             dpr = self.devicePixelRatioF() if hasattr(self, 'devicePixelRatioF') else 1.0
-            self.logo_label.setPixmap(render_svg(logo_path, 300, 100, dpr))
+            self.logo_label.setPixmap(render_svg(logo_path, 220, 73, dpr))
         else:
             self.logo_label.setText("[ uPtt ]")
-        
+
+        subtitle = QLabel("PTT BBS 即時通訊系統")
+        subtitle.setAlignment(Qt.AlignCenter)
+        subtitle.setStyleSheet("color: #5C6773; font-size: 11px; letter-spacing: 2px; background: transparent;")
+
+        # 分隔線
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setStyleSheet("background-color: #2D333B; border: none; max-height: 1px;")
+
+        # 帳號欄位
+        id_label = QLabel("PTT 代號")
+        id_label.setStyleSheet("color: #8B949E; font-size: 11px; background: transparent;")
+
         self.username_input = QLineEdit()
-        self.username_input.setPlaceholderText("請輸入批踢踢代號")
-        self.username_input.setFixedHeight(45)
-        
+        self.username_input.setPlaceholderText("輸入您的 PTT ID")
+        self.username_input.setFixedHeight(42)
+
+        # 密碼欄位
+        pw_label = QLabel("密碼")
+        pw_label.setStyleSheet("color: #8B949E; font-size: 11px; background: transparent;")
+
         self.password_input = QLineEdit()
-        self.password_input.setPlaceholderText("請輸入批踢踢密碼")
+        self.password_input.setPlaceholderText("••••••••")
         self.password_input.setEchoMode(QLineEdit.Password)
-        self.password_input.setFixedHeight(45)
-        
-        self.login_btn = QPushButton("登入連線 / LOGIN")
-        self.login_btn.setFixedHeight(45)
-        self.login_btn.clicked.connect(self.handle_login)
-        
+        self.password_input.setFixedHeight(42)
+
+        # 錯誤訊息
         self.error_label = QLabel("")
         self.error_label.setObjectName("error-label")
         self.error_label.setAlignment(Qt.AlignCenter)
         self.error_label.hide()
 
+        # 登入按鈕
+        self.login_btn = QPushButton("連線至 PTT")
+        self.login_btn.setObjectName("login-btn")
+        self.login_btn.setFixedHeight(42)
+        self.login_btn.clicked.connect(self.handle_login)
+
+        # 版本
         self.version_label = QLabel(f"v{__version__}")
         self.version_label.setObjectName("version-label")
         self.version_label.setAlignment(Qt.AlignCenter)
-        self.version_label.setStyleSheet("color: #484F58; font-size: 11px; margin-top: 10px;")
-        
-        layout.addWidget(self.logo_label)
-        layout.addSpacing(10)
-        layout.addWidget(self.username_input)
-        layout.addWidget(self.password_input)
-        layout.addWidget(self.error_label)
-        layout.addWidget(self.login_btn)
-        layout.addWidget(self.version_label)
+        self.version_label.setStyleSheet("color: #484F58; font-size: 11px; background: transparent;")
 
-        main_layout.addWidget(container)
-        
+        form_layout.addWidget(self.logo_label)
+        form_layout.addSpacing(5)
+        form_layout.addWidget(subtitle)
+        form_layout.addSpacing(20)
+        form_layout.addWidget(sep)
+        form_layout.addSpacing(20)
+        form_layout.addWidget(id_label)
+        form_layout.addSpacing(5)
+        form_layout.addWidget(self.username_input)
+        form_layout.addSpacing(12)
+        form_layout.addWidget(pw_label)
+        form_layout.addSpacing(5)
+        form_layout.addWidget(self.password_input)
+        form_layout.addSpacing(5)
+        form_layout.addWidget(self.error_label)
+        form_layout.addSpacing(14)
+        form_layout.addWidget(self.login_btn)
+        form_layout.addSpacing(14)
+        form_layout.addWidget(self.version_label)
+
+        main_layout.addWidget(form)
+
         # 綁定 Enter 鍵
         self.username_input.returnPressed.connect(self.password_input.setFocus)
         self.password_input.returnPressed.connect(self.handle_login)
-        
+
         # 預設聚焦帳號輸入
         self.username_input.setFocus()
 
@@ -161,7 +190,7 @@ class LoginWindow(QWidget):
         self.error_label.setText(message)
         self.error_label.show()
         self.login_btn.setEnabled(True)
-        self.login_btn.setText("登入 PTT")
+        self.login_btn.setText("連線至 PTT")
 
 class MainWindow(QMainWindow):
     """主聊天畫面"""
@@ -178,7 +207,7 @@ class MainWindow(QMainWindow):
             self.setWindowIcon(QIcon(icon_path))
             
         # 初始大小設為適合登入視窗的大小
-        self.setFixedSize(500, 550)
+        self.setFixedSize(440, 480)
         self.ptt_service = ptt_service
         self.db = db
         self.current_chat_id = None
@@ -269,10 +298,38 @@ class MainWindow(QMainWindow):
         user_layout = QHBoxLayout(self.user_profile)
         user_layout.setContentsMargins(15, 0, 15, 0)
         
-        self.user_id_label = QLabel("未登入")
-        self.user_id_label.setStyleSheet("font-weight: bold; font-size: 13px; color: #E6EDF3;")
+        # 狀態指示點
+        status_dot = QLabel("●")
+        status_dot.setStyleSheet("color: #56D364; font-size: 9px; background: transparent;")
+        status_dot.hide()
+        self._status_dot = status_dot
+
+        self.user_id_label = QLabel("uPtt")
+        self.user_id_label.setStyleSheet("font-weight: bold; font-size: 13px; color: #E6EDF3; background: transparent;")
+        user_layout.addWidget(status_dot)
+        user_layout.addSpacing(4)
         user_layout.addWidget(self.user_id_label)
         user_layout.addStretch()
+
+        # 登出按鈕
+        self.logout_btn = QPushButton("↪")
+        self.logout_btn.setFixedSize(28, 28)
+        self.logout_btn.setToolTip("登出")
+        self.logout_btn.hide()
+        self.logout_btn.clicked.connect(self.handle_logout)
+        self.logout_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: none;
+                color: #484F58;
+                font-size: 16px;
+                padding: 0;
+            }
+            QPushButton:hover {
+                color: #C27474;
+            }
+        """)
+        user_layout.addWidget(self.logout_btn)
         
         sidebar_vbox.addWidget(self.user_profile)
         
@@ -390,6 +447,49 @@ class MainWindow(QMainWindow):
         input_vbox.addWidget(self.reply_bar)
         input_vbox.addWidget(self.message_edit)
         
+        # 聊天標題列 (選擇聯絡人後顯示)
+        self.chat_header = QWidget()
+        self.chat_header.setObjectName("chat-header")
+        self.chat_header.setFixedHeight(52)
+        self.chat_header.hide()
+        chat_header_layout = QHBoxLayout(self.chat_header)
+        chat_header_layout.setContentsMargins(14, 0, 14, 0)
+        chat_header_layout.setSpacing(0)
+
+        self.chat_header_avatar = QLabel()
+        self.chat_header_avatar.setFixedSize(36, 36)
+        self.chat_header_avatar.setAlignment(Qt.AlignCenter)
+        self.chat_header_avatar.setStyleSheet("""
+            background-color: #2D3B35;
+            color: #A0C4B4;
+            border-radius: 18px;
+            font-weight: bold;
+            font-size: 15px;
+        """)
+
+        chat_header_text = QWidget()
+        chat_header_text.setStyleSheet("background: transparent;")
+        chat_header_text_layout = QVBoxLayout(chat_header_text)
+        chat_header_text_layout.setContentsMargins(10, 0, 0, 0)
+        chat_header_text_layout.setSpacing(1)
+
+        self.chat_header_id = QLabel()
+        self.chat_header_id.setStyleSheet(
+            "font-weight: bold; font-size: 14px; color: #E6EDF3; background: transparent;"
+        )
+        self.chat_header_nick = QLabel()
+        self.chat_header_nick.setStyleSheet(
+            "font-size: 11px; color: #8B949E; background: transparent;"
+        )
+        self.chat_header_nick.hide()
+
+        chat_header_text_layout.addWidget(self.chat_header_id)
+        chat_header_text_layout.addWidget(self.chat_header_nick)
+
+        chat_header_layout.addWidget(self.chat_header_avatar)
+        chat_header_layout.addWidget(chat_header_text, 1)
+
+        chat_vbox.addWidget(self.chat_header)
         chat_vbox.addWidget(self.scroll_area, stretch=1) # 給予最大拉伸權重
         chat_vbox.addWidget(self.input_area, stretch=0) # 輸入區不拉伸
         chat_vbox.setSpacing(0)
@@ -473,6 +573,8 @@ class MainWindow(QMainWindow):
                 self.update_sidebar_width() # 更新寬度
                 found = True
                 break
+        if found and self.current_chat_id == ptt_id.lower():
+            self._update_chat_header(ptt_id, nickname)
         if not found:
             logger.warning(f"在目前會話清單中找不到對應 ID: {ptt_id}")
 
@@ -525,7 +627,9 @@ class MainWindow(QMainWindow):
             corrected_id = self.ptt_service.ptt_id
             self.central_stack.setCurrentIndex(1)
             self.setWindowTitle(f"uPtt - {corrected_id}")
-            self.user_id_label.setText(f"{corrected_id} 登入中") # 更新目前使用者
+            self.user_id_label.setText(corrected_id)
+            self._status_dot.show()
+            self.logout_btn.show()
             
             # --- 從資料庫載入歷史對話清單 ---
             self.load_sessions_from_db()
@@ -600,9 +704,9 @@ class MainWindow(QMainWindow):
                 nick_text = widget.nickname_label.text()
                 nick_w = nick_metrics.horizontalAdvance(nick_text)
 
-                # 固定佔用: 8(左邊距) + 3(pin_bar) + 10(spacing) + 10(spacing)
-                #           + 38(right_container) + 12(右邊距) + 15(scrollbar) + 20(緩衝)
-                item_w = max(id_w, nick_w) + 116
+                # 固定佔用: 8(左邊距) + 3(pin_bar) + 8(spacing) + 36(avatar) + 10(spacing)
+                #           + 4(spacing) + 38(right_container) + 10(右邊距) + 15(scrollbar) + 20(緩衝)
+                item_w = max(id_w, nick_w) + 152
                 if item_w > max_w:
                     max_w = item_w
         
@@ -687,8 +791,23 @@ class MainWindow(QMainWindow):
         self.refresh_chat_display()
         self.message_edit.setFocus()
 
-        # 每次切換聯絡人時更新視窗標題
+        # 每次切換聯絡人時更新視窗標題與聊天標題列
         self.setWindowTitle(f"uPtt - 與 {widget.ptt_id_display} 對話中")
+        nick_text = widget.nickname_label.text()
+        nickname = nick_text[1:-1] if nick_text.startswith("(") and nick_text.endswith(")") else ""
+        self._update_chat_header(widget.ptt_id_display, nickname)
+
+    def _update_chat_header(self, display_id: str, nickname: str):
+        """更新聊天標題列的聯絡人資訊。"""
+        first_letter = display_id[0].upper() if display_id else "?"
+        self.chat_header_avatar.setText(first_letter)
+        self.chat_header_id.setText(display_id)
+        if nickname:
+            self.chat_header_nick.setText(nickname)
+            self.chat_header_nick.show()
+        else:
+            self.chat_header_nick.hide()
+        self.chat_header.show()
 
     def refresh_chat_display(self):
         """重新渲染右側訊息區域，並根據時間戳記排序"""
@@ -699,8 +818,9 @@ class MainWindow(QMainWindow):
                 child.widget().deleteLater()
         
         if not self.current_chat_id:
+            self.chat_header.hide()
             return
-            
+
         history = self.chat_histories.get(self.current_chat_id, [])
         # --- 新增排序邏輯：確保訊息依照時間戳記從小到大排列 ---
         history.sort(key=lambda x: x.get('timestamp', datetime.min))
@@ -1121,18 +1241,21 @@ class MainWindow(QMainWindow):
             self.pinned_ids.clear()
             self.current_chat_id = None
             self.refresh_chat_display()
-            self.user_id_label.setText("未登入")
+            self.user_id_label.setText("uPtt")
+            self._status_dot.hide()
+            self.logout_btn.hide()
+            self.chat_header.hide()
             self.setWindowTitle("uPtt")
             
             # 4. 重設視窗為登入大小
             self.setMinimumSize(0, 0)
             self.setMaximumSize(16777215, 16777215)
-            self.setFixedSize(500, 550)
+            self.setFixedSize(440, 480)
             
             # 5. 切換畫面
             self.central_stack.setCurrentIndex(0)
             self.login_screen.login_btn.setEnabled(True)
-            self.login_screen.login_btn.setText("登入連線 / LOGIN")
+            self.login_screen.login_btn.setText("連線至 PTT")
             self.login_screen.password_input.clear()
             self.login_screen.username_input.setFocus()
             
