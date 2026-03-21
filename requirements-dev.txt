@@ -6,3 +6,5 @@ pytest-cov
 pytest-asyncio
 nuitka
 zstandard
+bandit
+pip-audit

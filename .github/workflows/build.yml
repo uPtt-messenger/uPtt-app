@@ -12,7 +12,7 @@ on:
 
 jobs:
   # 秘密掃描：使用 TruffleHog 檢查是否有敏感資訊洩漏
-  secret_scan:
+  secret-scan:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -31,7 +31,7 @@ jobs:
 
   # 第一階段：執行測試 (在 Linux 執行以節省資源)
   test:
-    needs: [secret_scan]
+    needs: [secret-scan]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -60,9 +60,37 @@ jobs:
           # 使用 QT_QPA_PLATFORM=offscreen 確保在無介面環境下能執行 Qt 測試
           QT_QPA_PLATFORM=offscreen pytest tests/
 
+  # 靜態安全分析 + 依賴套件漏洞掃描
+  security-analysis:
+    needs: [secret-scan]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies and security tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install bandit pip-audit
+
+      - name: Bandit static security analysis
+        # 掃描 src/ 目錄，中等以上嚴重度（-ll）且中等以上可信度（-ii）
+        # 可偵測：可疑的網路呼叫、不安全的函數使用、SQL injection 等
+        run: bandit -r src/ -ll -ii
+
+      - name: pip-audit dependency vulnerability scan
+        # 掃描 requirements.txt 中已知有漏洞的套件（供應鏈攻擊防護）
+        run: pip-audit -r requirements.txt
+
   # 測試通過後，針對 main 與 beta 分支執行編譯
   build-macos:
-    needs: [test]
+    needs: [test, security-analysis]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/beta')
     runs-on: macos-latest
     steps:
@@ -156,6 +184,28 @@ jobs:
             --no-pyi-file \
             src/run_app.py
 
+      - name: Smoke test macOS binary
+        run: |
+          if [ -d "dist/uPtt.app" ]; then
+            APP_DIR="dist/uPtt.app"
+          elif [ -d "dist/run_app.app" ]; then
+            APP_DIR="dist/run_app.app"
+          else
+            echo "ERROR: No .app bundle found in dist/"
+            ls dist/
+            exit 1
+          fi
+          APP_BINARY=$(find "$APP_DIR/Contents/MacOS" -maxdepth 1 -type f | head -1)
+          echo "Smoke testing: $APP_BINARY"
+          EXIT_CODE=0
+          QT_QPA_PLATFORM=offscreen timeout 10s "$APP_BINARY" --debug || EXIT_CODE=$?
+          # 124 = timed out (still running) → success; 0 = clean exit → success
+          if [ "$EXIT_CODE" -ne 0 ] && [ "$EXIT_CODE" -ne 124 ]; then
+            echo "ERROR: Binary crashed with exit code $EXIT_CODE"
+            exit 1
+          fi
+          echo "Smoke test passed (exit code: $EXIT_CODE)"
+
       - name: Package .app for distribution
         run: |
           cd dist
@@ -178,7 +228,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-windows:
-    needs: [test]
+    needs: [test, security-analysis]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/beta')
     runs-on: windows-latest
     steps:
@@ -253,6 +303,28 @@ jobs:
             --windows-dependency-tool=pefile `
             --no-pyi-file `
             src/run_app.py
+
+      - name: Smoke test Windows binary
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist\uPtt.exe")) {
+            Write-Error "ERROR: dist\uPtt.exe not found"
+            exit 1
+          }
+          Write-Host "Smoke testing: dist\uPtt.exe"
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $proc = Start-Process -FilePath "dist\uPtt.exe" -ArgumentList "--debug" -PassThru
+          Start-Sleep -Seconds 10
+          if ($proc.HasExited) {
+            if ($proc.ExitCode -ne 0) {
+              Write-Error "ERROR: Binary crashed with exit code $($proc.ExitCode)"
+              exit 1
+            }
+            Write-Host "Smoke test passed (binary exited cleanly)"
+          } else {
+            $proc.Kill()
+            Write-Host "Smoke test passed (binary was still running after 10s)"
+          }
 
       - name: Package for distribution
         shell: pwsh
