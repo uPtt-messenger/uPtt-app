@@ -4,6 +4,6 @@
     <path d="M22 35V42C22 45 25 48 30 48C35 48 38 45 38 42V35" stroke="#F0F6FC" stroke-width="3" stroke-linecap="round"/>
     <circle cx="38" cy="48" r="3" fill="#E3B341"/>
     
-    <text x="65" y="52" fill="#F0F6FC" style="font-family: 'Segoe UI', sans-serif; font-weight: bold; font-size: 32px">uPtt</text>
-    <text x="65" y="68" fill="#8B949E" style="font-family: 'Segoe UI', sans-serif; font-size: 12px">Open Source PTT Messenger</text>
+    <text x="65" y="52" fill="#F0F6FC" font-family="sans-serif" font-weight="bold" font-size="32">uPtt</text>
+    <text x="65" y="68" fill="#8B949E" font-family="sans-serif" font-size="12">Open Source PTT Messenger</text>
 </svg>

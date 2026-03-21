@@ -253,7 +253,7 @@ class MailCard(QWidget):
                 border: 1px solid #3D4F63;
                 border-radius: 4px;
                 font-size: 13px;
-                font-family: "SF Mono", "Consolas", "Courier New", monospace;
+                font-family: "JetBrains Mono", "Cascadia Code", "SF Mono", "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
                 padding: 8px;
             }
         """)

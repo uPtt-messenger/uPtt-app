@@ -5,6 +5,7 @@ import os
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
+from PySide6.QtGui import QFontDatabase
 
 from .ptt import UPttService
 from .db import DatabaseManager
@@ -52,6 +53,12 @@ def main():
     qt_app = QApplication(sys.argv)
     qt_app.setApplicationName("uPtt")
     qt_app.setQuitOnLastWindowClosed(False)  # 允許縮小至系統匣而不退出
+
+    # 載入內建字體
+    _fonts_dir = os.path.join(os.path.dirname(__file__), "ui", "assets", "fonts")
+    for _fname in os.listdir(_fonts_dir):
+        if _fname.endswith((".ttf", ".otf")):
+            QFontDatabase.addApplicationFont(os.path.join(_fonts_dir, _fname))
 
     # --- 單一實例檢查 (Single Instance Check) ---
     server = None

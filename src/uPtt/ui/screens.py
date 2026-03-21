@@ -102,9 +102,9 @@ class LoginWindow(QWidget):
         else:
             self.logo_label.setText("[ uPtt ]")
 
-        subtitle = QLabel("PTT BBS 即時通訊系統")
+        subtitle = QLabel("開源 PTT 即時通訊系統")
         subtitle.setAlignment(Qt.AlignCenter)
-        subtitle.setStyleSheet("color: #5C6773; font-size: 11px; letter-spacing: 2px; background: transparent;")
+        subtitle.setStyleSheet("color: #5C6773; font-size: 13px; letter-spacing: 2px; background: transparent;")
 
         # 分隔線
         sep = QFrame()
@@ -228,12 +228,9 @@ class MainWindow(QMainWindow):
     def init_worker(self):
         """啟動 PTT 背景 Worker"""
         # 確保清理舊的訊號連線 (避免重複)
-        try:
+        if getattr(self, "_worker_signals_connected", False):
             self.send_requested.disconnect()
             self.user_info_requested.disconnect()
-        except Exception:
-            # 如果尚未連線過會噴錯，這裡直接略過
-            pass
 
         self.ptt_thread = QThread()
         self.worker = PTTWorker(self.ptt_service, self.db)
@@ -242,14 +239,14 @@ class MainWindow(QMainWindow):
         # 連接發信訊號 (跨執行緒會自動排程)
         self.send_requested.connect(self.worker.send_message)
         self.user_info_requested.connect(self.worker.get_user_info)
+        self._worker_signals_connected = True
 
         # 這裡也改用訊號連接，確保在背景執行緒登入 (且在登出重啟 Worker 後能重新連向新實例)
         if hasattr(self, "login_screen"):
-            try:
+            if getattr(self, "_login_signal_connected", False):
                 self.login_screen.login_requested.disconnect()
-            except Exception:
-                pass
             self.login_screen.login_requested.connect(self.worker.do_login)
+            self._login_signal_connected = True
 
         # 連接 Worker 訊號
         self.worker.new_message_received.connect(self.on_new_message)

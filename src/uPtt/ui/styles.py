@@ -3,7 +3,7 @@
 MAIN_STYLE = """
 /* 全域字體與背景 */
 QWidget {
-    font-family: "SF Mono", "Consolas", "Courier New", "PingFang TC", "Microsoft JhengHei", monospace;
+    font-family: "JetBrains Mono", "Cascadia Code", "SF Mono", "Menlo", "Consolas", "DejaVu Sans Mono", "PingFang TC", "Microsoft JhengHei", monospace;
     font-size: 14px;
     background-color: #0D1117;
     color: #E6EDF3;
