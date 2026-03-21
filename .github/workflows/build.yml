@@ -195,10 +195,22 @@ jobs:
             ls dist/
             exit 1
           fi
-          APP_BINARY=$(find "$APP_DIR/Contents/MacOS" -maxdepth 1 -type f | head -1)
+          # Derive binary name from the .app bundle name (e.g. run_app.app → run_app)
+          APP_NAME=$(basename "$APP_DIR" .app)
+          APP_BINARY="$APP_DIR/Contents/MacOS/$APP_NAME"
           echo "Smoke testing: $APP_BINARY"
           EXIT_CODE=0
-          QT_QPA_PLATFORM=offscreen timeout 10s "$APP_BINARY" --debug || EXIT_CODE=$?
+          # macOS has no `timeout`; run in background and kill after 10 s
+          QT_QPA_PLATFORM=offscreen "$APP_BINARY" --debug &
+          BG_PID=$!
+          sleep 10
+          if kill -0 "$BG_PID" 2>/dev/null; then
+            kill "$BG_PID"
+            EXIT_CODE=124   # still running → treat as success
+          else
+            wait "$BG_PID"
+            EXIT_CODE=$?
+          fi
           # 124 = timed out (still running) → success; 0 = clean exit → success
           if [ "$EXIT_CODE" -ne 0 ] && [ "$EXIT_CODE" -ne 124 ]; then
             echo "ERROR: Binary crashed with exit code $EXIT_CODE"
