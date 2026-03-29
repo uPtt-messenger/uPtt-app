@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QPushButton, QDialog, QTextEdit, QMenu
 )
 from PySide6.QtCore import Qt, QSize, Signal
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QDrag
 from uPtt.ui.styles import get_bubble_style
 
 logger = logging.getLogger("uPtt.ui.widgets")
@@ -452,6 +452,18 @@ class ContactListWidget(QListWidget):
         self.setDragDropMode(QAbstractItemView.InternalMove)
         self.setDefaultDropAction(Qt.MoveAction)
         self.setSelectionMode(QAbstractItemView.SingleSelection)
+
+    def startDrag(self, supportedActions):
+        """覆寫以防止 InternalMove 在拖放完成後自動刪除來源項目。
+        dropEvent 已手動重建整個清單，不需要 Qt 再移除。"""
+        drag = QDrag(self)
+        indexes = self.selectedIndexes()
+        if not indexes:
+            return
+        mime_data = self.model().mimeData(indexes)
+        if mime_data:
+            drag.setMimeData(mime_data)
+        drag.exec(supportedActions)
 
     def _pinned_count(self) -> int:
         """回傳清單頂端連續釘選項目的數量。"""

@@ -8,8 +8,10 @@ import requests
 sys.path.append(os.getcwd())
 
 from src.uPtt.utils import (
-    gen_random_string, msg_to_mail, get_latest_pypi_version, 
-    is_running_from_pypi_install, is_update_available, get_app_data_dir
+    gen_random_string, msg_to_mail, get_latest_pypi_version,
+    get_latest_github_release_version,
+    is_running_from_pypi_install, is_update_available, get_app_data_dir,
+    VersionCheckWorker,
 )
 from src.uPtt import contant
 
@@ -106,23 +108,126 @@ def test_is_running_from_pypi_install_false():
         with patch('sys.path', ["/home/user/git/uPtt/src"]):
             assert is_running_from_pypi_install() is False
 
-@patch('src.uPtt.utils.get_latest_pypi_version')
-@patch('src.uPtt.utils.__version__', "1.0.0")
-@patch('src.uPtt.utils.is_running_from_pypi_install', return_value=True)
-def test_is_update_available_true(mock_is_pypi, mock_get_latest):
-    mock_get_latest.return_value = "1.1.0"
-    assert is_update_available() is True
+
+# --- GitHub Release version tests ---
+
+@patch('requests.get')
+def test_get_latest_github_release_version_success(mock_get):
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"tag_name": "v1.5.0"}
+    mock_response.raise_for_status.return_value = None
+    mock_get.return_value = mock_response
+
+    version = get_latest_github_release_version()
+    assert version == "1.5.0"
+    assert "api.github.com" in mock_get.call_args[0][0]
+
+@patch('requests.get')
+def test_get_latest_github_release_version_strips_v(mock_get):
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"tag_name": "v2.0.0"}
+    mock_get.return_value = mock_response
+
+    assert get_latest_github_release_version() == "2.0.0"
+
+@patch('requests.get')
+def test_get_latest_github_release_version_no_prefix(mock_get):
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"tag_name": "3.1.0"}
+    mock_get.return_value = mock_response
+
+    assert get_latest_github_release_version() == "3.1.0"
+
+@patch('requests.get')
+def test_get_latest_github_release_version_failure(mock_get):
+    mock_get.side_effect = requests.exceptions.RequestException("Network error")
+    result = get_latest_github_release_version()
+    assert "Error fetching data" in result
+
+@patch('requests.get')
+def test_get_latest_github_release_version_key_error(mock_get):
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"wrong_key": "nope"}
+    mock_get.return_value = mock_response
+
+    result = get_latest_github_release_version()
+    assert "Could not find tag_name" in result
+
+
+# --- is_update_available tests ---
 
 @patch('src.uPtt.utils.get_latest_pypi_version')
+@patch('src.uPtt.utils._is_dev_version', return_value=True)
+@patch('src.uPtt.utils.__version__', "1.0.0.dev1")
+def test_is_update_available_dev_uses_testpypi(mock_is_dev, mock_get_pypi):
+    """測試版本走 TestPyPI"""
+    mock_get_pypi.return_value = "1.1.0.dev2"
+    assert is_update_available() is True
+    mock_get_pypi.assert_called_once_with(is_test=True)
+
+@patch('src.uPtt.utils.get_latest_github_release_version')
+@patch('src.uPtt.utils._is_dev_version', return_value=False)
+@patch('src.uPtt.utils.__version__', "1.0.0")
+def test_is_update_available_release_uses_github(mock_is_dev, mock_get_gh):
+    """正式版本走 GitHub Releases"""
+    mock_get_gh.return_value = "1.1.0"
+    assert is_update_available() is True
+    mock_get_gh.assert_called_once()
+
+@patch('src.uPtt.utils.get_latest_github_release_version')
+@patch('src.uPtt.utils._is_dev_version', return_value=False)
 @patch('src.uPtt.utils.__version__', "1.2.0")
-@patch('src.uPtt.utils.is_running_from_pypi_install', return_value=True)
-def test_is_update_available_false(mock_is_pypi, mock_get_latest):
-    mock_get_latest.return_value = "1.1.0"
+def test_is_update_available_false(mock_is_dev, mock_get_gh):
+    mock_get_gh.return_value = "1.1.0"
     assert is_update_available() is False
 
-@patch('src.uPtt.utils.get_latest_pypi_version')
+@patch('src.uPtt.utils._is_dev_version', return_value=False)
+@patch('src.uPtt.utils.get_latest_github_release_version', return_value="1.1.0")
 @patch('src.uPtt.utils.__version__', "1.0.0")
-def test_is_update_available_exception(mock_get_latest):
-    mock_get_latest.return_value = "1.1.0"
+def test_is_update_available_exception(mock_get_gh, mock_is_dev):
     with patch('packaging.version.parse', side_effect=Exception("Parse error")):
         assert is_update_available() is False
+
+
+# --- VersionCheckWorker tests ---
+
+class TestVersionCheckWorker:
+    @patch('src.uPtt.utils._is_dev_version', return_value=False)
+    @patch('src.uPtt.utils.is_update_available', return_value=True)
+    @patch('src.uPtt.utils.get_latest_github_release_version', return_value="2.0.0")
+    @patch('src.uPtt.utils.__version__', "1.0.0")
+    def test_emits_signal_release(self, *_mocks):
+        """正式版有更新時 emit GitHub release 版本"""
+        worker = VersionCheckWorker()
+        received = []
+        worker.update_available.connect(lambda v: received.append(v))
+        worker.check()
+        assert received == ["2.0.0"]
+
+    @patch('src.uPtt.utils._is_dev_version', return_value=True)
+    @patch('src.uPtt.utils.is_update_available', return_value=True)
+    @patch('src.uPtt.utils.get_latest_pypi_version', return_value="2.0.0.dev5")
+    @patch('src.uPtt.utils.__version__', "2.0.0.dev1")
+    def test_emits_signal_dev(self, *_mocks):
+        """測試版有更新時 emit TestPyPI 版本"""
+        worker = VersionCheckWorker()
+        received = []
+        worker.update_available.connect(lambda v: received.append(v))
+        worker.check()
+        assert received == ["2.0.0.dev5"]
+
+    @patch('src.uPtt.utils.is_update_available', return_value=False)
+    def test_no_signal_when_up_to_date(self, _mock):
+        worker = VersionCheckWorker()
+        received = []
+        worker.update_available.connect(lambda v: received.append(v))
+        worker.check()
+        assert received == []
+
+    @patch('src.uPtt.utils.is_update_available', side_effect=Exception("network error"))
+    def test_no_crash_on_exception(self, _mock):
+        worker = VersionCheckWorker()
+        received = []
+        worker.update_available.connect(lambda v: received.append(v))
+        worker.check()  # should not raise
+        assert received == []

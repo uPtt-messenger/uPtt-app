@@ -57,36 +57,40 @@ def test_login_window_version_label(qtbot):
     qtbot.addWidget(window)
     assert window.version_label.text() == f"v{__version__}"
 
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
 @patch('src.uPtt.ui.screens.PTTWorker')
 @patch('src.uPtt.ui.screens.QThread')
-def test_main_window_init(mock_qthread, mock_worker, qtbot, ptt_service_mock, db_mock):
+def test_main_window_init(mock_qthread, mock_worker, mock_ver_worker, qtbot, ptt_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         window = MainWindow(ptt_service_mock, db_mock)
         qtbot.addWidget(window)
         assert window.windowTitle() == "uPtt"
         assert window.central_stack.currentIndex() == 0
 
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
 @patch('src.uPtt.ui.screens.PTTWorker')
 @patch('src.uPtt.ui.screens.QThread')
-def test_on_login_result_success(mock_qthread, mock_worker, qtbot, ptt_service_mock, db_mock):
+def test_on_login_result_success(mock_qthread, mock_worker, mock_ver_worker, qtbot, ptt_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         window = MainWindow(ptt_service_mock, db_mock)
         qtbot.addWidget(window)
         window.on_login_result(True, "Login Success")
         assert window.central_stack.currentIndex() == 1
 
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
 @patch('src.uPtt.ui.screens.PTTWorker')
 @patch('src.uPtt.ui.screens.QThread')
-def test_on_login_result_failure(mock_qthread, mock_worker, qtbot, ptt_service_mock, db_mock):
+def test_on_login_result_failure(mock_qthread, mock_worker, mock_ver_worker, qtbot, ptt_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         window = MainWindow(ptt_service_mock, db_mock)
         qtbot.addWidget(window)
         window.on_login_result(False, "Failed")
         assert window.central_stack.currentIndex() == 0
 
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
 @patch('src.uPtt.ui.screens.PTTWorker')
 @patch('src.uPtt.ui.screens.QThread')
-def test_main_window_close_chat(mock_qthread, mock_worker, qtbot, ptt_service_mock, db_mock):
+def test_main_window_close_chat(mock_qthread, mock_worker, mock_ver_worker, qtbot, ptt_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         window = MainWindow(ptt_service_mock, db_mock)
         qtbot.addWidget(window)
@@ -95,9 +99,10 @@ def test_main_window_close_chat(mock_qthread, mock_worker, qtbot, ptt_service_mo
         assert window.contact_list.count() == 0
 
 @patch('src.uPtt.ui.screens.QMessageBox')
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
 @patch('src.uPtt.ui.screens.PTTWorker')
 @patch('src.uPtt.ui.screens.QThread')
-def test_main_window_block_user(mock_qthread, mock_worker, mock_msg, qtbot, ptt_service_mock, db_mock):
+def test_main_window_block_user(mock_qthread, mock_worker, mock_ver_worker, mock_msg, qtbot, ptt_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         window = MainWindow(ptt_service_mock, db_mock)
         qtbot.addWidget(window)
@@ -105,9 +110,10 @@ def test_main_window_block_user(mock_qthread, mock_worker, mock_msg, qtbot, ptt_
         window.handle_contact_action("BadUser", "BLOCK")
         assert "baduser" in window.blocked_users
 
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
 @patch('src.uPtt.ui.screens.PTTWorker')
 @patch('src.uPtt.ui.screens.QThread')
-def test_on_new_message_blocked(mock_qthread, mock_worker, qtbot, ptt_service_mock, db_mock):
+def test_on_new_message_blocked(mock_qthread, mock_worker, mock_ver_worker, qtbot, ptt_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         window = MainWindow(ptt_service_mock, db_mock)
         qtbot.addWidget(window)
@@ -116,27 +122,29 @@ def test_on_new_message_blocked(mock_qthread, mock_worker, qtbot, ptt_service_mo
         window.on_new_message(msg_data)
         assert "baduser" not in window.chat_histories
 
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
 @patch('src.uPtt.ui.screens.PTTWorker')
 @patch('src.uPtt.ui.screens.QThread')
-def test_on_user_info_result(mock_qthread, mock_worker, qtbot, ptt_service_mock, db_mock):
+def test_on_user_info_result(mock_qthread, mock_worker, mock_ver_worker, qtbot, ptt_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         window = MainWindow(ptt_service_mock, db_mock)
         qtbot.addWidget(window)
         window.add_or_select_contact("testuser")
-        
+
         # Manually trigger on_user_info_result
         data = {'ptt_id': 'TestUser', 'nickname': 'CoolNick'}
         window.on_user_info_result(data)
-        
+
         # Verify UI update
         item = window.contact_list.item(0)
         widget = window.contact_list.itemWidget(item)
         assert widget.id_label.text() == "TestUser"
         assert "(CoolNick)" in widget.nickname_label.text()
 
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
 @patch('src.uPtt.ui.screens.PTTWorker')
 @patch('src.uPtt.ui.screens.QThread')
-def test_load_sessions_from_db(mock_qthread, mock_worker, qtbot, ptt_service_mock, db_mock):
+def test_load_sessions_from_db(mock_qthread, mock_worker, mock_ver_worker, qtbot, ptt_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         db_mock.get_all_sessions.return_value = [{'id': 'u1', 'display_id': 'U1', 'nickname': 'N1', 'unread_count': 0}]
         window = MainWindow(ptt_service_mock, db_mock)
@@ -144,9 +152,10 @@ def test_load_sessions_from_db(mock_qthread, mock_worker, qtbot, ptt_service_moc
         window.load_sessions_from_db()
         assert window.contact_list.count() == 1
 
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
 @patch('src.uPtt.ui.screens.PTTWorker')
 @patch('src.uPtt.ui.screens.QThread')
-def test_handle_send(mock_qthread, mock_worker, qtbot, ptt_service_mock, db_mock):
+def test_handle_send(mock_qthread, mock_worker, mock_ver_worker, qtbot, ptt_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         window = MainWindow(ptt_service_mock, db_mock)
         qtbot.addWidget(window)
@@ -157,9 +166,10 @@ def test_handle_send(mock_qthread, mock_worker, qtbot, ptt_service_mock, db_mock
             mock_signal.emit.assert_called_with("target", "Hello")
 
 @patch('src.uPtt.ui.screens.QMessageBox')
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
 @patch('src.uPtt.ui.screens.PTTWorker')
 @patch('src.uPtt.ui.screens.QThread')
-def test_handle_logout(mock_qthread, mock_worker, mock_msg, qtbot, ptt_service_mock, db_mock):
+def test_handle_logout(mock_qthread, mock_worker, mock_ver_worker, mock_msg, qtbot, ptt_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         mock_msg.question.return_value = mock_msg.Yes
         window = MainWindow(ptt_service_mock, db_mock)
@@ -168,9 +178,10 @@ def test_handle_logout(mock_qthread, mock_worker, mock_msg, qtbot, ptt_service_m
         assert window.central_stack.currentIndex() == 0
 
 @patch('PySide6.QtCore.QMetaObject.invokeMethod')
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
 @patch('src.uPtt.ui.screens.PTTWorker')
 @patch('src.uPtt.ui.screens.QThread')
-def test_fully_quit(mock_qthread, mock_worker, mock_invoke, qtbot, ptt_service_mock, db_mock):
+def test_fully_quit(mock_qthread, mock_worker, mock_ver_worker, mock_invoke, qtbot, ptt_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         window = MainWindow(ptt_service_mock, db_mock)
         qtbot.addWidget(window)

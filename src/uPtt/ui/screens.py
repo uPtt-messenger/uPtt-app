@@ -9,14 +9,14 @@ from PySide6.QtWidgets import (
     QPushButton, QStackedWidget, QListWidget, QListWidgetItem, QSplitter,
     QScrollArea, QTextEdit, QSystemTrayIcon, QMenu, QMessageBox, QInputDialog
 )
-from PySide6.QtCore import Qt, Signal, Slot, QThread, QSize, QEvent
-from PySide6.QtGui import QIcon, QAction, QShortcut, QKeySequence, QPixmap, QPainter, QFontMetrics
+from PySide6.QtCore import Qt, Signal, Slot, QThread, QSize, QEvent, QUrl
+from PySide6.QtGui import QIcon, QAction, QShortcut, QKeySequence, QPixmap, QPainter, QFontMetrics, QDesktopServices
 from PySide6.QtSvg import QSvgRenderer
 
 from uPtt import __version__, contant
 from uPtt.ui.styles import MAIN_STYLE
 from uPtt.ui.widgets import ChatBubble, MailCard, ContactItem, ContactListWidget
-from uPtt.utils import encode_reply, decode_reply
+from uPtt.utils import encode_reply, decode_reply, VersionCheckWorker
 from uPtt.worker import PTTWorker
 from uPtt.ptt import UPttService
 
@@ -166,6 +166,20 @@ class LoginWindow(QWidget):
         form_layout.addSpacing(14)
         form_layout.addWidget(self.version_label)
 
+        # 更新提示 (初始隱藏)
+        self.update_label = QLabel()
+        self.update_label.setAlignment(Qt.AlignCenter)
+        self.update_label.setStyleSheet(
+            "color: #A0C4B4; font-size: 12px; background: transparent;"
+            "text-decoration: underline; padding-top: 4px;"
+        )
+        self.update_label.setCursor(Qt.PointingHandCursor)
+        self.update_label.hide()
+        self.update_label.mousePressEvent = lambda _: QDesktopServices.openUrl(
+            QUrl(contant.DOWNLOAD_URL)
+        )
+        form_layout.addWidget(self.update_label)
+
         main_layout.addWidget(form)
 
         # 綁定 Enter 鍵
@@ -191,6 +205,11 @@ class LoginWindow(QWidget):
         self.error_label.show()
         self.login_btn.setEnabled(True)
         self.login_btn.setText("連線至 PTT")
+
+    @Slot(str)
+    def show_update_available(self, latest_version: str):
+        self.update_label.setText(f"新版本 v{latest_version} 可供下載")
+        self.update_label.show()
 
 class MainWindow(QMainWindow):
     """主聊天畫面"""
@@ -224,6 +243,18 @@ class MainWindow(QMainWindow):
         self.init_shortcuts()
 
         self.setStyleSheet(MAIN_STYLE)
+
+        # 背景版本檢查
+        self._start_version_check()
+
+    def _start_version_check(self):
+        self._ver_thread = QThread()
+        self._ver_worker = VersionCheckWorker()
+        self._ver_worker.moveToThread(self._ver_thread)
+        self._ver_thread.started.connect(self._ver_worker.check)
+        self._ver_worker.update_available.connect(self.login_screen.show_update_available)
+        self._ver_worker.finished.connect(self._ver_thread.quit)
+        self._ver_thread.start()
 
     def init_worker(self):
         """啟動 PTT 背景 Worker"""

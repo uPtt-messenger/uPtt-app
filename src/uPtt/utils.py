@@ -1,8 +1,10 @@
+import logging
 import os
 import re
 import sys
 
 import requests
+from PySide6.QtCore import QObject, Signal, Slot
 
 try:
     from . import contant, __version__, __name__ as pkg_name
@@ -11,6 +13,8 @@ except ImportError:
     import contant
     from __init__ import __version__, __name__ as pkg_name
     import config
+
+logger = logging.getLogger("uPtt.utils")
 
 SECOND = 1
 MINUTE = 60 * SECOND
@@ -80,14 +84,14 @@ def msg_to_mail(app_name, ptt_id, msg):
 
 
 def get_latest_pypi_version(is_test: bool=False):
-    """查詢 PyPI 上指定套件的最新版本。"""
+    """查詢 PyPI (或 TestPyPI) 上指定套件的最新版本。"""
 
-    print(f"Checking latest version from {'Test' if is_test else 'PyPI'}...")
+    logger.info(f"Checking latest version from {'TestPyPI' if is_test else 'PyPI'}...")
     try:
         url = f"https://{'test.' if is_test else ''}pypi.org/pypi/{pkg_name}/json"
 
-        response = requests.get(url)
-        response.raise_for_status()  # 如果請求失敗則拋出異常
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
         data = response.json()
         latest_version = data["info"]["version"]
         return latest_version
@@ -95,6 +99,25 @@ def get_latest_pypi_version(is_test: bool=False):
         return f"Error fetching data: {e}"
     except KeyError:
         return "Error: Could not find version info in the response."
+
+
+def get_latest_github_release_version():
+    """查詢 GitHub Releases 上的最新正式版本。"""
+
+    logger.info("Checking latest version from GitHub Releases...")
+    try:
+        url = "https://api.github.com/repos/uPtt-messenger/uPttTerm/releases/latest"
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        tag = data["tag_name"]
+        # 移除 tag 前綴 "v"（例如 "v0.2.0" → "0.2.0"）
+        return tag.lstrip("v")
+    except requests.exceptions.RequestException as e:
+        return f"Error fetching data: {e}"
+    except KeyError:
+        return "Error: Could not find tag_name in the response."
+
 
 def is_running_from_pypi_install():
     script_path = os.path.abspath(__file__)
@@ -105,24 +128,56 @@ def is_running_from_pypi_install():
     return False
 
 
+def _is_dev_version():
+    """判斷目前是否為開發版本。"""
+    return 'dev' in __version__ or not is_running_from_pypi_install()
+
+
 def is_update_available():
-    """比較目前版本與最新版本，判斷是否有更新可用。"""
+    """比較目前版本與最新版本，判斷是否有更新可用。
+
+    測試版本 → 查 TestPyPI
+    正式版本 → 查 GitHub Releases
+    """
     from packaging import version
 
     current_version = __version__
-    # current_version = '0.1.0.dev20250925150919'
-    latest_version = get_latest_pypi_version(
-        'dev' in current_version or not is_running_from_pypi_install()
-    )
+    if _is_dev_version():
+        latest_version = get_latest_pypi_version(is_test=True)
+    else:
+        latest_version = get_latest_github_release_version()
 
     try:
         current_ver = version.parse(current_version)
         latest_ver = version.parse(latest_version)
         return latest_ver > current_ver
     except Exception as e:
-        print(f"Error comparing versions: {e}")
+        logger.debug(f"Error comparing versions: {e}")
         return False
 
+
+
+class VersionCheckWorker(QObject):
+    """背景版本檢查 Worker，檢查完成後自動停止所屬 thread。"""
+    update_available = Signal(str)  # latest_version
+    finished = Signal()
+
+    @Slot()
+    def check(self):
+        try:
+            if is_update_available():
+                if _is_dev_version():
+                    latest_version = get_latest_pypi_version(is_test=True)
+                else:
+                    latest_version = get_latest_github_release_version()
+                logger.info(f"新版本可用: {latest_version} (目前: {__version__})")
+                self.update_available.emit(latest_version)
+            else:
+                logger.info("目前已是最新版本")
+        except Exception:
+            logger.debug("版本檢查失敗，靜默忽略", exc_info=True)
+        finally:
+            self.finished.emit()
 
 
 if __name__ == '__main__':
