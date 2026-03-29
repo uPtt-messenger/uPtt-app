@@ -201,6 +201,20 @@ class DatabaseManager:
         except sqlite3.Error as e:
             logger.error(f"更新釘選排序失敗：{e}")
 
+    def delete_session(self, account_id: str, session_id: str):
+        """徹底刪除會話及其所有訊息紀錄。"""
+        acc_id_lower = account_id.lower()
+        session_id_lower = session_id.lower()
+        try:
+            with self._get_connection() as conn:
+                conn.execute("DELETE FROM messages WHERE account_id = ? AND session_id = ?",
+                             (acc_id_lower, session_id_lower))
+                conn.execute("DELETE FROM sessions WHERE account_id = ? AND id = ?",
+                             (acc_id_lower, session_id_lower))
+                conn.commit()
+        except sqlite3.Error as e:
+            logger.error(f"刪除會話失敗：{e}")
+
     # --- 訊息相關 (需傳入 account_id) ---
 
     def save_message(self, account_id: str, session_id: str, sender_id: str,

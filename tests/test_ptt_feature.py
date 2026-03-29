@@ -113,9 +113,9 @@ def test_call_retry_success():
     service.retry_delay = 0.1
     
     with patch.object(service.service, 'call') as mock_call:
-        # First call fails, second (re-login) succeeds, third (retry) succeeds
-        mock_call.side_effect = [Exception("Conn Error"), None, "Success"]
-        
+        # First call fails with ConnectionClosed, second (re-login) succeeds, third (retry) succeeds
+        mock_call.side_effect = [PyPtt.ConnectionClosed(), None, "Success"]
+
         res = service.call("get_user", {"user_id": "test"})
         assert res == "Success"
         assert mock_call.call_count == 3
@@ -128,12 +128,12 @@ def test_call_retry_failure():
     service.max_retry = 2
     
     with patch.object(service.service, 'call') as mock_call:
-        mock_call.side_effect = Exception("Permanent Error")
-        
-        with pytest.raises(Exception, match="Permanent Error"):
+        mock_call.side_effect = PyPtt.ConnectionClosed()
+
+        with pytest.raises(PyPtt.ConnectionClosed):
             service.call("get_user", {"user_id": "test"})
-        
-        # 1st attempt + 1st re-login + 2nd attempt
+
+        # 1st attempt + 1st re-login + 2nd attempt + 2nd re-login (fails silently)
         assert mock_call.call_count == 3
 
 def test_close():

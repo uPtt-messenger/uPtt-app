@@ -191,7 +191,7 @@ class LoginWindow(QWidget):
 
     def handle_login(self):
         user = self.username_input.text().strip()
-        pw = self.password_input.text().strip()
+        pw = self.password_input.text()
         if not user or not pw:
             self.show_error("請輸入完整帳號密碼")
             return
@@ -1049,14 +1049,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.Yes | QMessageBox.No
             )
             if confirm == QMessageBox.Yes:
-                # 從資料庫刪除 (需實作或直接下 SQL)
-                try:
-                    with self.db._get_connection() as conn:
-                        conn.execute("DELETE FROM messages WHERE account_id = ? AND session_id = ?", (current_acc, ptt_id_lower))
-                        conn.execute("DELETE FROM sessions WHERE account_id = ? AND id = ?", (current_acc, ptt_id_lower))
-                        conn.commit()
-                except Exception as e:
-                    logger.error(f"資料庫刪除失敗: {e}")
+                self.db.delete_session(current_acc, ptt_id_lower)
 
                 if ptt_id_lower in self.chat_histories:
                     del self.chat_histories[ptt_id_lower]
@@ -1075,7 +1068,7 @@ class MainWindow(QMainWindow):
         if sender in self.pinned_ids:
             return  # 釘選的聯絡人不需移動
 
-        pinned_count = len(self.pinned_ids)
+        pinned_count = self.contact_list._pinned_count()
 
         for i in range(self.contact_list.count()):
             item = self.contact_list.item(i)
@@ -1257,10 +1250,16 @@ class MainWindow(QMainWindow):
                 self.ptt_thread.quit()
                 if not self.ptt_thread.wait(2000):
                     self.ptt_thread.terminate()
+                    self.ptt_thread.wait()  # 確保 terminate 完全結束
 
-            # 2. 徹底重設 PTT 服務實例 (重啟 PyPtt.Service)
+            # 1.5 停止版本檢查執行緒
+            if hasattr(self, '_ver_thread') and self._ver_thread.isRunning():
+                self._ver_thread.quit()
+                self._ver_thread.wait(11000)
+
+            # 2. 徹底重設 PTT 服務實例 (建立全新實例，避免 race condition)
             self.ptt_service.close()
-            self.ptt_service.__init__()
+            self.ptt_service = UPttService()
 
             # 3. 清除 UI 狀態
             self.contact_list.clear()
@@ -1310,7 +1309,12 @@ class MainWindow(QMainWindow):
                 self.ptt_thread.quit()
                 if not self.ptt_thread.wait(3000):
                     logger.warning("Worker 執行緒未在預期時間內結束，跳過等待。")
-            
+
+            # 2.5 停止版本檢查執行緒
+            if hasattr(self, '_ver_thread') and self._ver_thread.isRunning():
+                self._ver_thread.quit()
+                self._ver_thread.wait(11000)
+
             # 3. 隱藏系統匣
             if hasattr(self, 'tray_icon'):
                 self.tray_icon.hide()

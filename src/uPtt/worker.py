@@ -166,10 +166,11 @@ class PTTWorker(QObject):
                 # 處理 uPtt 訊息
                 if not is_backup:
                     content = mail[PyPtt.MailField.content]
-                    start = content.find(contant.PTT_MSG_DIVISION_LINE) + len(contant.PTT_MSG_DIVISION_LINE)
+                    div_pos = content.find(contant.PTT_MSG_DIVISION_LINE)
                     end = content.rfind(contant.PTT_MSG_DIVISION_LINE)
 
-                    if start >= 0 and end > start:
+                    if div_pos >= 0 and end > div_pos:
+                        start = div_pos + len(contant.PTT_MSG_DIVISION_LINE)
                         text = content[start:end].strip()
                         current_user = self.ptt.ptt_id
                         self.db.upsert_session(account_id=current_user, display_id=sender_id)
@@ -195,8 +196,9 @@ class PTTWorker(QObject):
                                 'subject': ''
                             })
 
-                # 處理完即刪除
+                # uPtt 訊息處理完即刪除（含 backup 副本）
                 self.ptt.call('del_mail', {'index': mail_idx})
+                continue
 
             # 5. 更新本次輪詢成功結束的時間並存入資料庫
             self.last_poll_time = current_poll_start

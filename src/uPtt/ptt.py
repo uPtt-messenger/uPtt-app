@@ -66,8 +66,8 @@ class UPttService:
         for i in range(self.max_retry):
             try:
                 return self.service.call(api, args)
-            except (PyPtt.ConnectionClosed, Exception) as e:
-                logger.warning(f"API 呼叫失敗 (嘗試 {i+1}/{self.max_retry}): {e}")
+            except PyPtt.ConnectionClosed as e:
+                logger.warning(f"連線中斷，嘗試重連 ({i+1}/{self.max_retry}): {e}")
                 if i < self.max_retry - 1:
                     time.sleep(self.retry_delay)
                     try:

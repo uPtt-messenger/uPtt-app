@@ -1,7 +1,7 @@
 try:
-    from . import __name__ as pkg_name
+    from . import __app_name__ as pkg_name
 except ImportError:
-    from __init__ import __name__ as pkg_name
+    from __init__ import __app_name__ as pkg_name
 
 LOGO = '''
 ██╗   ██╗██████╗ ████████╗████████╗ 
