@@ -8,7 +8,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/uPtt-messenger/uPttTerm/releases"><img src="https://img.shields.io/github/v/release/uPtt-messenger/uPttTerm?label=最新發布版本&color=blue" alt="GitHub release"></a>
+  <a href="README_en.md">English</a> | 繁體中文
+</p>
+
+<p align="center">
   <a href="https://github.com/uPtt-messenger/uPttTerm/blob/main/LICENSE"><img src="https://img.shields.io/badge/授權條款-GPL--3.0-green.svg" alt="License"></a>
   <img src="https://img.shields.io/badge/平台-Windows%20|%20macOS-lightgrey" alt="Platform">
 </p>
@@ -81,7 +84,7 @@ PTT（批踢踢）是台灣最具生命力的網路社群，但傳統的 Telnet 
 ## 🚀 如何開始使用？
 
 ### 取得最新發行版
-無需安裝繁瑣的程式碼環境，請前往 [GitHub Releases](https://github.com/uPtt-messenger/uPttTerm/releases) 下載對應版本：
+無需安裝繁瑣的程式碼環境，請前往 [GitHub Releases](https://github.com/uPtt-messenger/uPtt-app/releases) 下載對應版本：
 
 *   **Windows:** 下載 `.exe` 執行檔，執行後即可啟動。
 *   **macOS:** 下載 `.dmg` 映像檔，將 `uPtt` 拖移至「應用程式」資料夾即可使用。
@@ -92,7 +95,7 @@ PTT（批踢踢）是台灣最具生命力的網路社群，但傳統的 Telnet 
 
 本專案使用 **Python 3.12** 與 **PySide6** 開發。如果您想參與開發或自行編譯，請參考：
 
-1.  **複製專案：** `git clone https://github.com/uPtt-messenger/uPttTerm.git`
+1.  **複製專案：** `git clone git@github.com:uPtt-messenger/uPtt-app.git`
 2.  **安裝依賴：** `pip install -r requirements.txt`
 3.  **執行：** `python3 src/run_app.py`
 4.  **測試：** `pytest --cov=src/uPtt tests/`
@@ -102,8 +105,10 @@ PTT（批踢踢）是台灣最具生命力的網路社群，但傳統的 Telnet 
 ## 📜 授權與感謝
 
 *   本專案採用 **GPL-3.0** 授權。
-*   特別感謝 [PyPtt](https://github.com/Ptt-Official-App/PyPtt) 提供強大的 PTT 操作支援 ~~這其實也是 CodingMan 開發的~~。
+*   特別感謝 [PyPtt](https://github.com/PyPtt/PyPtt) 提供強大的 PTT 操作支援。
 
-<p align="center">
-  由 <a href="mailto:pttcodingman@gmail.com">CodingMan</a> 帶著對 PTT 的熱愛製作
-</p>
+## Code signing policy
+
+本專案的發行版由 [SignPath.io](https://signpath.io) 簽署，並由 [SignPath Foundation](https://signpath.org) 驗證。
+
+詳細資訊請參閱 [Code Signing Policy](CODE_SIGNING_POLICY.md)。
