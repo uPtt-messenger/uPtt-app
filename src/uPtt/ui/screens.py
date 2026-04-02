@@ -286,6 +286,9 @@ class MainWindow(QMainWindow):
         self.worker.user_info_error.connect(self.on_user_info_error)
         self.worker.status_updated.connect(lambda s: logger.info(f"Worker Status: {s}"))
         self.worker.login_result.connect(self.on_login_result)
+        self.worker.connection_lost.connect(self.on_connection_lost)
+        self.worker.connection_restored.connect(self.on_connection_restored)
+        self.worker.online_status_updated.connect(self.on_online_status_updated)
         
         # 啟動執行緒
         self.ptt_thread.start()
@@ -514,6 +517,14 @@ class MainWindow(QMainWindow):
         chat_header_text_layout.addWidget(self.chat_header_id)
         chat_header_text_layout.addWidget(self.chat_header_nick)
 
+        # 聊天標題列在線狀態文字
+        self.chat_header_online = QLabel()
+        self.chat_header_online.setStyleSheet(
+            "font-size: 10px; color: #484F58; background: transparent;"
+        )
+        self.chat_header_online.hide()
+        chat_header_text_layout.addWidget(self.chat_header_online)
+
         chat_header_layout.addWidget(self.chat_header_avatar)
         chat_header_layout.addWidget(chat_header_text, 1)
 
@@ -588,21 +599,23 @@ class MainWindow(QMainWindow):
     def on_user_info_result(self, data):
         ptt_id = data['ptt_id'] # 正確大小寫的 ID
         nickname = data['nickname']
-        logger.info(f"收到使用者資訊回傳: ID='{ptt_id}', 暱稱='{nickname}'")
+        is_online = data.get('is_online', False)
+        logger.info(f"收到使用者資訊回傳: ID='{ptt_id}', 暱稱='{nickname}', 在線={is_online}")
 
-        # 更新清單中的資訊 (包含正確大小寫的 ID)
+        # 更新清單中的資訊 (包含正確大小寫的 ID 與在線狀態)
         found = False
         for i in range(self.contact_list.count()):
             item = self.contact_list.item(i)
             widget = self.contact_list.itemWidget(item)
             if widget.ptt_id == ptt_id.lower():
                 widget.update_info(ptt_id, nickname)
+                widget.set_online(is_online)
                 logger.debug(f"成功更新介面清單項目: {ptt_id}")
                 self.update_sidebar_width() # 更新寬度
                 found = True
                 break
         if found and self.current_chat_id == ptt_id.lower():
-            self._update_chat_header(ptt_id, nickname)
+            self._update_chat_header(ptt_id, nickname, is_online)
         if not found:
             logger.warning(f"在目前會話清單中找不到對應 ID: {ptt_id}")
 
@@ -665,6 +678,40 @@ class MainWindow(QMainWindow):
             self.message_edit.setFocus() # 登入後自動聚焦輸入框
         else:
             self.login_screen.show_error(message)
+
+    @Slot()
+    def on_connection_lost(self):
+        """連線中斷時更新 UI 狀態"""
+        logger.warning("UI: 偵測到連線中斷")
+        self._status_dot.setStyleSheet("color: #D29922; font-size: 9px; background: transparent;")
+        self._status_dot.setToolTip("連線中斷，正在重新連線...")
+        self.setWindowTitle(f"uPtt - {self.ptt_service.ptt_id} (重新連線中...)")
+
+    @Slot()
+    def on_connection_restored(self):
+        """連線恢復時更新 UI 狀態"""
+        logger.info("UI: 連線已恢復")
+        self._status_dot.setStyleSheet("color: #56D364; font-size: 9px; background: transparent;")
+        self._status_dot.setToolTip("")
+        self.setWindowTitle(f"uPtt - {self.ptt_service.ptt_id}")
+
+    @Slot(str, bool)
+    def on_online_status_updated(self, ptt_id: str, is_online: bool):
+        """收到聯絡人在線狀態更新"""
+        ptt_id_lower = ptt_id.lower()
+        for i in range(self.contact_list.count()):
+            item = self.contact_list.item(i)
+            widget = self.contact_list.itemWidget(item)
+            if widget and widget.ptt_id == ptt_id_lower:
+                widget.set_online(is_online)
+                break
+        # 若正在檢視此聯絡人的對話，同步更新聊天標題列
+        if self.current_chat_id == ptt_id_lower:
+            self.chat_header_online.setText("● 在線上" if is_online else "● 離線")
+            self.chat_header_online.setStyleSheet(
+                f"font-size: 10px; color: {'#56D364' if is_online else '#484F58'}; background: transparent;"
+            )
+            self.chat_header_online.show()
 
     def load_sessions_from_db(self):
         """從資料庫載入所有可見的歷史對話。"""
@@ -823,9 +870,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(f"uPtt - 與 {widget.ptt_id_display} 對話中")
         nick_text = widget.nickname_label.text()
         nickname = nick_text[1:-1] if nick_text.startswith("(") and nick_text.endswith(")") else ""
-        self._update_chat_header(widget.ptt_id_display, nickname)
+        self._update_chat_header(widget.ptt_id_display, nickname, widget._is_online)
 
-    def _update_chat_header(self, display_id: str, nickname: str):
+    def _update_chat_header(self, display_id: str, nickname: str, is_online: Optional[bool] = None):
         """更新聊天標題列的聯絡人資訊。"""
         first_letter = display_id[0].upper() if display_id else "?"
         self.chat_header_avatar.setText(first_letter)
@@ -835,6 +882,18 @@ class MainWindow(QMainWindow):
             self.chat_header_nick.show()
         else:
             self.chat_header_nick.hide()
+        if is_online is not None:
+            if is_online:
+                self.chat_header_online.setText("● 在線上")
+                self.chat_header_online.setStyleSheet(
+                    "font-size: 10px; color: #56D364; background: transparent;"
+                )
+            else:
+                self.chat_header_online.setText("● 離線")
+                self.chat_header_online.setStyleSheet(
+                    "font-size: 10px; color: #484F58; background: transparent;"
+                )
+            self.chat_header_online.show()
         self.chat_header.show()
 
     def refresh_chat_display(self):
@@ -1087,6 +1146,7 @@ class MainWindow(QMainWindow):
                     is_pinned=False,
                     last_msg_time=data.get('last_msg_time', ''),
                 )
+                new_widget.set_online(data.get('is_online', False))
                 self.contact_list.insertItem(pinned_count, new_item)
                 self.contact_list.setItemWidget(new_item, new_widget)
                 unread = self.unread_counts.get(sender, 0)
@@ -1156,6 +1216,7 @@ class MainWindow(QMainWindow):
                     is_pinned=True,
                     last_msg_time=data.get('last_msg_time', ''),
                 )
+                new_widget.set_online(data.get('is_online', False))
                 self.contact_list.insertItem(insert_pos, new_item)
                 self.contact_list.setItemWidget(new_item, new_widget)
                 if was_selected:
@@ -1183,6 +1244,7 @@ class MainWindow(QMainWindow):
                     is_pinned=False,
                     last_msg_time=data.get('last_msg_time', ''),
                 )
+                new_widget.set_online(data.get('is_online', False))
                 self.contact_list.insertItem(insert_pos, new_item)
                 self.contact_list.setItemWidget(new_item, new_widget)
                 if was_selected:

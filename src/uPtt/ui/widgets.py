@@ -287,6 +287,7 @@ class ContactItem(QWidget):
         self.ptt_id = ptt_id.lower()
         self.is_pinned = is_pinned
         self.unread_count = unread_count
+        self._is_online = False
 
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setStyleSheet("background: transparent;")
@@ -304,9 +305,14 @@ class ContactItem(QWidget):
         main_layout.addWidget(self.pin_bar, alignment=Qt.AlignVCenter)
         main_layout.addSpacing(8)
 
-        # 1. 頭像圓圈
-        self.avatar_label = QLabel(ptt_id[0].upper() if ptt_id else "?")
+        # 1. 頭像圓圈 (含在線狀態指示點)
+        avatar_container = QWidget()
+        avatar_container.setFixedSize(40, 40)
+        avatar_container.setStyleSheet("background: transparent;")
+
+        self.avatar_label = QLabel(ptt_id[0].upper() if ptt_id else "?", avatar_container)
         self.avatar_label.setFixedSize(36, 36)
+        self.avatar_label.move(0, 2)
         self.avatar_label.setAlignment(Qt.AlignCenter)
         self.avatar_label.setStyleSheet("""
             background-color: #2D3B35;
@@ -315,8 +321,15 @@ class ContactItem(QWidget):
             font-weight: bold;
             font-size: 14px;
         """)
-        main_layout.addWidget(self.avatar_label, alignment=Qt.AlignVCenter)
-        main_layout.addSpacing(10)
+
+        # 在線狀態指示點 (右下角)
+        self.online_dot = QLabel(avatar_container)
+        self.online_dot.setFixedSize(10, 10)
+        self.online_dot.move(27, 28)
+        self._update_online_dot_style()
+
+        main_layout.addWidget(avatar_container, alignment=Qt.AlignVCenter)
+        main_layout.addSpacing(8)
 
         # 2. 中央文字區域 (ID + 暱稱)
         text_container = QWidget()
@@ -396,6 +409,21 @@ class ContactItem(QWidget):
     def set_nickname(self, nickname: str):
         self.update_info(self.ptt_id_display, nickname)
 
+    def _update_online_dot_style(self):
+        if self._is_online:
+            self.online_dot.setStyleSheet(
+                "background-color: #56D364; border-radius: 5px; border: 2px solid #0D1117;"
+            )
+        else:
+            self.online_dot.setStyleSheet(
+                "background-color: #484F58; border-radius: 5px; border: 2px solid #0D1117;"
+            )
+
+    def set_online(self, is_online: bool):
+        """更新在線狀態指示點。"""
+        self._is_online = is_online
+        self._update_online_dot_style()
+
     def _update_pin_style(self):
         if self.is_pinned:
             self.pin_bar.setStyleSheet("background-color: #A0C4B4; border-radius: 1px;")
@@ -416,6 +444,7 @@ class ContactItem(QWidget):
             'nickname': nickname,
             'unread_count': self.unread_count,
             'is_pinned': self.is_pinned,
+            'is_online': self._is_online,
             'last_msg_time': self.time_label.text(),
         }
 
@@ -536,6 +565,7 @@ class ContactListWidget(QListWidget):
                 is_pinned=data['is_pinned'],
                 last_msg_time=data.get('last_msg_time', ''),
             )
+            new_widget.set_online(data.get('is_online', False))
             self.addItem(new_item)
             self.setItemWidget(new_item, new_widget)
 

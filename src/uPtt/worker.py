@@ -19,9 +19,12 @@ class PTTWorker(QObject):
     login_result = Signal(bool, str)  # (成功與否, 訊息)
     new_message_received = Signal(dict)  # {'sender': str, 'text': str, 'time': str, 'full_author': str}
     send_result = Signal(bool, str)  # (成功與否, 錯誤訊息)
-    user_info_result = Signal(dict)  # {'ptt_id': str, 'nickname': str}
+    user_info_result = Signal(dict)  # {'ptt_id': str, 'nickname': str, 'is_online': bool}
     user_info_error = Signal(str, str)  # (ID, 錯誤訊息)
+    online_status_updated = Signal(str, bool)  # (ptt_id 小寫, is_online)
     status_updated = Signal(str)
+    connection_lost = Signal()       # 連線中斷
+    connection_restored = Signal()   # 連線恢復
 
     def __init__(self, ptt_service: UPttService, db):
         super().__init__()
@@ -37,6 +40,9 @@ class PTTWorker(QObject):
             self.last_poll_time = None
             
         self.is_first_polling = True
+        self._was_connected = True  # 追蹤上次連線狀態，用於判斷是否需發射訊號
+        self._last_newest_index: Optional[int] = None  # 上次輪詢時的信箱最新索引
+        self._online_check_timer: Optional[QTimer] = None
 
     @Slot(str, str)
     def do_login(self, username, password):
@@ -73,6 +79,16 @@ class PTTWorker(QObject):
             self.polling_timer.start(interval)
             logger.info(f"開始輪詢新信件，間隔: {interval / 1000}s")
 
+        # 啟動在線狀態定期檢查
+        if self._online_check_timer is None:
+            self._online_check_timer = QTimer()
+            self._online_check_timer.timeout.connect(self._check_all_online_status)
+            online_interval = getattr(config, 'CHECK_ONLINE_STATUS_INTERVAL', 60) * 1000
+            self._online_check_timer.start(online_interval)
+            logger.info(f"開始輪詢在線狀態，間隔: {online_interval / 1000}s")
+            # 首次立即檢查一次
+            self._check_all_online_status()
+
     def _poll_new_mails(self):
         """
         輪詢新信件的內部邏輯 (超級優化版：帶有時間截止點)
@@ -81,29 +97,51 @@ class PTTWorker(QObject):
         try:
             # 記錄本次輪詢開始的時間
             current_poll_start = datetime.now()
-            
+
             # 1. 取得信箱總數
             total_newest = self.ptt.call('get_newest_index', {'index_type': PyPtt.NewIndex.MAIL})
+
+            # 如果之前是斷線狀態，現在成功了，代表已恢復
+            if not self._was_connected:
+                self._was_connected = True
+                self.connection_restored.emit()
+                self.status_updated.emit("已重新連線")
+                logger.info("連線已恢復")
             
             if not total_newest or total_newest == 0:
                 self.last_poll_time = current_poll_start
                 return
 
-            # 2. 定義掃描上限 (防呆用：初次啟動可掃描較多封數以補齊離線訊息)
+            # 2. 快速跳過：如果信箱最新索引沒有變化，表示沒有新信，不需掃描
+            if not self.is_first_polling and self._last_newest_index is not None:
+                if total_newest == self._last_newest_index:
+                    logger.debug(f"信箱無變化 (總數={total_newest})，跳過掃描")
+                    self.last_poll_time = current_poll_start
+                    self.db.set_config('LAST_POLL_TIME', current_poll_start.isoformat())
+                    return
+                elif total_newest < self._last_newest_index:
+                    # 索引變小代表有信被刪除（例如 uPtt 訊息處理後刪信），也不需掃描
+                    logger.debug(f"信箱索引減少 ({self._last_newest_index} → {total_newest})，跳過掃描")
+                    self._last_newest_index = total_newest
+                    self.last_poll_time = current_poll_start
+                    self.db.set_config('LAST_POLL_TIME', current_poll_start.isoformat())
+                    return
+
+            # 3. 定義掃描上限 (防呆用：初次啟動可掃描較多封數以補齊離線訊息)
             scan_limit = 200 if self.is_first_polling else 50
-            
-            # 3. 建立停止時間 (不論是否為初次啟動，只要有紀錄就啟用截止點)
+
+            # 4. 建立停止時間 (不論是否為初次啟動，只要有紀錄就啟用截止點)
             stop_time = None
             if self.last_poll_time:
                 # 緩衝 10 秒以應對 PTT 伺服器時間誤差
                 stop_time = self.last_poll_time - timedelta(seconds=10)
-            
+
             self.is_first_polling = False
-            
+
             start_idx = total_newest
             end_idx = max(1, total_newest - scan_limit + 1)
-            
-            logger.debug(f"輪詢掃描中: 總數={total_newest}, 截止時間={stop_time}")
+
+            logger.debug(f"輪詢掃描中: 總數={total_newest}, 新增={total_newest - (self._last_newest_index or 0)}, 截止時間={stop_time}")
 
             mails_to_emit = []
             
@@ -130,7 +168,10 @@ class PTTWorker(QObject):
                 raw_title = mail.get(PyPtt.MailField.title)
                 title = str(raw_title) if raw_title is not None else ""
                 
-                full_author = mail[PyPtt.MailField.author].strip()
+                raw_author = mail.get(PyPtt.MailField.author)
+                if not raw_author:
+                    continue
+                full_author = raw_author.strip()
                 sender_id = full_author.split(' ')[0]
                 is_backup = (self.ptt.ptt_id and sender_id.lower() == self.ptt.ptt_id.lower())
 
@@ -200,7 +241,8 @@ class PTTWorker(QObject):
                 self.ptt.call('del_mail', {'index': mail_idx})
                 continue
 
-            # 5. 更新本次輪詢成功結束的時間並存入資料庫
+            # 5. 更新本次輪詢成功結束的時間與索引並存入資料庫
+            self._last_newest_index = total_newest
             self.last_poll_time = current_poll_start
             self.db.set_config('LAST_POLL_TIME', current_poll_start.isoformat())
 
@@ -209,8 +251,26 @@ class PTTWorker(QObject):
                 self.new_message_received.emit(mail_data)
                 self.last_mail_time = mail_data['timestamp']
 
+        except PyPtt.ConnectionClosed:
+            logger.warning("輪詢時偵測到連線中斷，嘗試自動重連...")
+            if self._was_connected:
+                self._was_connected = False
+                self.connection_lost.emit()
+                self.status_updated.emit("連線中斷，正在嘗試重新連線...")
+            # ptt.call 內部重連失敗才會拋出此例外，再嘗試一次頂層重連
+            if self.ptt.reconnect():
+                self._was_connected = True
+                self.connection_restored.emit()
+                self.status_updated.emit("已重新連線")
+                logger.info("頂層重連成功，下次輪詢將恢復正常")
+            else:
+                logger.error("頂層重連失敗，將在下次輪詢時重試")
         except Exception as e:
             logger.exception(f"輪詢信件發生錯誤: {e}")
+            # 檢查是否為連線相關錯誤
+            if not self.ptt.is_connected and self._was_connected:
+                self._was_connected = False
+                self.connection_lost.emit()
             self.status_updated.emit(f"輪詢錯誤: {e}")
 
     @Slot(str, str)
@@ -256,24 +316,25 @@ class PTTWorker(QObject):
 
     @Slot(str)
     def get_user_info(self, ptt_id):
-        """主動獲取使用者資訊 (包含暱稱與正確大小寫)"""
+        """主動獲取使用者資訊 (包含暱稱、正確大小寫與在線狀態)"""
         try:
             logger.info(f"--- 開始查詢使用者資訊: {ptt_id} ---")
             info = self.ptt.get_user_info(ptt_id)
-            
+
             # --- 更新資料庫中的暱稱與顯示 ID (加入 account_id 隔離) ---
             self.db.upsert_session(
-                account_id=self.ptt.ptt_id, 
-                display_id=info['ptt_id'], 
+                account_id=self.ptt.ptt_id,
+                display_id=info['ptt_id'],
                 nickname=info['nickname']
             )
 
             self.user_info_result.emit({
                 'ptt_id': info['ptt_id'],
-                'nickname': info['nickname']
+                'nickname': info['nickname'],
+                'is_online': info['is_online'],
             })
             logger.info(f"成功獲取使用者資訊: {info}")
-            
+
         except ValueError as e:
             error_msg = str(e)
             logger.warning(f"查詢使用者 {ptt_id} 失敗: {error_msg}")
@@ -284,6 +345,25 @@ class PTTWorker(QObject):
         finally:
             logger.info(f"--- 查詢結束: {ptt_id} ---")
 
+    def _check_all_online_status(self):
+        """定期檢查所有聯絡人的在線狀態"""
+        if not self.ptt.ptt_id:
+            return
+        try:
+            sessions = self.db.get_all_sessions(self.ptt.ptt_id)
+            for s in sessions:
+                contact_id = s['id']
+                # 跳過自己
+                if contact_id == self.ptt.ptt_id.lower():
+                    continue
+                try:
+                    info = self.ptt.get_user_info(contact_id)
+                    self.online_status_updated.emit(contact_id, info['is_online'])
+                except Exception as e:
+                    logger.debug(f"檢查 {contact_id} 在線狀態失敗: {e}")
+        except Exception as e:
+            logger.warning(f"在線狀態輪詢失敗: {e}")
+
     @Slot()
     def stop(self):
         """停止所有背景任務並登出"""
@@ -291,6 +371,8 @@ class PTTWorker(QObject):
             logger.info("正在停止 Worker...")
             if self.polling_timer:
                 self.polling_timer.stop()
+            if self._online_check_timer:
+                self._online_check_timer.stop()
 
             # 關閉 PTT 連線
             if self.ptt:

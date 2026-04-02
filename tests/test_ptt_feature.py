@@ -11,34 +11,38 @@ def test_get_user_info_success():
     service = UPttService()
     service.ptt_id = "test_user"
     service.ptt_pw = "test_pw"
-    
+
     # Mock the internal call to PyPtt
     mock_response = {
         'ptt_id': 'CodingMan (bug maker)',
+        'activity': '閱讀文章',
         'other_info': '...'
     }
-    
+
     with patch.object(service, 'call', return_value=mock_response):
         info = service.get_user_info("codingman")
         # In current logic, full_id_str is "CodingMan (bug maker)"
         # true_id = full_id_str[:start_idx].strip() -> "CodingMan"
         assert info['ptt_id'] == "CodingMan"
         assert info['nickname'] == "bug maker"
+        assert info['is_online'] is True
 
 def test_get_user_info_no_nickname():
     service = UPttService()
     service.ptt_id = "test_user"
     service.ptt_pw = "test_pw"
-    
+
     mock_response = {
         'ptt_id': 'JustID',
+        'activity': '不在站上',
         'other_info': '...'
     }
-    
+
     with patch.object(service, 'call', return_value=mock_response):
         info = service.get_user_info("justid")
         assert info['ptt_id'] == "JustID"
         assert info['nickname'] == ""
+        assert info['is_online'] is False
 
 def test_get_user_info_not_found():
     service = UPttService()
@@ -66,7 +70,7 @@ def test_login_id_correction():
     with patch.object(service.service, 'call') as mock_ptt_call, \
          patch.object(service, 'get_user_info') as mock_get_info:
         
-        mock_get_info.return_value = {'ptt_id': 'CorrectID', 'nickname': 'MyNick'}
+        mock_get_info.return_value = {'ptt_id': 'CorrectID', 'nickname': 'MyNick', 'is_online': True}
         
         # Call login with lowercase
         success = service.login("correctid", "password")
@@ -111,14 +115,15 @@ def test_call_retry_success():
     service.ptt_id = "user"
     service.ptt_pw = "pass"
     service.retry_delay = 0.1
-    
-    with patch.object(service.service, 'call') as mock_call:
-        # First call fails with ConnectionClosed, second (re-login) succeeds, third (retry) succeeds
-        mock_call.side_effect = [PyPtt.ConnectionClosed(), None, "Success"]
 
-        res = service.call("get_user", {"user_id": "test"})
-        assert res == "Success"
-        assert mock_call.call_count == 3
+    with patch.object(service, 'reconnect', return_value=True) as mock_reconnect:
+        # First call raises ConnectionClosed, reconnect succeeds, second call succeeds
+        with patch.object(service.service, 'call') as mock_call:
+            mock_call.side_effect = [PyPtt.ConnectionClosed(), "Success"]
+
+            res = service.call("get_user", {"user_id": "test"})
+            assert res == "Success"
+            mock_reconnect.assert_called_once()
 
 def test_call_retry_failure():
     service = UPttService()
@@ -126,15 +131,15 @@ def test_call_retry_failure():
     service.ptt_pw = "pass"
     service.retry_delay = 0.1
     service.max_retry = 2
-    
-    with patch.object(service.service, 'call') as mock_call:
-        mock_call.side_effect = PyPtt.ConnectionClosed()
 
-        with pytest.raises(PyPtt.ConnectionClosed):
-            service.call("get_user", {"user_id": "test"})
+    with patch.object(service, 'reconnect', return_value=False) as mock_reconnect:
+        with patch.object(service.service, 'call') as mock_call:
+            mock_call.side_effect = PyPtt.ConnectionClosed()
 
-        # 1st attempt + 1st re-login + 2nd attempt + 2nd re-login (fails silently)
-        assert mock_call.call_count == 3
+            with pytest.raises(PyPtt.ConnectionClosed):
+                service.call("get_user", {"user_id": "test"})
+
+            mock_reconnect.assert_called_once()
 
 def test_close():
     service = UPttService()

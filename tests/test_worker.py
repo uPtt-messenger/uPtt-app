@@ -37,7 +37,7 @@ def test_worker_init_invalid_poll_time(ptt_service_mock, db_mock):
 
 def test_do_login_success(qtbot, worker, ptt_service_mock, db_mock):
     ptt_service_mock.login.return_value = True
-    ptt_service_mock.get_user_info.return_value = {'ptt_id': 'CorrectID', 'nickname': 'Nick'}
+    ptt_service_mock.get_user_info.return_value = {'ptt_id': 'CorrectID', 'nickname': 'Nick', 'is_online': True}
     
     with qtbot.waitSignal(worker.login_result) as blocker:
         worker.do_login("testuser", "testpass")
@@ -133,13 +133,14 @@ def test_send_message_failure(qtbot, worker, ptt_service_mock):
 def test_get_user_info_success(qtbot, worker, ptt_service_mock, db_mock):
     ptt_service_mock.get_user_info.return_value = {
         'ptt_id': 'CorrectID',
-        'nickname': 'CoolNick'
+        'nickname': 'CoolNick',
+        'is_online': True,
     }
-    
+
     with qtbot.waitSignal(worker.user_info_result) as blocker:
         worker.get_user_info("correctid")
-    
-    assert blocker.args == [{'ptt_id': 'CorrectID', 'nickname': 'CoolNick'}]
+
+    assert blocker.args == [{'ptt_id': 'CorrectID', 'nickname': 'CoolNick', 'is_online': True}]
     db_mock.upsert_session.assert_called_once()
 
 def test_get_user_info_value_error(qtbot, worker, ptt_service_mock):
