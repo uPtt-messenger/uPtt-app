@@ -70,7 +70,10 @@ def decode_reply(content: str):
     return None, content
 
 
-def msg_to_mail(app_name, ptt_id, msg):
+def msg_to_mail(app_name, ptt_id, msg, timestamp=None):
+    ts_line = ""
+    if timestamp:
+        ts_line = f"\n{contant.PTT_MSG_TS_PREFIX}{timestamp.isoformat()}{contant.PTT_MSG_TS_SUFFIX}"
     mail = f"""{ptt_id} 想要使用 {app_name} 跟你聯繫！
 
 回覆請至以下網址下載 {app_name} 回覆訊息！
@@ -78,9 +81,26 @@ def msg_to_mail(app_name, ptt_id, msg):
 
 {contant.PTT_MSG_DIVISION_LINE}
 {msg}
-{contant.PTT_MSG_DIVISION_LINE}
+{contant.PTT_MSG_DIVISION_LINE}{ts_line}
 """
     return mail
+
+
+def parse_embedded_timestamp(content: str, division_end: int):
+    """從 uPtt 訊息中解析嵌入的發送端時間戳。回傳 datetime 或 None。"""
+    from datetime import datetime as _dt
+    prefix = contant.PTT_MSG_TS_PREFIX
+    suffix = contant.PTT_MSG_TS_SUFFIX
+    ts_start = content.find(prefix, division_end)
+    if ts_start < 0:
+        return None
+    ts_end = content.find(suffix, ts_start + len(prefix))
+    if ts_end < 0:
+        return None
+    try:
+        return _dt.fromisoformat(content[ts_start + len(prefix):ts_end])
+    except (ValueError, TypeError):
+        return None
 
 
 

@@ -250,6 +250,26 @@ QMenu::separator {
 """
 
 
+# 水球氣泡的 inline 樣式
+def get_waterball_bubble_style(is_me: bool) -> str:
+    if is_me:
+        return """
+            background-color: #1A2E3A;
+            color: #D1DCE5;
+            border-radius: 14px;
+            border-top-right-radius: 3px;
+            border: 1px solid #2A4A5A;
+        """
+    else:
+        return """
+            background-color: #1A2535;
+            color: #E6EDF3;
+            border-radius: 14px;
+            border-top-left-radius: 3px;
+            border: 1px solid #2A3A50;
+        """
+
+
 # 對話氣泡的 inline 樣式
 def get_bubble_style(is_me: bool) -> str:
     if is_me:

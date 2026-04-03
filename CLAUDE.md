@@ -48,23 +48,90 @@ PTTWorker → Signal (e.g. login_result) → UI handler
 |--------|------|
 | `app.py` | Entry point, window management, single-instance via QLocalServer |
 | `worker.py` | Background thread: polling loop, send/receive, user queries |
-| `ptt.py` | Thin wrapper around PyPtt library |
+| `ptt.py` | Thin wrapper around PyPtt library with reconnection logic |
 | `db.py` | SQLite database with multi-account isolation |
 | `ui/screens.py` | LoginWindow and MainWindow (chat interface) |
-| `ui/widgets.py` | ChatBubble, ContactItem custom widgets |
+| `ui/widgets.py` | ChatBubble, WaterballBubble, MailCard custom widgets |
 | `ui/styles.py` | QSS dark theme stylesheets |
-| `config.py` | Constants (poll interval, max messages, service port) |
-| `contant.py` | Message format templates, commands, URLs |
+| `config.py` | Constants: poll intervals (mail 5s, waterball 5s, online 60s), max messages (256) |
+| `contant.py` | Message format templates, commands, URLs (filename typo is legacy, do not rename) |
 | `utils.py` | App data directory, version checking, message formatting |
 
-### Message Flow
-1. **Sending:** UI → worker formats with uPtt header/footer → PyPtt `mail()` API → saved to local DB
-2. **Receiving:** Worker polls PTT mail every 5s → filters uPtt-format messages → extracts content → auto-deletes from PTT → saves to DB → emits signal to UI
+### Message Types and Flow
+Three message types with different handling:
+- **`uptt`** — uPtt-format messages: parsed, saved to DB, then **auto-deleted from PTT**
+- **`mail`** — Regular PTT station mail: displayed as mail cards, **never deleted** from PTT
+- **`waterball`** — PTT waterball (instant pop-up) messages: captured and displayed inline
+
+**Sending:** UI → worker wraps with uPtt header/footer + embedded timestamp → PyPtt `mail()` API → saved to local DB
+
+**Receiving:** Worker polls PTT mail → filters by format → extracts content → processes per type → saves to DB → emits `new_message_received` signal to UI
+
+### Polling Optimization
+- **First poll after login:** scans up to 200 messages to recover offline history
+- **Subsequent polls:** scans max 50 messages, stops early if hitting timestamp cutoff (`last_poll_time - 10s buffer`)
+- uPtt messages are always fully processed regardless of age (must be deleted from PTT)
+- Index tracking prevents rescanning: compares newest index and adjusts for deleted messages
+- `last_poll_time` is persisted in SQLite settings table to survive restarts
+
+### Timestamp Synchronization
+uPtt embeds the sender's timestamp in message content as `[uPtt-ts:ISO-FORMAT]` after the division line. This embedded timestamp takes precedence over PTT's mail timestamp for message ordering, ensuring consistency across sender and receiver. Fallback chain: embedded timestamp → mail date → current time.
+
+### Reply Format
+Quoted replies are encoded as `[re:@SENDER_ID|TRUNCATED_PREVIEW]\nMESSAGE_TEXT`. Use `encode_reply()` / `decode_reply()` in `utils.py`.
+
+### Connection Resilience
+`ptt.py` handles reconnection on `PyPtt.ConnectionClosed`:
+- Creates fresh PyPtt.Service instance on disconnect
+- Max 5 retries: 3s delay between attempts, 60s for `LoginTooOften`
+- `WrongIDorPassword` gives up immediately
+- Worker emits `connection_lost` / `connection_restored` signals
+
+### Waterball Deduplication
+Waterball polling generates a batch fingerprint (hash of all content in current poll). If identical to the previous batch, the entire batch is skipped — this handles cases where PTT's CLEAR API fails.
 
 ### Database
 SQLite at platform-specific app data directory (`~/.local/share/uPtt/`, `~/Library/Application Support/uPtt/`, `%APPDATA%\uPtt/`). Multi-account isolation via `account_id` foreign key on all tables.
 
-## Development Rules (from GEMINI.md)
+Key patterns:
+- **Composite primary keys:** sessions use `(account_id, id)`, ensuring account isolation
+- **Message deduplication:** UNIQUE constraint on `(account_id, session_id, sender_id, content, timestamp)`
+- **Soft delete:** sessions use `is_visible` flag instead of hard delete
+- **Pin ordering:** `is_pinned` + `pin_order` columns, pinned/unpinned sections sort independently
+- **Config storage:** JSON-serialized values in settings table (dates as ISO strings)
+
+## Testing
+
+### Security Fixture
+`conftest.py` has an **autouse** fixture that wraps `PyPtt.Service.call` and monitors for the canary password (`SECRET_CANARY_PW_12345`). Any non-login API call containing this canary raises `PasswordLeakError`. This ensures credentials never leak through PyPtt calls during tests.
+
+### Key Fixtures (in test files)
+- `ptt_service_mock` — `MagicMock(spec=UPttService)` with `ptt_id="TestUser"`
+- `db_mock` — `MagicMock()` with `get_config` returning `None`
+- `worker` — actual `PTTWorker` with mocked dependencies
+- `db_manager` — real `DatabaseManager` using `tmp_path`
+
+### Qt Testing Pattern
+Uses `pytest-qt`'s `qtbot` for signal assertions:
+```python
+with qtbot.waitSignal(worker.login_result) as blocker:
+    worker.do_login("user", "pass")
+assert blocker.args == [True, "success"]
+```
+
+## CI Pipeline
+
+Multi-stage workflow (`.github/workflows/build.yml`):
+1. **Secret Scan** — TruffleHog with `--only-verified` on all branches/PRs
+2. **Change Detection** — skips test/build for doc-only changes
+3. **Testing** — `QT_QPA_PLATFORM=offscreen pytest` on Ubuntu with Qt6 system deps
+4. **Security Analysis** — Bandit (static analysis) + pip-audit (dependency vulnerabilities)
+5. **Build macOS** — Nuitka standalone app bundle, SVG→ICNS icon pipeline via librsvg
+6. **Build Windows** — Nuitka onefile EXE, SVG→ICO via ImageMagick
+
+Beta builds append `beta{COMMIT_SHA[0:4]}` to version and set prerelease flag.
+
+## Development Rules
 
 ### Git Workflow
 - **main**: stable production. **beta**: staging. **feature/\***: branch from beta, squash merge back. **hotfix/\***: branch from main, merge to both main and beta.

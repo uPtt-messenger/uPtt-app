@@ -103,6 +103,19 @@ class DatabaseManager:
                 except sqlite3.OperationalError:
                     pass  # 欄位已存在
 
+                # 遷移：修正水球時間戳（舊版未補正年份，導致未來日期）
+                try:
+                    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    cursor.execute("""
+                        UPDATE messages SET timestamp = datetime(timestamp, '-1 year')
+                        WHERE mail_type = 'waterball' AND timestamp > ?
+                    """, (now_str,))
+                    fixed = cursor.rowcount
+                    if fixed:
+                        logger.info(f"已修正 {fixed} 筆水球時間戳")
+                except sqlite3.OperationalError:
+                    pass
+
                 conn.commit()
                 logger.info(f"資料庫初始化成功 (已啟用帳號隔離)：{self.db_path}")
         except sqlite3.Error as e:
@@ -173,7 +186,8 @@ class DatabaseManager:
                              id ASC
                 """, (account_id.lower(),)).fetchall()
                 return [dict(row) for row in rows]
-        except sqlite3.Error:
+        except sqlite3.Error as e:
+            logger.error(f"查詢會話清單失敗：{e}")
             return []
 
     def set_pin_session(self, account_id: str, session_id: str, is_pinned: bool, pin_order: int = 0):
@@ -271,14 +285,15 @@ class DatabaseManager:
             with self._get_connection() as conn:
                 rows = conn.execute("""
                     SELECT * FROM (
-                        SELECT * FROM messages 
-                        WHERE account_id = ? AND session_id = ? 
-                        ORDER BY timestamp DESC 
+                        SELECT * FROM messages
+                        WHERE account_id = ? AND session_id = ?
+                        ORDER BY timestamp DESC, id DESC
                         LIMIT ?
-                    ) ORDER BY timestamp ASC
+                    ) ORDER BY timestamp ASC, id ASC
                 """, (account_id.lower(), session_id.lower(), limit)).fetchall()
                 return [dict(row) for row in rows]
-        except sqlite3.Error:
+        except sqlite3.Error as e:
+            logger.error(f"查詢訊息失敗：{e}")
             return []
 
     def mark_as_read(self, account_id: str, session_id: str):
@@ -309,5 +324,6 @@ class DatabaseManager:
             with self._get_connection() as conn:
                 row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
                 return json.loads(row['value']) if row else default
-        except sqlite3.Error:
+        except sqlite3.Error as e:
+            logger.error(f"讀取設定失敗 (key={key})：{e}")
             return default

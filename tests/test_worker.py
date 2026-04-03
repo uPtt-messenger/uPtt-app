@@ -80,37 +80,207 @@ def test_poll_new_mails_basic(qtbot, worker, ptt_service_mock, db_mock):
 
     ptt_service_mock.call.side_effect = call_side_effect
     db_mock.save_message.return_value = True # New message
-    
+
     worker.is_first_polling = False
-    
+
     with qtbot.waitSignal(worker.new_message_received) as blocker:
         worker._poll_new_mails()
-    
+
     assert blocker.args[0]['sender'] == "SenderID"
     assert blocker.args[0]['text'] == "Test Message Content"
 
+
+def test_poll_new_mails_uses_embedded_timestamp(qtbot, worker, ptt_service_mock, db_mock):
+    """收到帶有嵌入時間戳的 uPtt 訊息時，應使用發送端的時間戳而非 PTT 信件時間"""
+    embedded_time = datetime(2026, 3, 15, 9, 58, 30)
+    ts_tag = f"{contant.PTT_MSG_TS_PREFIX}{embedded_time.isoformat()}{contant.PTT_MSG_TS_SUFFIX}"
+
+    def call_side_effect(api, args=None):
+        if api == 'get_newest_index':
+            return 1
+        if api == 'get_mail':
+            return {
+                PyPtt.MailField.title: contant.PTT_MSG_TITLE,
+                PyPtt.MailField.author: "SenderID (Nick)",
+                PyPtt.MailField.date: "Wed Mar 15 10:00:00 2026",
+                PyPtt.MailField.content: (
+                    f"Header\n{contant.PTT_MSG_DIVISION_LINE}\nHello\n"
+                    f"{contant.PTT_MSG_DIVISION_LINE}\n{ts_tag}"
+                ),
+            }
+        if api == 'del_mail':
+            return None
+        return None
+
+    ptt_service_mock.call.side_effect = call_side_effect
+    db_mock.save_message.return_value = True
+
+    worker.is_first_polling = False
+
+    with qtbot.waitSignal(worker.new_message_received) as blocker:
+        worker._poll_new_mails()
+
+    # 驗證 save_message 使用的是嵌入的發送端時間戳，而非 PTT 信件時間 10:00:00
+    save_call = db_mock.save_message.call_args
+    assert save_call.kwargs.get('timestamp') or save_call[1].get('timestamp') or save_call[0][5] == embedded_time
+    assert blocker.args[0]['timestamp'] == embedded_time
+
 def test_poll_new_mails_stop_time(worker, ptt_service_mock):
+    """非 uPtt 的舊信應觸發 stop_time 提早結束掃描"""
     last_poll = datetime.now() - timedelta(minutes=5)
     worker.last_poll_time = last_poll
-    
+
     old_time = last_poll - timedelta(minutes=10)
-    
+
     def call_side_effect(api, args=None):
         if api == 'get_newest_index': return 100
         if api == 'get_mail':
             return {
                 PyPtt.MailField.date: old_time.strftime('%a %b %d %H:%M:%S %Y'),
-                PyPtt.MailField.title: contant.PTT_MSG_TITLE,
+                PyPtt.MailField.title: "一般站內信標題",
                 PyPtt.MailField.author: "sender",
-                PyPtt.MailField.content: "..."
+                PyPtt.MailField.content: "一般信件內容"
             }
         return None
 
     ptt_service_mock.call.side_effect = call_side_effect
     worker._poll_new_mails()
-    # Should stop after first mail because it's older than stop_time
+    # Should stop after first mail because it's a non-uPtt mail older than stop_time
     # 1 for get_newest_index, 1 for get_mail index 100
     assert ptt_service_mock.call.call_count == 2
+
+def test_poll_new_mails_new_user_scans_7_days(worker, ptt_service_mock, db_mock):
+    """全新使用者（無 last_poll_time）應掃描過去 7 天，7 天外的非 uPtt 信停止"""
+    worker.last_poll_time = None
+    worker.is_first_polling = True
+
+    now = datetime.now()
+    # 8 天前的信 → 超出 7 天窗口
+    old_time = now - timedelta(days=8)
+
+    def call_side_effect(api, args=None):
+        if api == 'get_newest_index':
+            return 1
+        if api == 'get_mail':
+            return {
+                PyPtt.MailField.date: old_time.strftime('%a %b %d %H:%M:%S %Y'),
+                PyPtt.MailField.title: "一般站內信標題",
+                PyPtt.MailField.author: "sender",
+                PyPtt.MailField.content: "一般信件內容"
+            }
+        return None
+
+    ptt_service_mock.call.side_effect = call_side_effect
+    worker._poll_new_mails()
+    # 1 get_newest_index + 1 get_mail → break (非 uPtt, 超出 7 天)
+    assert ptt_service_mock.call.call_count == 2
+
+
+def test_poll_extends_2_days_when_uptt_found(worker, ptt_service_mock, db_mock):
+    """發現 uPtt 訊息後，掃描範圍應延伸 2 天"""
+    last_poll = datetime.now() - timedelta(minutes=5)
+    worker.last_poll_time = last_poll
+    worker.is_first_polling = False
+
+    # 信件時間排列（由新到舊）：
+    #   index 3: uPtt 訊息（新，在 stop_time 內）
+    #   index 2: 一般信（舊，超出原始 stop_time 但在延伸 2 天內）
+    #   index 1: 一般信（更舊，超出延伸後的 stop_time）
+    now = datetime.now()
+    times = {
+        3: now - timedelta(minutes=1),                                      # 新的 uPtt 訊息
+        2: last_poll - timedelta(seconds=10) - timedelta(hours=1),          # 稍微超出原始 stop_time
+        1: last_poll - timedelta(seconds=10) - timedelta(days=3),           # 超出延伸後 stop_time
+    }
+
+    def call_side_effect(api, args=None):
+        if api == 'get_newest_index':
+            return 3
+        if api == 'get_mail':
+            idx = args['index']
+            t = times[idx]
+            if idx == 3:
+                return {
+                    PyPtt.MailField.date: t.strftime('%a %b %d %H:%M:%S %Y'),
+                    PyPtt.MailField.title: contant.PTT_MSG_TITLE,
+                    PyPtt.MailField.author: "SenderID (Nick)",
+                    PyPtt.MailField.content: f"H\n{contant.PTT_MSG_DIVISION_LINE}\nMsg\n{contant.PTT_MSG_DIVISION_LINE}\nF"
+                }
+            else:
+                return {
+                    PyPtt.MailField.date: t.strftime('%a %b %d %H:%M:%S %Y'),
+                    PyPtt.MailField.title: "一般站內信",
+                    PyPtt.MailField.author: "other",
+                    PyPtt.MailField.content: "content"
+                }
+        if api == 'del_mail':
+            return None
+        return None
+
+    ptt_service_mock.call.side_effect = call_side_effect
+    db_mock.save_message.return_value = True
+    worker._poll_new_mails()
+
+    # 預期：
+    #  1. get_newest_index
+    #  2. get_mail(3) → uPtt → 處理 + del_mail
+    #  3. get_mail(2) → 一般信，超出原始 stop_time → 延伸 2 天 → 在延伸內 → 處理
+    #  4. get_mail(1) → 一般信，超出延伸後 stop_time → break
+    # 共 5 次 call（get_newest + 3x get_mail + 1x del_mail）
+    assert ptt_service_mock.call.call_count == 5
+
+
+def test_poll_extends_multiple_times(worker, ptt_service_mock, db_mock):
+    """延伸範圍內又發現 uPtt，應繼續再延伸 2 天（不限次數）"""
+    last_poll = datetime.now() - timedelta(minutes=5)
+    worker.last_poll_time = last_poll
+    worker.is_first_polling = False
+
+    stop = last_poll - timedelta(seconds=10)
+    # index 5: uPtt（stop_time 內）→ 第一次觸發延伸
+    # index 4: 一般信（超出原始 stop，在第一次延伸內）→ 處理
+    # index 3: uPtt（在第一次延伸內）→ 觸發第二次延伸
+    # index 2: 一般信（超出第一次延伸，在第二次延伸內）→ 處理
+    # index 1: 一般信（超出第二次延伸）→ break
+    times = {
+        5: datetime.now() - timedelta(minutes=1),
+        4: stop - timedelta(hours=1),
+        3: stop - timedelta(days=1),
+        2: stop - timedelta(days=3),
+        1: stop - timedelta(days=5),
+    }
+
+    def call_side_effect(api, args=None):
+        if api == 'get_newest_index':
+            return 5
+        if api == 'get_mail':
+            idx = args['index']
+            t = times[idx]
+            is_uptt = idx in (5, 3)
+            if is_uptt:
+                return {
+                    PyPtt.MailField.date: t.strftime('%a %b %d %H:%M:%S %Y'),
+                    PyPtt.MailField.title: contant.PTT_MSG_TITLE,
+                    PyPtt.MailField.author: "SenderID (Nick)",
+                    PyPtt.MailField.content: f"H\n{contant.PTT_MSG_DIVISION_LINE}\nMsg\n{contant.PTT_MSG_DIVISION_LINE}\nF"
+                }
+            return {
+                PyPtt.MailField.date: t.strftime('%a %b %d %H:%M:%S %Y'),
+                PyPtt.MailField.title: "一般站內信",
+                PyPtt.MailField.author: "other",
+                PyPtt.MailField.content: "content"
+            }
+        if api == 'del_mail':
+            return None
+        return None
+
+    ptt_service_mock.call.side_effect = call_side_effect
+    db_mock.save_message.return_value = True
+    worker._poll_new_mails()
+
+    # get_newest(1) + get_mail x5 + del_mail x2 = 8
+    assert ptt_service_mock.call.call_count == 8
+
 
 def test_send_message_success(qtbot, worker, ptt_service_mock, db_mock):
     worker.ptt.ptt_id = "SenderID"

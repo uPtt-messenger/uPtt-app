@@ -15,7 +15,7 @@ from PySide6.QtSvg import QSvgRenderer
 
 from uPtt import __version__, contant
 from uPtt.ui.styles import MAIN_STYLE
-from uPtt.ui.widgets import ChatBubble, MailCard, ContactItem, ContactListWidget
+from uPtt.ui.widgets import ChatBubble, WaterballBubble, MailCard, ContactItem, ContactListWidget
 from uPtt.utils import encode_reply, decode_reply, VersionCheckWorker
 from uPtt.worker import PTTWorker
 from uPtt.ptt import UPttService
@@ -213,7 +213,7 @@ class LoginWindow(QWidget):
 
 class MainWindow(QMainWindow):
     """主聊天畫面"""
-    send_requested = Signal(str, str)
+    send_requested = Signal(str, str, object)
     user_info_requested = Signal(str)
 
     def __init__(self, ptt_service: UPttService, db):
@@ -916,7 +916,9 @@ class MainWindow(QMainWindow):
         self.messages_layout.addStretch(1)
         
         for msg in history:
-            if msg.get('mail_type') == 'mail':
+            if msg.get('mail_type') == 'waterball':
+                widget = WaterballBubble(msg['text'], msg['time'], msg.get('is_me', False))
+            elif msg.get('mail_type') == 'mail':
                 widget = MailCard(msg.get('subject', ''), msg['text'], msg['time'])
             else:
                 widget = ChatBubble(msg['text'], msg['time'], msg['is_me'],
@@ -992,8 +994,8 @@ class MainWindow(QMainWindow):
                 w.set_last_msg_time(now_str)
                 break
 
-        # 2. 透過訊號觸發 Worker 背景發送 (跨執行緒安全)
-        self.send_requested.emit(self.current_chat_id, encoded_text)
+        # 2. 透過訊號觸發 Worker 背景發送 (跨執行緒安全，傳入相同時間戳確保排序一致)
+        self.send_requested.emit(self.current_chat_id, encoded_text, now)
 
     @Slot(dict)
     def on_new_message(self, data):
@@ -1032,15 +1034,24 @@ class MainWindow(QMainWindow):
                     break
 
             reply_info, actual_text = decode_reply(data['text'])
-            self.chat_histories[sender].append({
-                'text': actual_text,
-                'time': data['time'],
-                'timestamp': data.get('timestamp', datetime.now()),
-                'is_me': False,
-                'mail_type': data.get('mail_type', 'uptt'),
-                'subject': data.get('subject', ''),
-                'reply_info': reply_info,
-            })
+            is_me = data.get('is_me', False)
+            msg_ts = data.get('timestamp', datetime.now())
+
+            # 去重：避免 on_contact_selected 從 DB 載入後，signal 又重複 append
+            is_dup = any(
+                m.get('timestamp') == msg_ts and m.get('text') == actual_text and m.get('is_me', False) == is_me
+                for m in self.chat_histories[sender]
+            )
+            if not is_dup:
+                self.chat_histories[sender].append({
+                    'text': actual_text,
+                    'time': data['time'],
+                    'timestamp': msg_ts,
+                    'is_me': is_me,
+                    'mail_type': data.get('mail_type', 'uptt'),
+                    'subject': data.get('subject', ''),
+                    'reply_info': reply_info,
+                })
 
             if self.current_chat_id == sender:
                 self.refresh_chat_display()

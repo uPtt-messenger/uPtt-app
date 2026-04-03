@@ -10,6 +10,7 @@
 <p align="center">
   <a href="https://github.com/uPtt-messenger/uPttTerm/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-green.svg" alt="License"></a>
   <img src="https://img.shields.io/badge/Platform-Windows%20|%20macOS-lightgrey" alt="Platform">
+  <a href="https://uptt-messenger.github.io/uPtt-app/"><img src="https://img.shields.io/badge/Website-uPtt-A0C4B4?style=flat&logo=github" alt="Website"></a>
 </p>
 
 <p align="center">

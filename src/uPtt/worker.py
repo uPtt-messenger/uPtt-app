@@ -43,6 +43,8 @@ class PTTWorker(QObject):
         self._was_connected = True  # 追蹤上次連線狀態，用於判斷是否需發射訊號
         self._last_newest_index: Optional[int] = None  # 上次輪詢時的信箱最新索引
         self._online_check_timer: Optional[QTimer] = None
+        self._waterball_timer: Optional[QTimer] = None
+        self._last_waterball_batch: Optional[str] = None  # 上一批水球的指紋，用於整批去重
 
     @Slot(str, str)
     def do_login(self, username, password):
@@ -79,6 +81,14 @@ class PTTWorker(QObject):
             self.polling_timer.start(interval)
             logger.info(f"開始輪詢新信件，間隔: {interval / 1000}s")
 
+        # 啟動水球輪詢
+        if self._waterball_timer is None:
+            self._waterball_timer = QTimer()
+            self._waterball_timer.timeout.connect(self._poll_waterballs)
+            wb_interval = getattr(config, 'CHECK_WATERBALL_INTERVAL', 5) * 1000
+            self._waterball_timer.start(wb_interval)
+            logger.info(f"開始輪詢水球，間隔: {wb_interval / 1000}s")
+
         # 啟動在線狀態定期檢查
         if self._online_check_timer is None:
             self._online_check_timer = QTimer()
@@ -91,8 +101,10 @@ class PTTWorker(QObject):
 
     def _poll_new_mails(self):
         """
-        輪詢新信件的內部邏輯 (超級優化版：帶有時間截止點)
-        除了第一次掃描，後續僅檢查 10-15 秒內的信件，看到舊信即停止。
+        輪詢新信件的內部邏輯（時間驅動掃描策略）
+        - 全新使用者：掃描過去 7 天，發現 uPtt 訊息則延伸至 9 天
+        - 已有紀錄：掃描到上次輪詢時間，發現 uPtt 訊息則多掃 2 天
+        - uPtt 訊息無論多舊都會處理並刪除
         """
         try:
             # 記錄本次輪詢開始的時間
@@ -127,28 +139,31 @@ class PTTWorker(QObject):
                     self.db.set_config('LAST_POLL_TIME', current_poll_start.isoformat())
                     return
 
-            # 3. 定義掃描上限 (防呆用：初次啟動可掃描較多封數以補齊離線訊息)
-            scan_limit = 200 if self.is_first_polling else 50
-
-            # 4. 建立停止時間 (不論是否為初次啟動，只要有紀錄就啟用截止點)
-            stop_time = None
+            # 3. 建立停止時間（時間驅動掃描策略）
+            #    - 全新使用者（無 last_poll_time）：至少掃描過去一週
+            #    - 已有掃描紀錄：掃描到上次掃描時間（含 10 秒緩衝）
+            #    - 若掃描途中發現 uPtt 訊息，自動延伸掃描範圍 2 天（不限次數）
             if self.last_poll_time:
-                # 緩衝 10 秒以應對 PTT 伺服器時間誤差
                 stop_time = self.last_poll_time - timedelta(seconds=10)
+            else:
+                stop_time = current_poll_start - timedelta(days=7)
+
+            found_uptt = False
 
             self.is_first_polling = False
 
             start_idx = total_newest
-            end_idx = max(1, total_newest - scan_limit + 1)
+            end_idx = 1
 
             logger.debug(f"輪詢掃描中: 總數={total_newest}, 新增={total_newest - (self._last_newest_index or 0)}, 截止時間={stop_time}")
 
             mails_to_emit = []
-            
+            deleted_count = 0
+
             # 4. 倒序掃描
             for mail_idx in range(start_idx, end_idx - 1, -1):
                 mail = self.ptt.call('get_mail', {'index': mail_idx})
-                
+
                 if not mail:
                     continue
 
@@ -159,15 +174,28 @@ class PTTWorker(QObject):
                 except (ValueError, TypeError):
                     mail_time = datetime.now()
 
-                # --- 核心優化：提早結束判定 ---
-                if stop_time and mail_time < stop_time:
-                    logger.debug(f"已進入舊信區域 (索引 {mail_idx}, 時間 {mail_time}), 停止本次掃描。")
-                    break
-
-                # 本地端過濾標題
+                # 先解析標題，判斷是否為 uPtt 訊息
                 raw_title = mail.get(PyPtt.MailField.title)
                 title = str(raw_title) if raw_title is not None else ""
-                
+                is_uptt_msg = contant.PTT_MSG_TITLE in title
+
+                if is_uptt_msg:
+                    found_uptt = True
+
+                # --- 核心優化：提早結束判定 (僅對非 uPtt 訊息生效) ---
+                # uPtt 訊息無論多舊都必須處理並刪除，不受時間截止點限制
+                if mail_time < stop_time and not is_uptt_msg:
+                    if found_uptt:
+                        # 發現過 uPtt 訊息，多掃兩天以確保不遺漏離線訊息
+                        stop_time = stop_time - timedelta(days=2)
+                        found_uptt = False  # 重置，若延伸範圍內又有 uPtt 則繼續延伸
+                        if mail_time < stop_time:
+                            logger.debug(f"已進入舊信區域 (索引 {mail_idx}, 時間 {mail_time}), 延伸掃描後仍超出截止時間 {stop_time}, 停止。")
+                            break
+                    else:
+                        logger.debug(f"已進入舊信區域 (索引 {mail_idx}, 時間 {mail_time}), 停止本次掃描。")
+                        break
+
                 raw_author = mail.get(PyPtt.MailField.author)
                 if not raw_author:
                     continue
@@ -175,7 +203,7 @@ class PTTWorker(QObject):
                 sender_id = full_author.split(' ')[0]
                 is_backup = (self.ptt.ptt_id and sender_id.lower() == self.ptt.ptt_id.lower())
 
-                if contant.PTT_MSG_TITLE not in title:
+                if not is_uptt_msg:
                     # 一般站內信：儲存為 mail_type='mail' 並顯示
                     if not is_backup:
                         content = mail[PyPtt.MailField.content]
@@ -213,6 +241,9 @@ class PTTWorker(QObject):
                     if div_pos >= 0 and end > div_pos:
                         start = div_pos + len(contant.PTT_MSG_DIVISION_LINE)
                         text = content[start:end].strip()
+                        # 優先使用發送端嵌入的時間戳，確保兩端排序一致
+                        embedded_ts = utils.parse_embedded_timestamp(content, end)
+                        msg_time = embedded_ts if embedded_ts else mail_time
                         current_user = self.ptt.ptt_id
                         self.db.upsert_session(account_id=current_user, display_id=sender_id)
                         is_new = self.db.save_message(
@@ -221,7 +252,7 @@ class PTTWorker(QObject):
                             sender_id=sender_id,
                             receiver_id=current_user,
                             content=text,
-                            timestamp=mail_time,
+                            timestamp=msg_time,
                             is_me=False,
                             mail_type='uptt'
                         )
@@ -230,19 +261,21 @@ class PTTWorker(QObject):
                             mails_to_emit.append({
                                 'sender': sender_id,
                                 'text': text,
-                                'time': mail_time.strftime("%H:%M"),
+                                'time': msg_time.strftime("%H:%M"),
                                 'full_author': full_author,
-                                'timestamp': mail_time,
+                                'timestamp': msg_time,
                                 'mail_type': 'uptt',
                                 'subject': ''
                             })
 
                 # uPtt 訊息處理完即刪除（含 backup 副本）
                 self.ptt.call('del_mail', {'index': mail_idx})
+                deleted_count += 1
                 continue
 
             # 5. 更新本次輪詢成功結束的時間與索引並存入資料庫
-            self._last_newest_index = total_newest
+            # 扣除已刪除的 uPtt 信件數，避免下次輪詢誤判「索引減少＝無新信」
+            self._last_newest_index = total_newest - deleted_count
             self.last_poll_time = current_poll_start
             self.db.set_config('LAST_POLL_TIME', current_poll_start.isoformat())
 
@@ -273,14 +306,16 @@ class PTTWorker(QObject):
                 self.connection_lost.emit()
             self.status_updated.emit(f"輪詢錯誤: {e}")
 
-    @Slot(str, str)
-    def send_message(self, receiver_id, text):
+    @Slot(str, str, object)
+    def send_message(self, receiver_id, text, timestamp=None):
         """發送站內信"""
         try:
             # PTT ID 通常不分大小寫，但發送時建議使用原始輸入或去空白
             receiver_id = receiver_id.strip()
-            # 封裝成 uPtt 格式的站內信
-            ptt_msg = utils.msg_to_mail(contant.pkg_name, self.ptt.ptt_id or "uPttUser", text)
+            # 使用 UI 傳入的時間戳，確保 UI 顯示與 DB 儲存的排序一致
+            send_time = timestamp if isinstance(timestamp, datetime) else datetime.now()
+            # 封裝成 uPtt 格式的站內信（嵌入發送端時間戳）
+            ptt_msg = utils.msg_to_mail(contant.pkg_name, self.ptt.ptt_id or "uPttUser", text, timestamp=send_time)
 
             logger.info(f"正在發送站內信給 {receiver_id}...")
             # 呼叫 PyPtt mail API
@@ -297,14 +332,14 @@ class PTTWorker(QObject):
             current_user = self.ptt.ptt_id
             # 1. 確保會話存在
             self.db.upsert_session(account_id=current_user, display_id=receiver_id)
-            # 2. 儲存訊息
+            # 2. 儲存訊息（使用與信件中嵌入的相同時間戳）
             self.db.save_message(
                 account_id=current_user,
                 session_id=receiver_id,
                 sender_id=current_user,
                 receiver_id=receiver_id,
                 content=text,
-                timestamp=datetime.now(),
+                timestamp=send_time,
                 is_me=True
             )
 
@@ -345,6 +380,111 @@ class PTTWorker(QObject):
         finally:
             logger.info(f"--- 查詢結束: {ptt_id} ---")
 
+    def _poll_waterballs(self):
+        """輪詢水球訊息"""
+        try:
+            waterballs = self.ptt.call('get_waterball', {'post_action': PyPtt.WaterballPostAction.CLEAR})
+
+            if not waterballs:
+                return
+
+            current_user = self.ptt.ptt_id
+            if not current_user:
+                return
+
+            # 整批去重：若這批水球跟上次完全一樣，代表 CLEAR 沒生效，直接跳過
+            batch_fingerprint = str([
+                (wb.get(PyPtt.WaterballField.target, ''),
+                 wb.get(PyPtt.WaterballField.content, ''),
+                 wb.get(PyPtt.WaterballField.date, ''),
+                 wb.get(PyPtt.WaterballField.type))
+                for wb in waterballs
+            ])
+            if batch_fingerprint == self._last_waterball_batch:
+                return
+            self._last_waterball_batch = batch_fingerprint
+
+            for wb in waterballs:
+                wb_type = wb.get(PyPtt.WaterballField.type)
+                target = wb.get(PyPtt.WaterballField.target, '').strip()
+                content = wb.get(PyPtt.WaterballField.content, '').strip()
+                date_str = wb.get(PyPtt.WaterballField.date, '')
+
+                if not target or not content:
+                    continue
+
+                # 跳過自己對自己的水球
+                if target.lower() == current_user.lower():
+                    continue
+
+                # 解析時間戳記
+                wb_time = self._parse_waterball_date(date_str)
+
+                is_me = (wb_type == PyPtt.WaterballType.SEND)
+                if is_me:
+                    sender_id = current_user
+                    receiver_id = target
+                else:
+                    sender_id = target
+                    receiver_id = current_user
+
+                # 儲存至資料庫
+                self.db.upsert_session(account_id=current_user, display_id=target)
+                is_new = self.db.save_message(
+                    account_id=current_user,
+                    session_id=target,
+                    sender_id=sender_id,
+                    receiver_id=receiver_id,
+                    content=content,
+                    timestamp=wb_time,
+                    is_me=is_me,
+                    mail_type='waterball'
+                )
+
+                # 發射訊號通知 UI（收到的與自己發出的都通知）
+                if is_new:
+                    self.new_message_received.emit({
+                        'sender': target,
+                        'text': content,
+                        'time': wb_time.strftime("%H:%M"),
+                        'full_author': target,
+                        'timestamp': wb_time,
+                        'mail_type': 'waterball',
+                        'subject': '',
+                        'is_me': is_me,
+                    })
+
+        except PyPtt.ConnectionClosed:
+            logger.warning("水球輪詢時連線中斷")
+        except Exception as e:
+            logger.debug(f"水球輪詢錯誤: {e}")
+
+    @staticmethod
+    def _parse_waterball_date(date_val) -> datetime:
+        """解析水球時間。PyPtt 新版回傳 datetime，舊版回傳 str。"""
+        if isinstance(date_val, datetime):
+            return date_val
+        # 相容舊版 PyPtt 回傳字串的情況
+        now = datetime.now()
+        formats = [
+            ('%m/%d/%Y %H:%M:%S', False),  # "03/15/2026 10:30:00"
+            ('%m/%d %H:%M:%S', True),       # "03/15 10:30:00" (需補年份)
+            ('%m/%d %H:%M', True),          # "03/15 10:30" (需補年份)
+        ]
+        for fmt, needs_year in formats:
+            try:
+                wb_time = datetime.strptime(str(date_val).strip(), fmt)
+                if needs_year:
+                    wb_time = wb_time.replace(year=now.year)
+                    if wb_time > now:
+                        wb_time = wb_time.replace(year=now.year - 1)
+                return wb_time
+            except (ValueError, TypeError):
+                continue
+        # 確定性 fallback
+        h = abs(hash(str(date_val))) % 86400
+        return now.replace(hour=h // 3600, minute=(h % 3600) // 60, second=h % 60, microsecond=0)
+
     def _check_all_online_status(self):
         """定期檢查所有聯絡人的在線狀態"""
         if not self.ptt.ptt_id:
@@ -371,6 +511,8 @@ class PTTWorker(QObject):
             logger.info("正在停止 Worker...")
             if self.polling_timer:
                 self.polling_timer.stop()
+            if self._waterball_timer:
+                self._waterball_timer.stop()
             if self._online_check_timer:
                 self._online_check_timer.stop()
 

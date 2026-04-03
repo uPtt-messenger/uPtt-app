@@ -15,7 +15,7 @@ from . import utils
 
 # --- 日誌設定 ---
 def setup_logging(debug_mode: bool):
-    """設定日誌系統，確保同時輸出到終端機與檔案 (如果開啟除錯)"""
+    """設定日誌系統，確保同時輸出到終端機與檔案"""
     # 建立處理器 (同時輸出到終端機)
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(logging.DEBUG if debug_mode else logging.INFO)
@@ -27,15 +27,24 @@ def setup_logging(debug_mode: bool):
     root_logger.setLevel(logging.DEBUG if debug_mode else logging.INFO)
     root_logger.addHandler(console_handler)
 
+    # 錯誤日誌：無論是否為除錯模式，都將 ERROR 以上的日誌寫入檔案
+    error_log_dir = utils.get_app_data_dir()
+    os.makedirs(error_log_dir, exist_ok=True)
+    error_log_path = os.path.join(error_log_dir, "uptt_error.log")
+    error_file_handler = logging.FileHandler(error_log_path, mode="a", encoding="utf-8")
+    error_file_handler.setLevel(logging.ERROR)
+    error_file_handler.setFormatter(formatter)
+    root_logger.addHandler(error_file_handler)
+
     if debug_mode:
-        file_handler = logging.FileHandler("uptt_debug.log", mode="w")
+        file_handler = logging.FileHandler("uptt_debug.log", mode="w", encoding="utf-8")
         file_handler.setFormatter(formatter)
         file_handler.setLevel(logging.DEBUG)
         root_logger.addHandler(file_handler)
         logging.info("已啟用除錯模式，日誌將同步紀錄至 uptt_debug.log")
 
     logger = logging.getLogger("uPtt")
-    logger.info("uPtt 日誌系統初始化完成")
+    logger.info(f"uPtt 日誌系統初始化完成 (錯誤日誌: {error_log_path})")
 
 
 logger = logging.getLogger("uPtt")

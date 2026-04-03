@@ -36,6 +36,8 @@ DIVISION_TYPE = '='  # 用於分隔線的訊息類型
 # PTT 訊息標題
 PTT_MSG_TITLE = "你收到使用 uPtt 傳送的訊息"
 PTT_MSG_DIVISION_LINE = DIVISION_TYPE * 20
+PTT_MSG_TS_PREFIX = "[uPtt-ts:"
+PTT_MSG_TS_SUFFIX = "]"
 
 
 class CMD:

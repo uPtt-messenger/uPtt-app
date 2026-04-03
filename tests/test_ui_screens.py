@@ -1,6 +1,7 @@
 import pytest
+from datetime import datetime
 from PySide6.QtCore import Qt
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, ANY
 import os
 
 # Set offscreen platform for CI/CLI environments
@@ -163,7 +164,11 @@ def test_handle_send(mock_qthread, mock_worker, mock_ver_worker, qtbot, ptt_serv
         window.message_edit.setText("Hello")
         with patch.object(window, 'send_requested') as mock_signal:
             window.handle_send()
-            mock_signal.emit.assert_called_with("target", "Hello")
+            mock_signal.emit.assert_called_once()
+            args = mock_signal.emit.call_args[0]
+            assert args[0] == "target"
+            assert args[1] == "Hello"
+            assert isinstance(args[2], datetime)
 
 @patch('src.uPtt.ui.screens.QMessageBox')
 @patch('src.uPtt.ui.screens.VersionCheckWorker')

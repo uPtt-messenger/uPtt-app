@@ -105,8 +105,8 @@ class UPttService:
             self.ptt_pw = None
             try:
                 self.service.call('logout')
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error(f"登出時發生錯誤: {e}")
             return True
 
         for i in range(self.max_retry):
@@ -180,5 +180,5 @@ class UPttService:
         try:
             self.call('logout')
             self.service.close()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"關閉連線時發生錯誤: {e}")

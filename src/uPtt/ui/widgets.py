@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtGui import QAction, QDrag
-from uPtt.ui.styles import get_bubble_style
+from uPtt.ui.styles import get_bubble_style, get_waterball_bubble_style
 
 logger = logging.getLogger("uPtt.ui.widgets")
 
@@ -137,6 +137,77 @@ class ChatBubble(QWidget):
         self.message_label.updateGeometry()
         self.bubble_container.updateGeometry()
         self.updateGeometry()
+
+class WaterballBubble(QWidget):
+    """
+    水球訊息氣泡，帶有 💧 標記和藍色調背景。
+    """
+    def __init__(self, text: str, time_str: str, is_me: bool = False, parent=None):
+        super().__init__(parent)
+        self.is_me = is_me
+
+        self.main_layout = QHBoxLayout(self)
+        self.main_layout.setContentsMargins(0, 1, 0, 1)
+        self.main_layout.setSpacing(4)
+
+        self.bubble_container = QFrame()
+        self.bubble_container.setStyleSheet(get_waterball_bubble_style(is_me))
+        self.bubble_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+
+        content_layout = QVBoxLayout(self.bubble_container)
+        content_layout.setContentsMargins(10, 6, 10, 6)
+        content_layout.setSpacing(2)
+
+        # 水球標記
+        tag_label = QLabel("💧 水球")
+        tag_label.setStyleSheet("color: #7EB8DA; font-size: 10px; font-weight: bold; background: transparent; border: none;")
+        content_layout.addWidget(tag_label)
+
+        # 訊息內容
+        self.message_label = QLabel(text)
+        self.message_label.setWordWrap(True)
+        self.message_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.message_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        content_layout.addWidget(self.message_label)
+
+        time_label = QLabel(time_str)
+        time_label.setStyleSheet("color: #5C6773; font-size: 10px;")
+        time_label.setAlignment(Qt.AlignBottom)
+
+        if is_me:
+            self.main_layout.addStretch()
+            self.main_layout.addWidget(time_label)
+            self.main_layout.addWidget(self.bubble_container)
+        else:
+            self.main_layout.addWidget(self.bubble_container)
+            self.main_layout.addWidget(time_label)
+            self.main_layout.addStretch()
+
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        total_w = event.size().width()
+        if total_w <= 0:
+            return
+        max_bubble_w = int(total_w * 0.8)
+        self.message_label.setWordWrap(False)
+        text_ideal_w = self.message_label.sizeHint().width()
+        label_max_allowed_w = max_bubble_w - 25
+
+        if text_ideal_w > label_max_allowed_w:
+            self.message_label.setWordWrap(True)
+            self.message_label.setFixedWidth(label_max_allowed_w)
+        else:
+            self.message_label.setWordWrap(False)
+            self.message_label.setFixedWidth(text_ideal_w)
+
+        h = self.message_label.sizeHint().height()
+        self.message_label.setMinimumHeight(h)
+        self.message_label.updateGeometry()
+        self.bubble_container.updateGeometry()
+        self.updateGeometry()
+
 
 class MailCard(QWidget):
     """

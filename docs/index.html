@@ -1,0 +1,1155 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>uPtt — 開源 PTT 即時通訊終端</title>
+    <meta name="description" content="uPtt 是一款為批踢踢實業坊量身打造的現代化即時通訊桌面應用程式，將 PTT 站內信轉化為流暢的聊天體驗。">
+    <meta name="keywords" content="uPtt, PTT, 批踢踢, 即時通訊, 站內信, BBS, 開源, open source, messenger">
+    <meta property="og:title" content="uPtt — 開源 PTT 即時通訊終端">
+    <meta property="og:description" content="讓 PTT 的溫柔，在現代桌面重新綻放。一個為批踢踢量身打造的現代化即時通訊終端。">
+    <meta property="og:type" content="website">
+    <meta property="og:image" content="https://raw.githubusercontent.com/uPtt-messenger/uPtt-app/main/src/uPtt/ui/assets/logo_icon.svg">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg width='80' height='80' viewBox='0 0 80 80' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Crect x='2' y='2' width='76' height='76' rx='18' fill='%23161B22' stroke='%2330363D' stroke-width='2'/%3E%3Crect x='12' y='12' width='56' height='56' rx='12' fill='%230D1117' stroke='%2358A6FF' stroke-width='1.5' stroke-dasharray='2 2'/%3E%3Cpath d='M28 28V42C28 48.6274 33.3726 54 40 54C46.6274 54 52 48.6274 52 42V28' stroke='%23F0F6FC' stroke-width='6' stroke-linecap='round'/%3E%3Cpath d='M52 38V54' stroke='%23F0F6FC' stroke-width='6' stroke-linecap='round'/%3E%3Ccircle cx='28' cy='28' r='5' fill='%2358A6FF'/%3E%3Ccircle cx='52' cy='54' r='5' fill='%23E3B341'/%3E%3C/svg%3E">
+    <style>
+        *, *::before, *::after {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg: #0d1117;
+            --bg-surface: #161b22;
+            --bg-card: #1c2128;
+            --border: #30363d;
+            --border-light: #484f58;
+            --text: #f0f6fc;
+            --text-secondary: #8b949e;
+            --text-muted: #6e7681;
+            --accent: #A0C4B4;
+            --accent-dim: rgba(160, 196, 180, 0.15);
+            --accent-blue: #58A6FF;
+            --accent-blue-dim: rgba(88, 166, 255, 0.15);
+            --accent-gold: #E3B341;
+            --accent-gold-dim: rgba(227, 179, 65, 0.15);
+            --accent-red: #f85149;
+            --font-mono: "SF Mono", "JetBrains Mono", "Cascadia Code", "Fira Code", "Consolas", "Courier New", monospace;
+            --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", Helvetica, Arial, sans-serif;
+            --max-width: 1140px;
+            --nav-height: 64px;
+        }
+
+        html {
+            scroll-behavior: smooth;
+            scroll-padding-top: var(--nav-height);
+        }
+
+        body {
+            font-family: var(--font-sans);
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.7;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        /* ===== NAVIGATION ===== */
+        nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: var(--nav-height);
+            background: rgba(13, 17, 23, 0.85);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .nav-inner {
+            width: 100%;
+            max-width: var(--max-width);
+            padding: 0 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .nav-logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none;
+            color: var(--text);
+        }
+
+        .nav-logo svg {
+            width: 36px;
+            height: 36px;
+        }
+
+        .nav-logo span {
+            font-family: var(--font-mono);
+            font-weight: 700;
+            font-size: 1.25rem;
+            letter-spacing: -0.02em;
+        }
+
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            list-style: none;
+        }
+
+        .nav-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.9rem;
+            padding: 6px 14px;
+            border-radius: 6px;
+            transition: color 0.2s, background 0.2s;
+        }
+
+        .nav-links a:hover {
+            color: var(--text);
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .nav-links .btn-nav {
+            background: var(--accent);
+            color: var(--bg);
+            font-weight: 600;
+            padding: 8px 18px;
+        }
+
+        .nav-links .btn-nav:hover {
+            background: #b5d4c7;
+            color: var(--bg);
+        }
+
+        .nav-hamburger {
+            display: none;
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 8px;
+        }
+
+        .nav-hamburger svg {
+            width: 24px;
+            height: 24px;
+        }
+
+        /* ===== SECTIONS ===== */
+        section {
+            padding: 96px 24px;
+        }
+
+        .container {
+            max-width: var(--max-width);
+            margin: 0 auto;
+        }
+
+        .section-label {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            color: var(--accent);
+            text-transform: uppercase;
+            letter-spacing: 0.15em;
+            margin-bottom: 12px;
+        }
+
+        .section-title {
+            font-family: var(--font-mono);
+            font-size: clamp(1.75rem, 4vw, 2.5rem);
+            font-weight: 700;
+            line-height: 1.3;
+            margin-bottom: 16px;
+            letter-spacing: -0.02em;
+        }
+
+        .section-desc {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            max-width: 640px;
+            line-height: 1.8;
+        }
+
+        /* ===== HERO ===== */
+        .hero {
+            padding-top: calc(var(--nav-height) + 80px);
+            padding-bottom: 80px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: -200px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 800px;
+            height: 800px;
+            background: radial-gradient(circle, rgba(160, 196, 180, 0.06) 0%, transparent 70%);
+            pointer-events: none;
+        }
+
+        .hero-logo {
+            margin-bottom: 32px;
+        }
+
+        .hero-logo svg {
+            width: 280px;
+            height: auto;
+        }
+
+        .hero-tagline {
+            font-family: var(--font-mono);
+            font-size: clamp(1.5rem, 4vw, 2.75rem);
+            font-weight: 700;
+            line-height: 1.3;
+            margin-bottom: 20px;
+            letter-spacing: -0.02em;
+        }
+
+        .hero-tagline .highlight {
+            background: linear-gradient(135deg, var(--accent), var(--accent-blue));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .hero-subtitle {
+            font-size: 1.2rem;
+            color: var(--text-secondary);
+            max-width: 580px;
+            margin: 0 auto 40px;
+            line-height: 1.8;
+        }
+
+        .hero-buttons {
+            display: flex;
+            gap: 16px;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-bottom: 48px;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 14px 28px;
+            border-radius: 10px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 1rem;
+            transition: all 0.2s;
+            border: none;
+            cursor: pointer;
+        }
+
+        .btn svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: var(--bg);
+        }
+
+        .btn-primary:hover {
+            background: #b5d4c7;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(160, 196, 180, 0.2);
+        }
+
+        .btn-secondary {
+            background: var(--bg-card);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            border-color: var(--border-light);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+        }
+
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 16px;
+            background: var(--accent-dim);
+            border: 1px solid rgba(160, 196, 180, 0.2);
+            border-radius: 100px;
+            font-size: 0.85rem;
+            color: var(--accent);
+            font-family: var(--font-mono);
+            margin-bottom: 24px;
+        }
+
+        .hero-badge .dot {
+            width: 6px;
+            height: 6px;
+            background: var(--accent);
+            border-radius: 50%;
+            animation: pulse-dot 2s infinite;
+        }
+
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .hero-preview {
+            max-width: 560px;
+            margin: 0 auto;
+            border-radius: 16px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+            box-shadow: 0 24px 48px rgba(0, 0, 0, 0.4);
+        }
+
+        .hero-preview img {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        /* ===== FEATURES ===== */
+        .features {
+            background: var(--bg-surface);
+            border-top: 1px solid var(--border);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 24px;
+            margin-top: 48px;
+        }
+
+        .feature-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 32px 28px;
+            transition: border-color 0.2s, transform 0.2s;
+        }
+
+        .feature-card:hover {
+            border-color: var(--border-light);
+            transform: translateY(-4px);
+        }
+
+        .feature-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+            font-size: 1.5rem;
+        }
+
+        .feature-icon.green { background: var(--accent-dim); }
+        .feature-icon.blue { background: var(--accent-blue-dim); }
+        .feature-icon.gold { background: var(--accent-gold-dim); }
+
+        .feature-card h3 {
+            font-family: var(--font-mono);
+            font-size: 1.1rem;
+            margin-bottom: 10px;
+            letter-spacing: -0.01em;
+        }
+
+        .feature-card p {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            line-height: 1.7;
+        }
+
+        /* ===== HOW IT WORKS ===== */
+        .how-it-works .section-desc {
+            margin-bottom: 56px;
+        }
+
+        .flow-diagram {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 0;
+            position: relative;
+            margin-top: 48px;
+        }
+
+        .flow-step {
+            text-align: center;
+            padding: 32px 24px;
+            position: relative;
+        }
+
+        .flow-step::after {
+            content: '';
+            position: absolute;
+            top: 56px;
+            right: -12px;
+            width: 24px;
+            height: 2px;
+            background: var(--border-light);
+        }
+
+        .flow-step:last-child::after {
+            display: none;
+        }
+
+        .flow-number {
+            width: 52px;
+            height: 52px;
+            border-radius: 50%;
+            background: var(--accent-dim);
+            border: 2px solid var(--accent);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--font-mono);
+            font-weight: 700;
+            font-size: 1.2rem;
+            color: var(--accent);
+            margin: 0 auto 20px;
+        }
+
+        .flow-step h3 {
+            font-family: var(--font-mono);
+            font-size: 1.05rem;
+            margin-bottom: 8px;
+        }
+
+        .flow-step p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            line-height: 1.7;
+        }
+
+        /* ===== MESSAGE TYPES ===== */
+        .msg-types {
+            background: var(--bg-surface);
+            border-top: 1px solid var(--border);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .msg-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 24px;
+            margin-top: 48px;
+        }
+
+        .msg-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 28px 24px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .msg-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+        }
+
+        .msg-card.type-uptt::before { background: var(--accent); }
+        .msg-card.type-mail::before { background: var(--accent-blue); }
+        .msg-card.type-waterball::before { background: var(--accent-gold); }
+
+        .msg-card .msg-tag {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            padding: 3px 10px;
+            border-radius: 100px;
+            display: inline-block;
+            margin-bottom: 14px;
+            font-weight: 600;
+        }
+
+        .type-uptt .msg-tag { background: var(--accent-dim); color: var(--accent); }
+        .type-mail .msg-tag { background: var(--accent-blue-dim); color: var(--accent-blue); }
+        .type-waterball .msg-tag { background: var(--accent-gold-dim); color: var(--accent-gold); }
+
+        .msg-card h3 {
+            font-family: var(--font-mono);
+            font-size: 1.05rem;
+            margin-bottom: 10px;
+        }
+
+        .msg-card p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            line-height: 1.7;
+        }
+
+        /* ===== SECURITY ===== */
+        .security-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 24px;
+            margin-top: 48px;
+        }
+
+        .security-item {
+            display: flex;
+            gap: 16px;
+            align-items: flex-start;
+            padding: 24px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+        }
+
+        .security-icon {
+            width: 40px;
+            height: 40px;
+            min-width: 40px;
+            border-radius: 10px;
+            background: var(--accent-dim);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+        }
+
+        .security-item h4 {
+            font-family: var(--font-mono);
+            font-size: 0.95rem;
+            margin-bottom: 6px;
+        }
+
+        .security-item p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+
+        /* ===== DOWNLOAD ===== */
+        .download {
+            text-align: center;
+        }
+
+        .download-cards {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 24px;
+            margin-top: 48px;
+            max-width: 720px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .download-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 40px 32px;
+            text-align: center;
+            text-decoration: none;
+            color: var(--text);
+            transition: border-color 0.2s, transform 0.2s;
+            display: block;
+        }
+
+        .download-card:hover {
+            border-color: var(--accent);
+            transform: translateY(-4px);
+        }
+
+        .download-card svg {
+            width: 48px;
+            height: 48px;
+            margin-bottom: 20px;
+            color: var(--text-secondary);
+        }
+
+        .download-card h3 {
+            font-family: var(--font-mono);
+            font-size: 1.2rem;
+            margin-bottom: 8px;
+        }
+
+        .download-card p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        /* ===== DEVELOPER ===== */
+        .developer {
+            background: var(--bg-surface);
+            border-top: 1px solid var(--border);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .code-block {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 28px 32px;
+            margin-top: 32px;
+            overflow-x: auto;
+            max-width: 640px;
+        }
+
+        .code-block code {
+            font-family: var(--font-mono);
+            font-size: 0.9rem;
+            line-height: 2;
+            color: var(--text-secondary);
+        }
+
+        .code-block .comment {
+            color: var(--text-muted);
+        }
+
+        .code-block .cmd {
+            color: var(--accent);
+        }
+
+        .code-block .prompt {
+            color: var(--accent-blue);
+            user-select: none;
+        }
+
+        .dev-links {
+            display: flex;
+            gap: 16px;
+            margin-top: 32px;
+            flex-wrap: wrap;
+        }
+
+        /* ===== KEYBOARD SHORTCUTS ===== */
+        .shortcuts-table {
+            margin-top: 32px;
+            width: 100%;
+            max-width: 480px;
+            border-collapse: collapse;
+        }
+
+        .shortcuts-table th,
+        .shortcuts-table td {
+            padding: 12px 16px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.9rem;
+        }
+
+        .shortcuts-table th {
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        .shortcuts-table kbd {
+            font-family: var(--font-mono);
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            color: var(--accent-blue);
+        }
+
+        .shortcuts-table td:last-child {
+            color: var(--text-secondary);
+        }
+
+        /* ===== FOOTER ===== */
+        footer {
+            padding: 48px 24px;
+            text-align: center;
+            border-top: 1px solid var(--border);
+        }
+
+        .footer-inner {
+            max-width: var(--max-width);
+            margin: 0 auto;
+        }
+
+        .footer-links {
+            display: flex;
+            justify-content: center;
+            gap: 24px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .footer-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: color 0.2s;
+        }
+
+        .footer-links a:hover {
+            color: var(--text);
+        }
+
+        .footer-copy {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            line-height: 1.8;
+        }
+
+        .footer-copy a {
+            color: var(--text-secondary);
+            text-decoration: none;
+        }
+
+        .footer-copy a:hover {
+            color: var(--accent);
+        }
+
+        /* ===== RESPONSIVE ===== */
+        @media (max-width: 900px) {
+            .features-grid,
+            .msg-grid,
+            .flow-diagram {
+                grid-template-columns: 1fr;
+            }
+
+            .flow-step::after {
+                display: none;
+            }
+
+            .security-grid,
+            .download-cards {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 640px) {
+            section {
+                padding: 64px 20px;
+            }
+
+            .nav-links {
+                display: none;
+            }
+
+            .nav-links.open {
+                display: flex;
+                flex-direction: column;
+                position: absolute;
+                top: var(--nav-height);
+                left: 0;
+                right: 0;
+                background: var(--bg-surface);
+                border-bottom: 1px solid var(--border);
+                padding: 16px 24px;
+                gap: 4px;
+            }
+
+            .nav-links.open a {
+                display: block;
+                padding: 12px 14px;
+            }
+
+            .nav-hamburger {
+                display: block;
+            }
+
+            .hero {
+                padding-top: calc(var(--nav-height) + 48px);
+                padding-bottom: 48px;
+            }
+
+            .hero-logo svg {
+                width: 200px;
+            }
+
+            .hero-buttons {
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .btn {
+                width: 100%;
+                max-width: 300px;
+                justify-content: center;
+            }
+        }
+
+        /* ===== ANIMATIONS ===== */
+        @media (prefers-reduced-motion: no-preference) {
+            .fade-in {
+                opacity: 0;
+                transform: translateY(24px);
+                transition: opacity 0.6s ease, transform 0.6s ease;
+            }
+
+            .fade-in.visible {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .fade-in {
+                opacity: 1;
+                transform: none;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<!-- Navigation -->
+<nav>
+    <div class="nav-inner">
+        <a href="#" class="nav-logo">
+            <svg width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="2" y="2" width="76" height="76" rx="18" fill="#161B22" stroke="#30363D" stroke-width="2"/>
+                <rect x="12" y="12" width="56" height="56" rx="12" fill="#0D1117" stroke="#58A6FF" stroke-width="1.5" stroke-dasharray="2 2"/>
+                <path d="M28 28V42C28 48.6274 33.3726 54 40 54C46.6274 54 52 48.6274 52 42V28" stroke="#F0F6FC" stroke-width="6" stroke-linecap="round"/>
+                <path d="M52 38V54" stroke="#F0F6FC" stroke-width="6" stroke-linecap="round"/>
+                <circle cx="28" cy="28" r="5" fill="#58A6FF"/>
+                <circle cx="52" cy="54" r="5" fill="#E3B341"/>
+            </svg>
+            <span>uPtt</span>
+        </a>
+        <button class="nav-hamburger" aria-label="Toggle menu" onclick="document.querySelector('.nav-links').classList.toggle('open')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
+        <ul class="nav-links">
+            <li><a href="#features">功能</a></li>
+            <li><a href="#how-it-works">運作原理</a></li>
+            <li><a href="#security">安全</a></li>
+            <li><a href="#developer">開發者</a></li>
+            <li><a href="https://github.com/uPtt-messenger/uPtt-app" target="_blank" rel="noopener">GitHub</a></li>
+            <li><a href="#download" class="btn-nav">下載</a></li>
+        </ul>
+    </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+    <div class="container">
+        <div class="hero-badge">
+            <span class="dot"></span>
+            Open Source &middot; GPL-3.0
+        </div>
+        <div class="hero-logo">
+            <svg width="240" height="80" viewBox="0 0 240 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="10" y="20" width="40" height="40" rx="8" stroke="#58A6FF" stroke-width="3"/>
+                <path d="M22 35V42C22 45 25 48 30 48C35 48 38 45 38 42V35" stroke="#F0F6FC" stroke-width="3" stroke-linecap="round"/>
+                <circle cx="38" cy="48" r="3" fill="#E3B341"/>
+                <text x="65" y="52" fill="#F0F6FC" font-family="sans-serif" font-weight="bold" font-size="32">uPtt</text>
+                <text x="65" y="68" fill="#8B949E" font-family="sans-serif" font-size="12">Open Source PTT Messenger</text>
+            </svg>
+        </div>
+        <h1 class="hero-tagline">
+            讓 PTT 的溫柔<br>在現代桌面<span class="highlight">重新綻放</span>
+        </h1>
+        <p class="hero-subtitle">
+            一個為「批踢踢實業坊」量身打造的現代化即時通訊終端。<br>
+            將 PTT 站內信系統重塑為流暢的聊天體驗。
+        </p>
+        <div class="hero-buttons">
+            <a href="https://github.com/uPtt-messenger/uPtt-app/releases/latest" class="btn btn-primary" target="_blank" rel="noopener">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                下載最新版本
+            </a>
+            <a href="https://github.com/uPtt-messenger/uPtt-app" class="btn btn-secondary" target="_blank" rel="noopener">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+                GitHub
+            </a>
+        </div>
+        <div class="hero-preview fade-in">
+            <img src="https://i.meee.com.tw/0RXU0Vt.png" alt="uPtt 登入畫面" loading="lazy">
+        </div>
+    </div>
+</section>
+
+<!-- Features -->
+<section class="features" id="features">
+    <div class="container">
+        <div class="section-label">Features</div>
+        <h2 class="section-title">舊傳統與新科技的完美結合</h2>
+        <p class="section-desc">無需學習複雜的 Telnet 鍵盤指令，讓您在 PTT 上的對話如同呼吸般自然。</p>
+        <div class="features-grid">
+            <div class="feature-card fade-in">
+                <div class="feature-icon green">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#A0C4B4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                </div>
+                <h3>郵件轉對話</h3>
+                <p>自動將瑣碎的「站內信」轉換為直覺的「對話氣泡」，溝通不再斷斷續續。支援引用回覆，讓對話脈絡一目了然。</p>
+            </div>
+            <div class="feature-card fade-in">
+                <div class="feature-icon blue">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#58A6FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                </div>
+                <h3>智慧輪詢</h3>
+                <p>採用精準的背景偵測技術，首次登入掃描多達 200 封歷史訊息，後續僅掃描增量變化，確保即時傳達又降低系統負載。</p>
+            </div>
+            <div class="feature-card fade-in">
+                <div class="feature-icon gold">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#E3B341" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                </div>
+                <h3>多帳號管理</h3>
+                <p>獨家資料庫隔離技術，每個 PTT 帳號的對話紀錄完全獨立，互不干擾，安全可靠。</p>
+            </div>
+            <div class="feature-card fade-in">
+                <div class="feature-icon green">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#A0C4B4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                </div>
+                <h3>聯絡人管理</h3>
+                <p>釘選重要對話、拖放排序、封鎖或隱藏聯絡人。右鍵選單提供多層級操作，管理對話從未如此簡單。</p>
+            </div>
+            <div class="feature-card fade-in">
+                <div class="feature-icon blue">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#58A6FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                </div>
+                <h3>背景通知</h3>
+                <p>關閉視窗後程式仍在系統匣常駐。收到新訊息時，桌面即時彈出通知預覽，不錯過任何重要訊息。</p>
+            </div>
+            <div class="feature-card fade-in">
+                <div class="feature-icon gold">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#E3B341" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+                </div>
+                <h3>水球訊息整合</h3>
+                <p>PTT 的即時水球訊息也能捕獲顯示。內建批次去重機制，確保訊息不重複、不遺漏。</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- How it works -->
+<section class="how-it-works" id="how-it-works">
+    <div class="container">
+        <div class="section-label">How It Works</div>
+        <h2 class="section-title">運作原理</h2>
+        <p class="section-desc">uPtt 直接連接 PTT 官方伺服器，以站內信作為訊息傳輸層，無需第三方中繼。</p>
+        <div class="flow-diagram">
+            <div class="flow-step fade-in">
+                <div class="flow-number">1</div>
+                <h3>發送訊息</h3>
+                <p>您在 uPtt 輸入的訊息經過格式封裝，透過 PyPtt 以站內信形式送至 PTT 伺服器，同時儲存到本地資料庫。</p>
+            </div>
+            <div class="flow-step fade-in">
+                <div class="flow-number">2</div>
+                <h3>背景輪詢</h3>
+                <p>Worker 執行緒每 5 秒輪詢一次站內信，識別 uPtt 格式訊息並解析內容。內建時間戳同步機制確保訊息順序一致。</p>
+            </div>
+            <div class="flow-step fade-in">
+                <div class="flow-number">3</div>
+                <h3>即時呈現</h3>
+                <p>解析後的訊息存入 SQLite 資料庫，透過 Qt Signal 通知 UI 執行緒即時更新畫面，呈現為熟悉的聊天氣泡。</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Message Types -->
+<section class="msg-types" id="message-types">
+    <div class="container">
+        <div class="section-label">Message Types</div>
+        <h2 class="section-title">三種訊息類型，統一管理</h2>
+        <p class="section-desc">uPtt 能智慧辨識並處理不同類型的 PTT 訊息。</p>
+        <div class="msg-grid">
+            <div class="msg-card type-uptt fade-in">
+                <span class="msg-tag">uPtt</span>
+                <h3>uPtt 訊息</h3>
+                <p>uPtt 專屬格式訊息，解析後存入本地資料庫並自動從 PTT 信箱刪除，維持信箱整潔。</p>
+            </div>
+            <div class="msg-card type-mail fade-in">
+                <span class="msg-tag">Mail</span>
+                <h3>一般站內信</h3>
+                <p>來自其他使用者的普通站內信，以信件卡片形式顯示在對話中，原始信件保留在 PTT 信箱不刪除。</p>
+            </div>
+            <div class="msg-card type-waterball fade-in">
+                <span class="msg-tag">Waterball</span>
+                <h3>水球訊息</h3>
+                <p>PTT 的即時彈出訊息（水球），被捕獲後以行內氣泡形式顯示，並透過批次指紋雜湊機制去重。</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Security -->
+<section class="security" id="security">
+    <div class="container">
+        <div class="section-label">Security &amp; Privacy</div>
+        <h2 class="section-title">安全與隱私優先</h2>
+        <p class="section-desc">您的資料只屬於您。uPtt 不收集任何個人資訊，不連接任何第三方伺服器。</p>
+        <div class="security-grid">
+            <div class="security-item fade-in">
+                <div class="security-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A0C4B4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                </div>
+                <div>
+                    <h4>本地加密存儲</h4>
+                    <p>所有對話紀錄與帳號資訊僅保存在您的電腦本地 SQLite 資料庫中，絕不上傳第三方。</p>
+                </div>
+            </div>
+            <div class="security-item fade-in">
+                <div class="security-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A0C4B4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                </div>
+                <div>
+                    <h4>原生通訊協議</h4>
+                    <p>直接連接 PTT 官方伺服器（ptt.cc），僅額外連線 GitHub API 檢查更新版本，純淨安全。</p>
+                </div>
+            </div>
+            <div class="security-item fade-in">
+                <div class="security-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A0C4B4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                </div>
+                <div>
+                    <h4>自動化防洩漏</h4>
+                    <p>CI 整合 TruffleHog 掃描、Bandit 靜態分析與動態密碼攔截測試，確保敏感資訊絕不外洩。</p>
+                </div>
+            </div>
+            <div class="security-item fade-in">
+                <div class="security-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A0C4B4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                </div>
+                <div>
+                    <h4>程式碼簽章</h4>
+                    <p>發行版由 <a href="https://signpath.io" target="_blank" rel="noopener" style="color: var(--accent);">SignPath.io</a> 簽署並經 SignPath Foundation 驗證，確保下載的程式未被篡改。</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Download -->
+<section class="download" id="download">
+    <div class="container">
+        <div class="section-label">Download</div>
+        <h2 class="section-title">立即下載</h2>
+        <p class="section-desc" style="margin: 0 auto;">無需安裝繁瑣的程式碼環境，下載即用。</p>
+        <div class="download-cards">
+            <a href="https://github.com/uPtt-messenger/uPtt-app/releases/latest" class="download-card fade-in" target="_blank" rel="noopener">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5C17.88 20.74 17 21.95 15.66 21.97C14.32 22 13.89 21.18 12.37 21.18C10.84 21.18 10.37 21.95 9.1 22C7.79 22.05 6.8 20.68 5.96 19.47C4.25 17 2.94 12.45 4.7 9.39C5.57 7.87 7.13 6.91 8.82 6.88C10.1 6.86 11.32 7.75 12.11 7.75C12.89 7.75 14.37 6.68 15.92 6.84C16.57 6.87 18.39 7.1 19.56 8.82C19.47 8.88 17.39 10.1 17.41 12.63C17.44 15.65 20.06 16.66 20.09 16.67C20.06 16.74 19.67 18.11 18.71 19.5ZM13 3.5C13.73 2.67 14.94 2.04 15.94 2C16.07 3.17 15.6 4.35 14.9 5.19C14.21 6.04 13.07 6.7 11.95 6.61C11.8 5.46 12.36 4.26 13 3.5Z"/></svg>
+                <h3>macOS</h3>
+                <p>.dmg 映像檔</p>
+            </a>
+            <a href="https://github.com/uPtt-messenger/uPtt-app/releases/latest" class="download-card fade-in" target="_blank" rel="noopener">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 12V6.75L9 5.43V11.91L3 12M20 3V11.75L10 11.9V5.21L20 3M3 13L9 13.09V19.9L3 18.75V13M10 13.15L20 13V22L10 20.09V13.15Z"/></svg>
+                <h3>Windows</h3>
+                <p>.exe 執行檔</p>
+            </a>
+        </div>
+    </div>
+</section>
+
+<!-- Developer -->
+<section class="developer" id="developer">
+    <div class="container">
+        <div class="section-label">Developer</div>
+        <h2 class="section-title">開發者快速入門</h2>
+        <p class="section-desc">uPtt 使用 Python 3.12 與 PySide6 開發，歡迎貢獻。</p>
+        <div class="code-block fade-in">
+            <code>
+                <span class="comment"># 複製專案</span><br>
+                <span class="prompt">$ </span><span class="cmd">git clone git@github.com:uPtt-messenger/uPtt-app.git</span><br>
+                <span class="prompt">$ </span><span class="cmd">cd uPtt-app</span><br>
+                <br>
+                <span class="comment"># 安裝依賴</span><br>
+                <span class="prompt">$ </span><span class="cmd">pip install -r requirements.txt</span><br>
+                <br>
+                <span class="comment"># 執行</span><br>
+                <span class="prompt">$ </span><span class="cmd">python src/run_app.py</span><br>
+                <br>
+                <span class="comment"># 測試</span><br>
+                <span class="prompt">$ </span><span class="cmd">pytest --cov=src/uPtt tests/</span>
+            </code>
+        </div>
+        <div class="dev-links">
+            <a href="https://github.com/uPtt-messenger/uPtt-app" class="btn btn-secondary" target="_blank" rel="noopener">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+                GitHub Repository
+            </a>
+            <a href="https://github.com/uPtt-messenger/uPtt-app/issues" class="btn btn-secondary" target="_blank" rel="noopener">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                回報問題
+            </a>
+        </div>
+
+        <h3 style="font-family: var(--font-mono); margin-top: 48px; margin-bottom: 12px; font-size: 1.1rem;">快捷鍵</h3>
+        <table class="shortcuts-table">
+            <thead>
+                <tr><th>按鍵</th><th>功能</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><kbd>Ctrl+N</kbd></td><td>聚焦新增對話輸入框</td></tr>
+                <tr><td><kbd>Ctrl+W</kbd></td><td>關閉目前對話</td></tr>
+                <tr><td><kbd>Ctrl+Q</kbd></td><td>完全退出程式</td></tr>
+                <tr><td><kbd>Enter</kbd></td><td>發送訊息</td></tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<!-- Footer -->
+<footer>
+    <div class="footer-inner">
+        <div class="footer-links">
+            <a href="https://github.com/uPtt-messenger/uPtt-app" target="_blank" rel="noopener">GitHub</a>
+            <a href="https://github.com/uPtt-messenger/uPtt-app/releases" target="_blank" rel="noopener">Releases</a>
+            <a href="https://github.com/uPtt-messenger/uPtt-app/issues" target="_blank" rel="noopener">Issues</a>
+            <a href="https://github.com/uPtt-messenger/uPtt-app/blob/main/LICENSE" target="_blank" rel="noopener">License</a>
+            <a href="https://github.com/uPtt-messenger/uPtt-app/blob/main/CODE_SIGNING_POLICY.md" target="_blank" rel="noopener">Code Signing</a>
+        </div>
+        <p class="footer-copy">
+            &copy; 2024 uPtt Project &middot; 以 <a href="https://github.com/uPtt-messenger/uPtt-app/blob/main/LICENSE" target="_blank" rel="noopener">GPL-3.0</a> 授權釋出<br>
+            特別感謝 <a href="https://github.com/PyPtt/PyPtt" target="_blank" rel="noopener">PyPtt</a> 提供強大的 PTT 操作支援<br>
+            程式碼簽章由 <a href="https://signpath.io" target="_blank" rel="noopener">SignPath.io</a> 提供，<a href="https://signpath.org" target="_blank" rel="noopener">SignPath Foundation</a> 驗證
+        </p>
+    </div>
+</footer>
+
+<script>
+    // Intersection Observer for fade-in animations
+    if ('IntersectionObserver' in window) {
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                    observer.unobserve(entry.target);
+                }
+            });
+        }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+
+        document.querySelectorAll('.fade-in').forEach(el => observer.observe(el));
+    } else {
+        document.querySelectorAll('.fade-in').forEach(el => el.classList.add('visible'));
+    }
+
+    // Close mobile menu on link click
+    document.querySelectorAll('.nav-links a').forEach(link => {
+        link.addEventListener('click', () => {
+            document.querySelector('.nav-links').classList.remove('open');
+        });
+    });
+</script>
+
+</body>
+</html>

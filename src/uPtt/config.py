@@ -5,6 +5,9 @@ MAX_MESSAGES = 256
 # 每 5 秒檢查一次批踢踢信箱
 CHECK_PTT_MAIL_INTERVAL = 5
 
+# 每 5 秒檢查一次水球
+CHECK_WATERBALL_INTERVAL = 5
+
 # 每 60 秒檢查一次聯絡人在線狀態
 CHECK_ONLINE_STATUS_INTERVAL = 60
 
