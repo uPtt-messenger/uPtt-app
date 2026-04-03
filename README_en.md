@@ -19,6 +19,10 @@
 
 ---
 
+> **🚧 Closed Beta:** This project is currently in closed beta. Features and UI are subject to change. We welcome bug reports and feedback via [GitHub Issues](https://github.com/uPtt-messenger/uPtt-app/issues)!
+
+---
+
 ### Project Vision
 
 [PTT (Ptt Bulletin Board System)](https://www.ptt.cc) is Taiwan's most vibrant online community, active for over 30 years. However, its traditional Telnet interface and internal mail system feel dated in the age of modern instant messaging.

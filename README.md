@@ -19,6 +19,10 @@
 
 ---
 
+> **🚧 封測中 (Closed Beta)：** 本專案目前仍在封閉測試階段，功能與介面可能隨時調整。歡迎至 [GitHub Issues](https://github.com/uPtt-messenger/uPtt-app/issues) 回報問題或提供建議！
+
+---
+
 ### 🌟 專案願景：跨越三十年的技術橋樑
 
 PTT（批踢踢）是台灣最具生命力的網路社群，但傳統的 Telnet 黑白畫面與站內信系統，在即時通訊盛行的今天顯得有些孤獨。
