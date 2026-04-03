@@ -32,12 +32,8 @@ class PTTWorker(QObject):
         self.db = db
         self.polling_timer: Optional[QTimer] = None
         self.last_mail_time: Optional[datetime] = None
-        # 從資料庫載入上次輪詢的時間，實現持久化
-        last_poll_str = self.db.get_config('LAST_POLL_TIME')
-        try:
-            self.last_poll_time = datetime.fromisoformat(last_poll_str) if last_poll_str else None
-        except (ValueError, TypeError):
-            self.last_poll_time = None
+        # last_poll_time 在 do_login 成功後才載入（需要帳號 ID 作為 key）
+        self.last_poll_time: Optional[datetime] = None
             
         self.is_first_polling = True
         self._was_connected = True  # 追蹤上次連線狀態，用於判斷是否需發射訊號
@@ -62,6 +58,14 @@ class PTTWorker(QObject):
                     )
                 except Exception as e:
                     logger.warning(f"登入後更新帳號資訊失敗: {e}")
+
+                # 登入成功後，載入該帳號的 last_poll_time
+                poll_key = f'LAST_POLL_TIME_{self.ptt.ptt_id.lower()}'
+                last_poll_str = self.db.get_config(poll_key)
+                try:
+                    self.last_poll_time = datetime.fromisoformat(last_poll_str) if last_poll_str else None
+                except (ValueError, TypeError):
+                    self.last_poll_time = None
 
                 self.login_result.emit(True, "登入成功")
                 # 登入成功後自動開始輪詢
@@ -129,14 +133,14 @@ class PTTWorker(QObject):
                 if total_newest == self._last_newest_index:
                     logger.debug(f"信箱無變化 (總數={total_newest})，跳過掃描")
                     self.last_poll_time = current_poll_start
-                    self.db.set_config('LAST_POLL_TIME', current_poll_start.isoformat())
+                    self.db.set_config(f'LAST_POLL_TIME_{self.ptt.ptt_id.lower()}', current_poll_start.isoformat())
                     return
                 elif total_newest < self._last_newest_index:
                     # 索引變小代表有信被刪除（例如 uPtt 訊息處理後刪信），也不需掃描
                     logger.debug(f"信箱索引減少 ({self._last_newest_index} → {total_newest})，跳過掃描")
                     self._last_newest_index = total_newest
                     self.last_poll_time = current_poll_start
-                    self.db.set_config('LAST_POLL_TIME', current_poll_start.isoformat())
+                    self.db.set_config(f'LAST_POLL_TIME_{self.ptt.ptt_id.lower()}', current_poll_start.isoformat())
                     return
 
             # 3. 建立停止時間（時間驅動掃描策略）
@@ -277,7 +281,7 @@ class PTTWorker(QObject):
             # 扣除已刪除的 uPtt 信件數，避免下次輪詢誤判「索引減少＝無新信」
             self._last_newest_index = total_newest - deleted_count
             self.last_poll_time = current_poll_start
-            self.db.set_config('LAST_POLL_TIME', current_poll_start.isoformat())
+            self.db.set_config(f'LAST_POLL_TIME_{self.ptt.ptt_id.lower()}', current_poll_start.isoformat())
 
             # 6. 發射訊號
             for mail_data in reversed(mails_to_emit):
@@ -285,19 +289,13 @@ class PTTWorker(QObject):
                 self.last_mail_time = mail_data['timestamp']
 
         except PyPtt.ConnectionClosed:
-            logger.warning("輪詢時偵測到連線中斷，嘗試自動重連...")
+            logger.warning("輪詢時偵測到連線中斷，將延遲重連...")
             if self._was_connected:
                 self._was_connected = False
                 self.connection_lost.emit()
                 self.status_updated.emit("連線中斷，正在嘗試重新連線...")
-            # ptt.call 內部重連失敗才會拋出此例外，再嘗試一次頂層重連
-            if self.ptt.reconnect():
-                self._was_connected = True
-                self.connection_restored.emit()
-                self.status_updated.emit("已重新連線")
-                logger.info("頂層重連成功，下次輪詢將恢復正常")
-            else:
-                logger.error("頂層重連失敗，將在下次輪詢時重試")
+            # 使用 QTimer.singleShot 延遲重連，避免阻塞 worker thread 事件迴圈
+            QTimer.singleShot(5000, self._deferred_reconnect)
         except Exception as e:
             logger.exception(f"輪詢信件發生錯誤: {e}")
             # 檢查是否為連線相關錯誤
@@ -305,6 +303,16 @@ class PTTWorker(QObject):
                 self._was_connected = False
                 self.connection_lost.emit()
             self.status_updated.emit(f"輪詢錯誤: {e}")
+
+    def _deferred_reconnect(self):
+        """延遲重連（由 QTimer.singleShot 觸發），避免阻塞事件迴圈。"""
+        if self.ptt.reconnect():
+            self._was_connected = True
+            self.connection_restored.emit()
+            self.status_updated.emit("已重新連線")
+            logger.info("延遲重連成功，下次輪詢將恢復正常")
+        else:
+            logger.error("延遲重連失敗，將在下次輪詢時重試")
 
     @Slot(str, str, object)
     def send_message(self, receiver_id, text, timestamp=None):

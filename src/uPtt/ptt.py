@@ -54,13 +54,16 @@ class UPttService:
         重新建立連線並登入。
         遵循 PyPtt 官方範例：建立全新 Service 實例再重新登入。
 
+        注意：此方法會短暫 sleep（最多 3 秒/次），避免長時間阻塞 Qt 事件迴圈。
+        LoginTooOften 時直接放棄，由上層 Worker 使用 QTimer 延遲重試。
+
         Returns:
             bool: 重連成功與否
         """
         if self.ptt_id is None or self.ptt_pw is None:
             return False
 
-        max_retry = 5
+        max_retry = 3
         for retry_time in range(max_retry):
             try:
                 self.service = PyPtt.Service({'log_level': PyPtt.log.SILENT})
@@ -73,8 +76,8 @@ class UPttService:
                 logger.info(f"重連成功 (第 {retry_time + 1} 次嘗試)")
                 return True
             except PyPtt.LoginTooOften:
-                logger.warning(f"登入太頻繁，等待 60 秒後再試 ({retry_time + 1}/{max_retry})")
-                time.sleep(60)
+                logger.warning("登入太頻繁，放棄本次重連，由上層延遲重試")
+                return False
             except PyPtt.LoginError:
                 logger.warning(f"登入失敗，等待 3 秒後再試 ({retry_time + 1}/{max_retry})")
                 time.sleep(3)

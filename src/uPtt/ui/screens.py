@@ -263,6 +263,24 @@ class MainWindow(QMainWindow):
             self.send_requested.disconnect()
             self.user_info_requested.disconnect()
 
+        # 斷開舊 Worker → MainWindow 方向的訊號，防止記憶體洩漏
+        if hasattr(self, 'worker'):
+            for sig in [
+                self.worker.new_message_received,
+                self.worker.send_result,
+                self.worker.user_info_result,
+                self.worker.user_info_error,
+                self.worker.status_updated,
+                self.worker.login_result,
+                self.worker.connection_lost,
+                self.worker.connection_restored,
+                self.worker.online_status_updated,
+            ]:
+                try:
+                    sig.disconnect()
+                except RuntimeError:
+                    pass  # 已斷開
+
         self.ptt_thread = QThread()
         self.worker = PTTWorker(self.ptt_service, self.db)
         self.worker.moveToThread(self.ptt_thread)
@@ -1067,8 +1085,8 @@ class MainWindow(QMainWindow):
 
             self._move_contact_to_top(sender)
 
-        # 桌面通知 (顯示原始大小寫 ID)
-        if not self.isActiveWindow():
+        # 桌面通知 (僅限收到的訊息，排除自己從其他終端發出的)
+        if not self.isActiveWindow() and not data.get('is_me', False):
             self.tray_icon.showMessage(
                 f"新訊息: {sender_id_display}",
                 data['text'][:50],

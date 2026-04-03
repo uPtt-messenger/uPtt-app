@@ -148,8 +148,10 @@ class VersionCheckWorker(QObject):
     @Slot()
     def check(self):
         try:
-            if is_update_available():
-                latest_version = get_latest_github_release_version()
+            from packaging import version
+            latest_version = get_latest_github_release_version()
+            if (not latest_version.startswith("Error") and
+                    version.parse(latest_version) > version.parse(__version__)):
                 logger.info(f"新版本可用: {latest_version} (目前: {__version__})")
                 self.update_available.emit(latest_version)
             else:

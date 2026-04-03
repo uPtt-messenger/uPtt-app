@@ -24,15 +24,33 @@ def db_mock():
 def worker(ptt_service_mock, db_mock):
     return PTTWorker(ptt_service_mock, db_mock)
 
-def test_worker_init_with_last_poll(ptt_service_mock, db_mock):
+def test_worker_init_last_poll_is_none(ptt_service_mock, db_mock):
+    """last_poll_time 在 __init__ 時應為 None，需等 do_login 成功後才載入。"""
+    w = PTTWorker(ptt_service_mock, db_mock)
+    assert w.last_poll_time is None
+
+def test_worker_login_loads_last_poll(qtbot, ptt_service_mock, db_mock):
+    """do_login 成功後應載入該帳號的 LAST_POLL_TIME。"""
     last_time = datetime.now().replace(microsecond=0)
+    ptt_service_mock.ptt_id = "TestUser"
+    ptt_service_mock.login.return_value = True
+    ptt_service_mock.get_user_info.return_value = {'ptt_id': 'TestUser', 'nickname': 'Nick', 'is_online': True}
     db_mock.get_config.return_value = last_time.isoformat()
     w = PTTWorker(ptt_service_mock, db_mock)
+    with qtbot.waitSignal(w.login_result):
+        w.do_login("testuser", "testpass")
+    db_mock.get_config.assert_called_with('LAST_POLL_TIME_testuser')
     assert w.last_poll_time == last_time
 
-def test_worker_init_invalid_poll_time(ptt_service_mock, db_mock):
+def test_worker_login_invalid_poll_time(qtbot, ptt_service_mock, db_mock):
+    """do_login 成功後若 LAST_POLL_TIME 格式不合法，應設為 None。"""
+    ptt_service_mock.ptt_id = "TestUser"
+    ptt_service_mock.login.return_value = True
+    ptt_service_mock.get_user_info.return_value = {'ptt_id': 'TestUser', 'nickname': 'Nick', 'is_online': True}
     db_mock.get_config.return_value = "invalid-date"
     w = PTTWorker(ptt_service_mock, db_mock)
+    with qtbot.waitSignal(w.login_result):
+        w.do_login("testuser", "testpass")
     assert w.last_poll_time is None
 
 def test_do_login_success(qtbot, worker, ptt_service_mock, db_mock):
