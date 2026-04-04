@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QTextEdit, QSystemTrayIcon, QMenu, QMessageBox, QInputDialog
 )
 from PySide6.QtCore import Qt, Signal, Slot, QThread, QSize, QEvent, QUrl
-from PySide6.QtGui import QIcon, QAction, QShortcut, QKeySequence, QPixmap, QPainter, QFontMetrics, QDesktopServices
+from PySide6.QtGui import QIcon, QAction, QShortcut, QKeySequence, QPixmap, QPainter, QFontMetrics, QDesktopServices, QIntValidator
 from PySide6.QtSvg import QSvgRenderer
 
 from uPtt import __version__, contant
@@ -211,10 +211,220 @@ class LoginWindow(QWidget):
         self.update_label.setText(f"新版本 v{latest_version} 可供下載")
         self.update_label.show()
 
+class ScanSetupScreen(QWidget):
+    """首次登入信箱掃描設定畫面"""
+    scan_days_selected = Signal(int)
+    scan_skipped = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self.setObjectName("scan-setup-screen")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setStyleSheet("background-color: #0D1117;")
+        self.init_ui()
+
+    def init_ui(self):
+        main_layout = QVBoxLayout(self)
+        main_layout.setAlignment(Qt.AlignCenter)
+
+        container = QWidget()
+        container.setFixedWidth(360)
+        container.setStyleSheet("background: transparent;")
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        # 標題
+        title = QLabel("信箱掃描")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("color: #E6EDF3; font-size: 18px; font-weight: bold; background: transparent;")
+
+        desc = QLabel("uPtt 需要掃描您的 PTT 信箱，\n才能載入過去的對話紀錄。")
+        desc.setAlignment(Qt.AlignCenter)
+        desc.setWordWrap(True)
+        desc.setStyleSheet("color: #8B949E; font-size: 13px; background: transparent; line-height: 1.5;")
+
+        subtitle = QLabel("選擇要載入的信件範圍")
+        subtitle.setAlignment(Qt.AlignCenter)
+        subtitle.setStyleSheet("color: #5C6773; font-size: 13px; background: transparent;")
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.HLine)
+        sep.setStyleSheet("background-color: #2D333B; border: none; max-height: 1px;")
+
+        # 快速選擇按鈕
+        btn_style = """
+            background-color: #2D3B35; color: #A0C4B4;
+            border: 1px solid #3E5149; border-radius: 8px;
+            font-weight: bold; font-size: 14px; padding: 10px 20px;
+        """
+        btn_hover_style = """
+            QPushButton:hover { background-color: #3A4D43; color: #B5D4C6; border-color: #4E6358; }
+        """
+
+        btn_row = QWidget()
+        btn_row.setStyleSheet("background: transparent;")
+        btn_row_layout = QHBoxLayout(btn_row)
+        btn_row_layout.setContentsMargins(0, 0, 0, 0)
+        btn_row_layout.setSpacing(12)
+
+        self.btn_7d = QPushButton("7 天")
+        self.btn_7d.setStyleSheet(btn_style + btn_hover_style)
+        self.btn_7d.setFixedHeight(42)
+        self.btn_7d.clicked.connect(lambda: self._start_scan(7))
+
+        self.btn_30d = QPushButton("30 天")
+        self.btn_30d.setStyleSheet(btn_style + btn_hover_style)
+        self.btn_30d.setFixedHeight(42)
+        self.btn_30d.clicked.connect(lambda: self._start_scan(30))
+
+        self.btn_all = QPushButton("全部")
+        self.btn_all.setStyleSheet(btn_style + btn_hover_style)
+        self.btn_all.setFixedHeight(42)
+        self.btn_all.clicked.connect(lambda: self._start_scan(0))
+
+        btn_row_layout.addWidget(self.btn_7d)
+        btn_row_layout.addWidget(self.btn_30d)
+        btn_row_layout.addWidget(self.btn_all)
+
+        # 自訂天數
+        custom_row = QWidget()
+        custom_row.setStyleSheet("background: transparent;")
+        custom_layout = QHBoxLayout(custom_row)
+        custom_layout.setContentsMargins(0, 0, 0, 0)
+        custom_layout.setSpacing(8)
+
+        custom_label = QLabel("自訂：")
+        custom_label.setStyleSheet("color: #8B949E; font-size: 13px; background: transparent;")
+
+        self.custom_input = QLineEdit()
+        self.custom_input.setPlaceholderText("天數")
+        self.custom_input.setValidator(QIntValidator(1, 3650))
+        self.custom_input.setFixedWidth(80)
+        self.custom_input.setFixedHeight(38)
+        self.custom_input.setStyleSheet(
+            "padding: 8px; border: 1px solid #2D333B; border-radius: 7px;"
+            "background-color: #161B22; color: #E6EDF3; font-size: 14px;"
+        )
+
+        day_label = QLabel("天")
+        day_label.setStyleSheet("color: #8B949E; font-size: 13px; background: transparent;")
+
+        self.btn_custom = QPushButton("開始掃描")
+        self.btn_custom.setStyleSheet(btn_style + btn_hover_style)
+        self.btn_custom.setFixedHeight(38)
+        self.btn_custom.clicked.connect(self._start_custom_scan)
+        self.custom_input.returnPressed.connect(self._start_custom_scan)
+
+        custom_layout.addWidget(custom_label)
+        custom_layout.addWidget(self.custom_input)
+        custom_layout.addWidget(day_label)
+        custom_layout.addStretch()
+        custom_layout.addWidget(self.btn_custom)
+
+        # 進度區塊（初始隱藏）
+        self.progress_widget = QWidget()
+        self.progress_widget.setStyleSheet("background: transparent;")
+        progress_layout = QVBoxLayout(self.progress_widget)
+        progress_layout.setContentsMargins(0, 0, 0, 0)
+        progress_layout.setSpacing(6)
+
+        self.progress_label = QLabel("正在掃描信件...")
+        self.progress_label.setAlignment(Qt.AlignCenter)
+        self.progress_label.setStyleSheet("color: #A0C4B4; font-size: 14px; font-weight: bold; background: transparent;")
+
+        self.progress_count = QLabel("0 / 0")
+        self.progress_count.setAlignment(Qt.AlignCenter)
+        self.progress_count.setStyleSheet("color: #E6EDF3; font-size: 24px; font-weight: bold; background: transparent;")
+
+        self.progress_title = QLabel("")
+        self.progress_title.setAlignment(Qt.AlignCenter)
+        self.progress_title.setStyleSheet("color: #5C6773; font-size: 12px; background: transparent;")
+        self.progress_title.setWordWrap(True)
+        self.progress_title.setMaximumWidth(360)
+
+        progress_layout.addWidget(self.progress_label)
+        progress_layout.addWidget(self.progress_count)
+        progress_layout.addWidget(self.progress_title)
+        self.progress_widget.hide()
+
+        # 跳過按鈕
+        self.skip_btn = QPushButton("跳過，之後再掃描")
+        self.skip_btn.setCursor(Qt.PointingHandCursor)
+        self.skip_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent; border: none;
+                color: #484F58; font-size: 12px; padding: 6px 0;
+            }
+            QPushButton:hover { color: #8B949E; }
+        """)
+        self.skip_btn.clicked.connect(lambda: self.scan_skipped.emit())
+
+        # 選項區塊
+        self.options_widget = QWidget()
+        self.options_widget.setStyleSheet("background: transparent;")
+        options_layout = QVBoxLayout(self.options_widget)
+        options_layout.setContentsMargins(0, 0, 0, 0)
+        options_layout.setSpacing(14)
+        options_layout.addWidget(btn_row)
+        options_layout.addWidget(custom_row)
+        options_layout.addWidget(self.skip_btn, alignment=Qt.AlignCenter)
+
+        # 組裝
+        layout.addWidget(title)
+        layout.addSpacing(8)
+        layout.addWidget(desc)
+        layout.addSpacing(12)
+        layout.addWidget(subtitle)
+        layout.addSpacing(20)
+        layout.addWidget(sep)
+        layout.addSpacing(20)
+        layout.addWidget(self.options_widget)
+        layout.addWidget(self.progress_widget)
+
+        main_layout.addWidget(container)
+
+    def _start_scan(self, days):
+        self.show_progress()
+        self.scan_days_selected.emit(days)
+
+    def _start_custom_scan(self):
+        text = self.custom_input.text().strip()
+        if not text:
+            return
+        days = int(text)
+        if days < 1:
+            return
+        self._start_scan(days)
+
+    def show_progress(self):
+        self.options_widget.hide()
+        self.progress_count.setText("0 / 0")
+        self.progress_title.setText("")
+        self.progress_widget.show()
+
+    @Slot(int, int, str)
+    def update_progress(self, current, total, title):
+        self.progress_count.setText(f"{current} / {total}")
+        # 截斷過長標題
+        display_title = title if len(title) <= 40 else title[:37] + "..."
+        self.progress_title.setText(display_title)
+
+    def reset(self):
+        self.options_widget.show()
+        self.progress_widget.hide()
+        self.custom_input.clear()
+        self.progress_count.setText("0 / 0")
+        self.progress_title.setText("")
+
+
 class MainWindow(QMainWindow):
     """主聊天畫面"""
     send_requested = Signal(str, str, object)
     user_info_requested = Signal(str)
+    priority_online_requested = Signal(str)
+    scan_requested = Signal(int)  # scan_days
+    skip_scan_requested = Signal()
 
     def __init__(self, ptt_service: UPttService, db):
         super().__init__()
@@ -235,6 +445,7 @@ class MainWindow(QMainWindow):
         self.blocked_users: set = set()
         self.pinned_ids: set = set()
         self.reply_to: Optional[Dict] = None  # {'sender': str, 'preview': str}
+        self._user_info_cache: Dict[str, Dict] = {}  # ptt_id_lower -> user info dict
         
         # 初始化 UI 與背景執行緒
         self.init_ui()
@@ -262,6 +473,9 @@ class MainWindow(QMainWindow):
         if getattr(self, "_worker_signals_connected", False):
             self.send_requested.disconnect()
             self.user_info_requested.disconnect()
+            self.priority_online_requested.disconnect()
+            self.scan_requested.disconnect()
+            self.skip_scan_requested.disconnect()
 
         # 斷開舊 Worker → MainWindow 方向的訊號，防止記憶體洩漏
         if hasattr(self, 'worker'):
@@ -275,6 +489,9 @@ class MainWindow(QMainWindow):
                 self.worker.connection_lost,
                 self.worker.connection_restored,
                 self.worker.online_status_updated,
+                self.worker.first_time_detected,
+                self.worker.scan_progress,
+                self.worker.scan_complete,
             ]:
                 try:
                     sig.disconnect()
@@ -288,6 +505,9 @@ class MainWindow(QMainWindow):
         # 連接發信訊號 (跨執行緒會自動排程)
         self.send_requested.connect(self.worker.send_message)
         self.user_info_requested.connect(self.worker.get_user_info)
+        self.priority_online_requested.connect(self.worker.check_online_priority)
+        self.scan_requested.connect(self.worker.do_initial_scan)
+        self.skip_scan_requested.connect(self.worker.do_skip_scan)
         self._worker_signals_connected = True
 
         # 這裡也改用訊號連接，確保在背景執行緒登入 (且在登出重啟 Worker 後能重新連向新實例)
@@ -307,7 +527,19 @@ class MainWindow(QMainWindow):
         self.worker.connection_lost.connect(self.on_connection_lost)
         self.worker.connection_restored.connect(self.on_connection_restored)
         self.worker.online_status_updated.connect(self.on_online_status_updated)
-        
+        self.worker.first_time_detected.connect(self._on_first_time_detected)
+        self.worker.scan_progress.connect(self.scan_setup_screen.update_progress)
+        self.worker.scan_complete.connect(self._on_scan_complete)
+
+        # 掃描設定畫面的訊號
+        if hasattr(self, 'scan_setup_screen'):
+            if getattr(self, '_scan_signal_connected', False):
+                self.scan_setup_screen.scan_days_selected.disconnect()
+                self.scan_setup_screen.scan_skipped.disconnect()
+            self.scan_setup_screen.scan_days_selected.connect(self._on_scan_days_selected)
+            self.scan_setup_screen.scan_skipped.connect(self._on_scan_skipped)
+            self._scan_signal_connected = True
+
         # 啟動執行緒
         self.ptt_thread.start()
 
@@ -326,6 +558,8 @@ class MainWindow(QMainWindow):
         chat_layout.setSpacing(0)
         
         self.splitter = QSplitter(Qt.Horizontal)
+        self.splitter.setHandleWidth(1)
+        self.splitter.setStyleSheet("QSplitter::handle { background-color: #21262D; }")
         
         # 左側: 會話清單
         self.sidebar = QWidget()
@@ -503,8 +737,13 @@ class MainWindow(QMainWindow):
         chat_header_layout.setContentsMargins(14, 0, 14, 0)
         chat_header_layout.setSpacing(0)
 
-        self.chat_header_avatar = QLabel()
+        chat_header_avatar_container = QWidget()
+        chat_header_avatar_container.setFixedSize(40, 40)
+        chat_header_avatar_container.setStyleSheet("background: transparent;")
+
+        self.chat_header_avatar = QLabel(chat_header_avatar_container)
         self.chat_header_avatar.setFixedSize(36, 36)
+        self.chat_header_avatar.move(0, 2)
         self.chat_header_avatar.setAlignment(Qt.AlignCenter)
         self.chat_header_avatar.setStyleSheet("""
             background-color: #2D3B35;
@@ -513,6 +752,14 @@ class MainWindow(QMainWindow):
             font-weight: bold;
             font-size: 15px;
         """)
+
+        self.chat_header_online_dot = QLabel(chat_header_avatar_container)
+        self.chat_header_online_dot.setFixedSize(10, 10)
+        self.chat_header_online_dot.move(27, 28)
+        self.chat_header_online_dot.setStyleSheet(
+            "background-color: #484F58; border-radius: 5px; border: 2px solid #0D1117;"
+        )
+        self.chat_header_online_dot.hide()
 
         chat_header_text = QWidget()
         chat_header_text.setStyleSheet("background: transparent;")
@@ -541,7 +788,7 @@ class MainWindow(QMainWindow):
         self.chat_header_online.hide()
         chat_header_text_layout.addWidget(self.chat_header_online)
 
-        chat_header_layout.addWidget(self.chat_header_avatar)
+        chat_header_layout.addWidget(chat_header_avatar_container)
         chat_header_layout.addWidget(chat_header_text, 1)
 
         chat_vbox.addWidget(self.chat_header)
@@ -555,8 +802,10 @@ class MainWindow(QMainWindow):
         
         chat_layout.addWidget(self.splitter)
         
-        self.central_stack.addWidget(self.login_screen)
-        self.central_stack.addWidget(self.chat_screen)
+        self.central_stack.addWidget(self.login_screen)     # index 0
+        self.central_stack.addWidget(self.chat_screen)      # index 1
+        self.scan_setup_screen = ScanSetupScreen()
+        self.central_stack.addWidget(self.scan_setup_screen) # index 2
 
     def init_tray(self):
         """初始化系統匣"""
@@ -577,7 +826,11 @@ class MainWindow(QMainWindow):
         quit_action = QAction("關閉", self)
         quit_action.triggered.connect(self.fully_quit)
         
+        rescan_action = QAction("重新掃描信箱", self)
+        rescan_action.triggered.connect(self._start_rescan)
+
         tray_menu.addAction(show_action)
+        tray_menu.addAction(rescan_action)
         tray_menu.addAction(logout_action)
         tray_menu.addSeparator()
         tray_menu.addAction(quit_action)
@@ -618,6 +871,9 @@ class MainWindow(QMainWindow):
         is_online = data.get('is_online', False)
         logger.info(f"收到使用者資訊回傳: ID='{ptt_id}', 暱稱='{nickname}', 在線={is_online}")
 
+        # 快取使用者詳細資訊（用於 tooltip 顯示）
+        self._user_info_cache[ptt_id.lower()] = data
+
         # 更新清單中的資訊 (包含正確大小寫的 ID 與在線狀態)
         found = False
         for i in range(self.contact_list.count()):
@@ -632,6 +888,7 @@ class MainWindow(QMainWindow):
                 break
         if found and self.current_chat_id == ptt_id.lower():
             self._update_chat_header(ptt_id, nickname, is_online)
+            self._update_chat_header_tooltip(ptt_id.lower())
         if not found:
             logger.warning(f"在目前會話清單中找不到對應 ID: {ptt_id}")
 
@@ -674,24 +931,54 @@ class MainWindow(QMainWindow):
             self.new_chat_input.clear() # 完成後自動清空
 
     @Slot(bool, str)
+    def _on_first_time_detected(self):
+        """Worker 偵測到首次登入（無 last_poll_time）"""
+        self._is_first_time_login = True
+
+    def _on_scan_days_selected(self, scan_days):
+        """使用者選擇掃描天數後觸發"""
+        self.scan_requested.emit(scan_days)
+
+    def _on_scan_skipped(self):
+        """使用者跳過首次掃描"""
+        self.skip_scan_requested.emit()
+
+    def _on_scan_complete(self):
+        """掃描完成，切換到聊天畫面"""
+        self.central_stack.setCurrentIndex(1)
+        self.scan_setup_screen.reset()
+        self.load_sessions_from_db()
+        self.message_edit.setFocus()
+
+    def _start_rescan(self):
+        """使用者從主畫面觸發重新掃描"""
+        from PySide6.QtCore import QMetaObject
+        QMetaObject.invokeMethod(self.worker, "stop_polling", Qt.AutoConnection)
+        self.scan_setup_screen.reset()
+        self.central_stack.setCurrentIndex(2)
+
     def on_login_result(self, success, message):
         if success:
-            # 登入成功，解除固定大小並調整為聊天視窗大小 (縮小預設寬度)
+            # 登入成功，解除固定大小並調整為聊天視窗大小
             self.setMinimumSize(800, 600)
-            self.setMaximumSize(16777215, 16777215) # 解除最大值限制
+            self.setMaximumSize(16777215, 16777215)
             self.resize(800, 600)
-            
+
             corrected_id = self.ptt_service.ptt_id
-            self.central_stack.setCurrentIndex(1)
             self.setWindowTitle(f"uPtt - {corrected_id}")
             self.user_id_label.setText(corrected_id)
             self._status_dot.show()
             self.logout_btn.show()
-            
-            # --- 從資料庫載入歷史對話清單 ---
-            self.load_sessions_from_db()
-            
-            self.message_edit.setFocus() # 登入後自動聚焦輸入框
+
+            if getattr(self, '_is_first_time_login', False):
+                # 首次登入：顯示掃描設定畫面
+                self._is_first_time_login = False
+                self.central_stack.setCurrentIndex(2)
+            else:
+                # 回訪使用者：直接進入聊天畫面
+                self.central_stack.setCurrentIndex(1)
+                self.load_sessions_from_db()
+                self.message_edit.setFocus()
         else:
             self.login_screen.show_error(message)
 
@@ -728,6 +1015,10 @@ class MainWindow(QMainWindow):
                 f"font-size: 10px; color: {'#56D364' if is_online else '#484F58'}; background: transparent;"
             )
             self.chat_header_online.show()
+            self.chat_header_online_dot.setStyleSheet(
+                f"background-color: {'#56D364' if is_online else '#484F58'}; border-radius: 5px; border: 2px solid #0D1117;"
+            )
+            self.chat_header_online_dot.show()
 
     def load_sessions_from_db(self):
         """從資料庫載入所有可見的歷史對話。"""
@@ -805,9 +1096,10 @@ class MainWindow(QMainWindow):
         final_w = max(150, min(max_w, 450))
         logger.debug(f"動態調整側邊欄寬度至: {final_w}px (內容最寬: {max_w}px)")
         
-        # 取得目前視窗實際寬度，以精確分配比例
-        current_total_w = self.width()
-        self.splitter.setSizes([final_w, current_total_w - final_w])
+        # 取得 splitter 實際寬度，以精確分配比例
+        current_total_w = self.splitter.width()
+        if current_total_w > 0:
+            self.splitter.setSizes([final_w, current_total_w - final_w])
 
     def add_or_select_contact(self, ptt_id, nickname=""):
         ptt_id_lower = ptt_id.lower()
@@ -887,6 +1179,10 @@ class MainWindow(QMainWindow):
         nick_text = widget.nickname_label.text()
         nickname = nick_text[1:-1] if nick_text.startswith("(") and nick_text.endswith(")") else ""
         self._update_chat_header(widget.ptt_id_display, nickname, widget._is_online)
+        self._update_chat_header_tooltip(widget.ptt_id)
+
+        # 切換聯絡人時立即查詢在線狀態
+        self.priority_online_requested.emit(widget.ptt_id)
 
     def _update_chat_header(self, display_id: str, nickname: str, is_online: Optional[bool] = None):
         """更新聊天標題列的聯絡人資訊。"""
@@ -904,13 +1200,42 @@ class MainWindow(QMainWindow):
                 self.chat_header_online.setStyleSheet(
                     "font-size: 10px; color: #56D364; background: transparent;"
                 )
+                self.chat_header_online_dot.setStyleSheet(
+                    "background-color: #56D364; border-radius: 5px; border: 2px solid #0D1117;"
+                )
             else:
                 self.chat_header_online.setText("● 離線")
                 self.chat_header_online.setStyleSheet(
                     "font-size: 10px; color: #484F58; background: transparent;"
                 )
+                self.chat_header_online_dot.setStyleSheet(
+                    "background-color: #484F58; border-radius: 5px; border: 2px solid #0D1117;"
+                )
+            self.chat_header_online_dot.show()
             self.chat_header_online.show()
         self.chat_header.show()
+
+    def _update_chat_header_tooltip(self, ptt_id_lower: str):
+        """根據快取的使用者資訊更新聊天標題列的 tooltip。"""
+        info = self._user_info_cache.get(ptt_id_lower)
+        if not info:
+            self.chat_header.setToolTip("")
+            return
+        lines = []
+        lines.append(f"ID：{info.get('ptt_id', ptt_id_lower)}")
+        if info.get('nickname'):
+            lines.append(f"暱稱：{info['nickname']}")
+        activity = info.get('activity', '')
+        lines.append(f"動態：{activity if activity else '未知'}")
+        if info.get('login_count'):
+            lines.append(f"登入次數：{info['login_count']}")
+        if info.get('last_login_date'):
+            lines.append(f"最後登入：{info['last_login_date']}")
+        if info.get('legal_post'):
+            lines.append(f"文章數量：{info['legal_post']}")
+        if info.get('money'):
+            lines.append(f"P 幣：{info['money']}")
+        self.chat_header.setToolTip("\n".join(lines))
 
     def _on_scroll_range_changed(self, _min, _max):
         """只在使用者已接近底部時才自動捲動，避免閱讀歷史時被強制拉回。"""
@@ -944,7 +1269,8 @@ class MainWindow(QMainWindow):
                 widget = MailCard(msg.get('subject', ''), msg['text'], msg['time'])
             else:
                 widget = ChatBubble(msg['text'], msg['time'], msg['is_me'],
-                                    reply_info=msg.get('reply_info'))
+                                    reply_info=msg.get('reply_info'),
+                                    send_status=msg.get('send_status'))
                 widget.reply_requested.connect(self.set_reply_to)
             self.messages_layout.addWidget(widget)
         
@@ -1005,6 +1331,7 @@ class MainWindow(QMainWindow):
             'timestamp': now,
             'is_me': True,
             'reply_info': reply_info,
+            'send_status': 'pending',
         })
         self.refresh_chat_display()
         self.message_edit.clear()
@@ -1016,7 +1343,9 @@ class MainWindow(QMainWindow):
                 w.set_last_msg_time(now_str)
                 break
 
-        # 2. 透過訊號觸發 Worker 背景發送 (跨執行緒安全，傳入相同時間戳確保排序一致)
+        # 2. 將發送請求放入 thread-safe 佇列（繞過 Qt 事件佇列，避免被阻塞操作卡住）
+        #    同時 emit signal 作為後備喚醒（worker 閒置時由 slot 觸發 drain）
+        self.worker.enqueue_send(self.current_chat_id, encoded_text, now)
         self.send_requested.emit(self.current_chat_id, encoded_text, now)
 
     @Slot(dict)
@@ -1123,6 +1452,19 @@ class MainWindow(QMainWindow):
 
     @Slot(bool, str)
     def on_send_result(self, success, error_msg):
+        new_status = 'sent' if success else 'failed'
+        # 找到最後一則 pending 狀態的自己訊息並更新
+        updated = False
+        for history in self.chat_histories.values():
+            for msg in reversed(history):
+                if msg.get('is_me') and msg.get('send_status') == 'pending':
+                    msg['send_status'] = new_status
+                    updated = True
+                    break
+            if updated:
+                break
+        if updated:
+            self.refresh_chat_display()
         if not success:
             QMessageBox.warning(self, "發送失敗", f"無法發送訊息: {error_msg}")
 
@@ -1193,6 +1535,7 @@ class MainWindow(QMainWindow):
                     return  # 已在非釘選區頂端
                 was_selected = (self.contact_list.currentItem() == item)
                 data = widget.get_data()
+                self.contact_list.removeItemWidget(item)
                 self.contact_list.takeItem(i)
                 new_item = QListWidgetItem()
                 new_item.setSizeHint(QSize(0, 70))
@@ -1218,8 +1561,9 @@ class MainWindow(QMainWindow):
         for i in range(self.contact_list.count()):
             item = self.contact_list.item(i)
             widget = self.contact_list.itemWidget(item)
-            if widget.ptt_id == ptt_id_lower:
+            if widget and widget.ptt_id == ptt_id_lower:
                 row = self.contact_list.row(item)
+                self.contact_list.removeItemWidget(item)
                 self.contact_list.takeItem(row)
 
                 # 如果正在與此人對話，清空對話顯示
@@ -1261,6 +1605,7 @@ class MainWindow(QMainWindow):
                     return
                 was_selected = (self.contact_list.currentItem() == item)
                 data = widget.get_data()
+                self.contact_list.removeItemWidget(item)
                 self.contact_list.takeItem(i)
 
                 new_item = QListWidgetItem()
@@ -1289,6 +1634,7 @@ class MainWindow(QMainWindow):
             if widget and widget.ptt_id == ptt_id_lower:
                 was_selected = (self.contact_list.currentItem() == item)
                 data = widget.get_data()
+                self.contact_list.removeItemWidget(item)
                 self.contact_list.takeItem(i)
 
                 new_item = QListWidgetItem()
@@ -1379,6 +1725,8 @@ class MainWindow(QMainWindow):
             self.ptt_service = UPttService()
 
             # 3. 清除 UI 狀態
+            self._is_first_time_login = False
+            self.scan_setup_screen.reset()
             self.cancel_reply()
             self.contact_list.clear()
             self.chat_histories.clear()
@@ -1391,7 +1739,7 @@ class MainWindow(QMainWindow):
             self.logout_btn.hide()
             self.chat_header.hide()
             self.setWindowTitle("uPtt")
-            
+
             # 4. 重設視窗為登入大小
             self.setMinimumSize(0, 0)
             self.setMaximumSize(16777215, 16777215)

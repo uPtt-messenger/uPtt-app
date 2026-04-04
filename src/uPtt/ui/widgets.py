@@ -18,7 +18,7 @@ class ChatBubble(QWidget):
     reply_requested = Signal(str, bool)  # (message_text, is_me)
 
     def __init__(self, text: str, time_str: str, is_me: bool = False,
-                 reply_info: dict = None, parent=None):
+                 reply_info: dict = None, send_status: str = None, parent=None):
         super().__init__(parent)
         self.is_me = is_me
         self._text = text
@@ -71,8 +71,24 @@ class ChatBubble(QWidget):
         self.time_label.setStyleSheet("color: #5C6773; font-size: 10px;")
         self.time_label.setAlignment(Qt.AlignBottom)
 
+        # 送出狀態指示標籤（僅自己的��息）
+        self.status_label = QLabel()
+        self.status_label.setAlignment(Qt.AlignBottom)
+        if is_me and send_status:
+            if send_status == 'sent':
+                self.status_label.setText("✓")
+                self.status_label.setStyleSheet("color: #56D364; font-size: 10px;")
+            elif send_status == 'failed':
+                self.status_label.setText("✗")
+                self.status_label.setStyleSheet("color: #C27474; font-size: 10px;")
+            elif send_status == 'pending':
+                self.status_label.setText("⏳")
+                self.status_label.setStyleSheet("color: #5C6773; font-size: 10px;")
+
         if is_me:
             self.main_layout.addStretch()
+            if send_status:
+                self.main_layout.addWidget(self.status_label)
             self.main_layout.addWidget(self.time_label)
             self.main_layout.addWidget(self.bubble_container)
         else:

@@ -91,6 +91,30 @@ def test_on_login_result_failure(mock_qthread, mock_worker, mock_ver_worker, qtb
 @patch('src.uPtt.ui.screens.VersionCheckWorker')
 @patch('src.uPtt.ui.screens.PTTWorker')
 @patch('src.uPtt.ui.screens.QThread')
+def test_first_time_login_shows_scan_screen(mock_qthread, mock_worker, mock_ver_worker, qtbot, ptt_service_mock, db_mock):
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, db_mock)
+        qtbot.addWidget(window)
+        window._is_first_time_login = True
+        window.on_login_result(True, "Login Success")
+        assert window.central_stack.currentIndex() == 2
+
+
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_scan_complete_transitions_to_chat(mock_qthread, mock_worker, mock_ver_worker, qtbot, ptt_service_mock, db_mock):
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, db_mock)
+        qtbot.addWidget(window)
+        window.central_stack.setCurrentIndex(2)
+        window._on_scan_complete()
+        assert window.central_stack.currentIndex() == 1
+
+
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
 def test_main_window_close_chat(mock_qthread, mock_worker, mock_ver_worker, qtbot, ptt_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         window = MainWindow(ptt_service_mock, db_mock)

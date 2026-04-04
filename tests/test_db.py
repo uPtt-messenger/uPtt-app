@@ -155,7 +155,8 @@ def test_error_handling(db_manager, monkeypatch):
     db_manager.upsert_session("user", "contact")
     db_manager.hide_session("user", "contact")
     assert db_manager.get_all_sessions("user") == []
-    assert db_manager.save_message("user", "session", "s", "r", "c", datetime.now(), True) is False
+    with pytest.raises(sqlite3.Error):
+        db_manager.save_message("user", "session", "s", "r", "c", datetime.now(), True)
     assert db_manager.get_messages("user", "session") == []
     db_manager.mark_as_read("user", "session")
     db_manager.set_config("k", "v")

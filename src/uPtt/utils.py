@@ -54,6 +54,7 @@ def gen_random_string(length=10):
 
 _REPLY_RE = re.compile(r'^\[re:@([^\|\]]+)\|([^\]]*)\]\n(.*)', re.DOTALL)
 _REPLY_PREVIEW_MAX = 80
+_ANSI_RE = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
 
 
 def encode_reply(sender_id: str, preview: str, actual_msg: str) -> str:
@@ -68,6 +69,11 @@ def decode_reply(content: str):
     if m:
         return {'sender': m.group(1), 'preview': m.group(2)}, m.group(3)
     return None, content
+
+
+def strip_ansi(text: str) -> str:
+    """移除 ANSI 跳脫序列（PTT 色碼）。"""
+    return _ANSI_RE.sub('', text)
 
 
 def msg_to_mail(app_name, ptt_id, msg, timestamp=None):
@@ -98,7 +104,7 @@ def parse_embedded_timestamp(content: str, division_end: int):
     if ts_end < 0:
         return None
     try:
-        return _dt.fromisoformat(content[ts_start + len(prefix):ts_end])
+        return _dt.fromisoformat(content[ts_start + len(prefix):ts_end].strip())
     except (ValueError, TypeError):
         return None
 

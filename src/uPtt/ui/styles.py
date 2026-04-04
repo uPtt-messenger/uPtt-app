@@ -100,7 +100,7 @@ QPushButton:disabled {
     background-color: #161B22;
     border-right: 1px solid #21262D;
     min-width: 160px;
-    max-width: 300px;
+    max-width: 450px;
 }
 
 #user-profile {

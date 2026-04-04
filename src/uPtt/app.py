@@ -43,6 +43,9 @@ def setup_logging(debug_mode: bool):
         root_logger.addHandler(file_handler)
         logging.info("已啟用除錯模式，日誌將同步紀錄至 uptt_debug.log")
 
+    # 靜音 PyPtt 的 Python logging 輸出，避免 root logger 攔截
+    logging.getLogger("PyPtt").setLevel(logging.WARNING)
+
     logger = logging.getLogger("uPtt")
     logger.info(f"uPtt 日誌系統初始化完成 (錯誤日誌: {error_log_path})")
 

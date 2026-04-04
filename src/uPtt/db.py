@@ -284,7 +284,7 @@ class DatabaseManager:
                 return True
         except sqlite3.Error as e:
             logger.error(f"儲存訊息失敗：{e}")
-            return False
+            raise
 
     def get_messages(self, account_id: str, session_id: str, limit: int = 50) -> List[Dict[str, Any]]:
         """取得特定帳號與特定對象的歷史訊息。"""

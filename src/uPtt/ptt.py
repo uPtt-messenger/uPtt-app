@@ -11,8 +11,11 @@ class UPttService:
 
     def __init__(self):
         self.service: PyPtt.Service = PyPtt.Service(
-            {'log_level': PyPtt.log.SILENT}
+            pyptt_init_config={'log_level': PyPtt.log.SILENT},
         )
+        # PyPtt.log.init() 會將 logger level 重設為 NOTSET，
+        # 導致 root logger 的 INFO 級別被繼承。必須在 Service 建立後再壓制。
+        logging.getLogger("PyPtt").setLevel(logging.WARNING)
         self.ptt_id: Optional[str] = None
         self.ptt_pw: Optional[str] = None
         self.max_retry = 3
@@ -68,7 +71,10 @@ class UPttService:
         for retry_time in range(max_retry):
             new_service = None
             try:
-                new_service = PyPtt.Service({'log_level': PyPtt.log.SILENT})
+                new_service = PyPtt.Service(
+                    pyptt_init_config={'log_level': PyPtt.log.SILENT},
+                )
+                logging.getLogger("PyPtt").setLevel(logging.WARNING)
                 new_service.call('login', {
                     'ptt_id': self.ptt_id,
                     'ptt_pw': self.ptt_pw,
@@ -187,6 +193,12 @@ class UPttService:
             'ptt_id': true_id,
             'nickname': nickname,
             'is_online': is_online,
+            'activity': activity,
+            'login_count': user_info.get('login_count', ''),
+            'last_login_date': user_info.get('last_login_date', ''),
+            'legal_post': user_info.get('legal_post', ''),
+            'illegal_post': user_info.get('illegal_post', ''),
+            'money': user_info.get('money', ''),
         }
 
     @staticmethod
