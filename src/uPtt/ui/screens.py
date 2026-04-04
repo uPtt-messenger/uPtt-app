@@ -432,11 +432,9 @@ class MainWindow(QMainWindow):
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setContentsMargins(0, 0, 0, 0)
         
-        # 自動捲動到底部 (監聽捲動範圍變化)
+        # 自動捲動到底部 (僅在使用者已接近底部時才觸發，避免閱讀歷史時被強制拉回)
         self.scroll_area.verticalScrollBar().rangeChanged.connect(
-            lambda: self.scroll_area.verticalScrollBar().setValue(
-                self.scroll_area.verticalScrollBar().maximum()
-            )
+            self._on_scroll_range_changed
         )
         
         self.messages_widget = QWidget()
@@ -625,7 +623,7 @@ class MainWindow(QMainWindow):
         for i in range(self.contact_list.count()):
             item = self.contact_list.item(i)
             widget = self.contact_list.itemWidget(item)
-            if widget.ptt_id == ptt_id.lower():
+            if widget and widget.ptt_id == ptt_id.lower():
                 widget.update_info(ptt_id, nickname)
                 widget.set_online(is_online)
                 logger.debug(f"成功更新介面清單項目: {ptt_id}")
@@ -650,7 +648,7 @@ class MainWindow(QMainWindow):
             for i in range(self.contact_list.count()):
                 item = self.contact_list.item(i)
                 widget = self.contact_list.itemWidget(item)
-                if widget.ptt_id == ptt_id_lower:
+                if widget and widget.ptt_id == ptt_id_lower:
                     # 如果目前正在與此無效 ID 對話，清空對話區
                     if self.current_chat_id == ptt_id_lower:
                         self.current_chat_id = None
@@ -819,7 +817,7 @@ class MainWindow(QMainWindow):
         for i in range(self.contact_list.count()):
             item = self.contact_list.item(i)
             widget = self.contact_list.itemWidget(item)
-            if widget.ptt_id == ptt_id_lower:
+            if widget and widget.ptt_id == ptt_id_lower:
                 # 即使已存在，也更新其顯示文字 (避免使用者輸入了不同的大小寫但沒反應)
                 if widget.ptt_id_display != ptt_id:
                     widget.update_info(ptt_id, nickname)
@@ -913,6 +911,12 @@ class MainWindow(QMainWindow):
                 )
             self.chat_header_online.show()
         self.chat_header.show()
+
+    def _on_scroll_range_changed(self, _min, _max):
+        """只在使用者已接近底部時才自動捲動，避免閱讀歷史時被強制拉回。"""
+        sb = self.scroll_area.verticalScrollBar()
+        if _max - sb.value() <= 50:
+            sb.setValue(_max)
 
     def refresh_chat_display(self):
         """重新渲染右側訊息區域，並根據時間戳記排序"""
@@ -1036,9 +1040,31 @@ class MainWindow(QMainWindow):
             self.chat_histories[sender] = []
             self.unread_counts[sender] = 0
             # 如果是新聯絡人，新增到清單 (帶入原始大小寫 ID 與 暱稱)
-            # add_or_select_contact 內部會呼叫 on_contact_selected，
-            # 後者已從 DB 載入訊息並呼叫 refresh_chat_display，不需再 append。
             self.add_or_select_contact(sender_id_display, nickname)
+
+            # add_or_select_contact 內部的 on_contact_selected 會從 DB 載入歷史並覆寫 chat_histories，
+            # 但觸發此訊號的那條訊息可能已在 DB 中（worker 先寫 DB 再 emit），
+            # 所以需要去重後 append，確保當前 session 能看到。
+            reply_info, actual_text = decode_reply(data['text'])
+            is_me = data.get('is_me', False)
+            msg_ts = data.get('timestamp', datetime.now())
+            is_dup = any(
+                m.get('timestamp') == msg_ts and m.get('text') == actual_text and m.get('is_me', False) == is_me
+                for m in self.chat_histories.get(sender, [])
+            )
+            if not is_dup:
+                self.chat_histories.setdefault(sender, []).append({
+                    'text': actual_text,
+                    'time': data['time'],
+                    'timestamp': msg_ts,
+                    'is_me': is_me,
+                    'mail_type': data.get('mail_type', 'uptt'),
+                    'subject': data.get('subject', ''),
+                    'reply_info': reply_info,
+                })
+                if self.current_chat_id == sender:
+                    self.refresh_chat_display()
+
             self._move_contact_to_top(sender)
         else:
             # 如果已存在，更新暱稱、ID 與最後訊息時間
@@ -1087,9 +1113,10 @@ class MainWindow(QMainWindow):
 
         # 桌面通知 (僅限收到的訊息，排除自己從其他終端發出的)
         if not self.isActiveWindow() and not data.get('is_me', False):
+            _, notify_text = decode_reply(data['text'])
             self.tray_icon.showMessage(
                 f"新訊息: {sender_id_display}",
-                data['text'][:50],
+                notify_text[:50],
                 QSystemTrayIcon.Information,
                 3000
             )
@@ -1223,7 +1250,7 @@ class MainWindow(QMainWindow):
 
     def _move_to_pinned_area(self, ptt_id_lower: str):
         """將項目移至釘選區末尾並標記為釘選。"""
-        insert_pos = len(self.pinned_ids) - 1  # 已加入 pinned_ids，所以減 1
+        insert_pos = self.contact_list._pinned_count()  # 以視覺列表為準
 
         for i in range(self.contact_list.count()):
             item = self.contact_list.item(i)
@@ -1254,7 +1281,7 @@ class MainWindow(QMainWindow):
 
     def _move_pinned_to_unpinned_area(self, ptt_id_lower: str):
         """將取消釘選的項目移至非釘選區頂端。"""
-        insert_pos = len(self.pinned_ids)  # 已從 pinned_ids 移除
+        insert_pos = self.contact_list._pinned_count() - 1  # 以視覺列表為準，扣除即將取消的項目
 
         for i in range(self.contact_list.count()):
             item = self.contact_list.item(i)
@@ -1333,26 +1360,26 @@ class MainWindow(QMainWindow):
         try:
             # 1. 停止目前的 Worker 與執行緒
             if hasattr(self, 'worker'):
-                # 停止輪詢與連線
                 from PySide6.QtCore import QMetaObject
-                QMetaObject.invokeMethod(self.worker, "stop", Qt.AutoConnection)
-            
+                QMetaObject.invokeMethod(self.worker, "stop", Qt.QueuedConnection)
+
             if hasattr(self, 'ptt_thread') and self.ptt_thread.isRunning():
                 self.ptt_thread.quit()
-                if not self.ptt_thread.wait(2000):
+                if not self.ptt_thread.wait(3000):
                     self.ptt_thread.terminate()
-                    self.ptt_thread.wait()  # 確保 terminate 完全結束
+                    self.ptt_thread.wait()
 
             # 1.5 停止版本檢查執行緒
             if hasattr(self, '_ver_thread') and self._ver_thread.isRunning():
                 self._ver_thread.quit()
                 self._ver_thread.wait(11000)
 
-            # 2. 徹底重設 PTT 服務實例 (建立全新實例，避免 race condition)
+            # 2. Worker thread 已確認停止，安全關閉 PTT 服務並重建實例
             self.ptt_service.close()
             self.ptt_service = UPttService()
 
             # 3. 清除 UI 狀態
+            self.cancel_reply()
             self.contact_list.clear()
             self.chat_histories.clear()
             self.unread_counts.clear()

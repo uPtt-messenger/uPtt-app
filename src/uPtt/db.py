@@ -103,16 +103,23 @@ class DatabaseManager:
                 except sqlite3.OperationalError:
                     pass  # 欄位已存在
 
-                # 遷移：修正水球時間戳（舊版未補正年份，導致未來日期）
+                # 遷移：修正水球時間戳（舊版未補正年份，導致未來日期）—— 只執行一次
                 try:
-                    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    cursor.execute("""
-                        UPDATE messages SET timestamp = datetime(timestamp, '-1 year')
-                        WHERE mail_type = 'waterball' AND timestamp > ?
-                    """, (now_str,))
-                    fixed = cursor.rowcount
-                    if fixed:
-                        logger.info(f"已修正 {fixed} 筆水球時間戳")
+                    already_fixed = cursor.execute(
+                        "SELECT value FROM settings WHERE key = 'migration_waterball_ts_v1'"
+                    ).fetchone()
+                    if not already_fixed:
+                        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        cursor.execute("""
+                            UPDATE messages SET timestamp = datetime(timestamp, '-1 year')
+                            WHERE mail_type = 'waterball' AND timestamp > ?
+                        """, (now_str,))
+                        fixed = cursor.rowcount
+                        if fixed:
+                            logger.info(f"已修正 {fixed} 筆水球時間戳")
+                        cursor.execute(
+                            "INSERT OR REPLACE INTO settings (key, value) VALUES ('migration_waterball_ts_v1', '1')"
+                        )
                 except sqlite3.OperationalError:
                     pass
 
@@ -155,7 +162,7 @@ class DatabaseManager:
                     INSERT INTO sessions (account_id, id, display_id, nickname, is_visible)
                     VALUES (?, ?, ?, ?, ?)
                     ON CONFLICT(account_id, id) DO UPDATE SET
-                        display_id = CASE WHEN excluded.display_id != lower(excluded.display_id) THEN excluded.display_id ELSE sessions.display_id END,
+                        display_id = CASE WHEN excluded.display_id != lower(excluded.display_id) THEN excluded.display_id WHEN sessions.display_id = lower(sessions.display_id) THEN excluded.display_id ELSE sessions.display_id END,
                         nickname = CASE WHEN excluded.nickname != '' THEN excluded.nickname ELSE sessions.nickname END,
                         is_visible = CASE WHEN ? THEN 1 ELSE sessions.is_visible END
                 """, (acc_id_lower, contact_id_lower, display_id, nickname, 1 if set_visible else 0, 1 if set_visible else 0))
@@ -324,6 +331,6 @@ class DatabaseManager:
             with self._get_connection() as conn:
                 row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
                 return json.loads(row['value']) if row else default
-        except sqlite3.Error as e:
+        except (sqlite3.Error, json.JSONDecodeError, ValueError) as e:
             logger.error(f"讀取設定失敗 (key={key})：{e}")
             return default

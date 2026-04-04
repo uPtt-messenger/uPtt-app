@@ -140,7 +140,8 @@ def test_poll_new_mails_uses_embedded_timestamp(qtbot, worker, ptt_service_mock,
 
     # 驗證 save_message 使用的是嵌入的發送端時間戳，而非 PTT 信件時間 10:00:00
     save_call = db_mock.save_message.call_args
-    assert save_call.kwargs.get('timestamp') or save_call[1].get('timestamp') or save_call[0][5] == embedded_time
+    actual_ts = save_call.kwargs.get('timestamp')
+    assert actual_ts == embedded_time
     assert blocker.args[0]['timestamp'] == embedded_time
 
 def test_poll_new_mails_stop_time(worker, ptt_service_mock):

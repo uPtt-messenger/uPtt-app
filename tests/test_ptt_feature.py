@@ -50,7 +50,7 @@ def test_get_user_info_not_found():
     service.ptt_pw = "test_pw"
     
     # Simulate NoSuchUser exception from PyPtt
-    with patch.object(service, 'call', side_effect=Exception("NoSuchUser: non_existent")):
+    with patch.object(service, 'call', side_effect=PyPtt.NoSuchUser("non_existent")):
         with pytest.raises(ValueError, match="查無此人"):
             service.get_user_info("non_existent")
 

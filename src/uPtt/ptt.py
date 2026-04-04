@@ -1,4 +1,5 @@
 import logging
+import threading
 import time
 import PyPtt
 from typing import Any, Dict, Optional
@@ -65,27 +66,39 @@ class UPttService:
 
         max_retry = 3
         for retry_time in range(max_retry):
+            new_service = None
             try:
-                self.service = PyPtt.Service({'log_level': PyPtt.log.SILENT})
-                self.service.call('login', {
+                new_service = PyPtt.Service({'log_level': PyPtt.log.SILENT})
+                new_service.call('login', {
                     'ptt_id': self.ptt_id,
                     'ptt_pw': self.ptt_pw,
-                    'kick_other_session': True if retry_time > 0 else False,
+                    'kick_other_session': retry_time > 0,
                 })
+                # Login succeeded — close old service, swap in new one
+                old_service = self.service
+                self.service = new_service
+                try:
+                    old_service.close()
+                except Exception:
+                    pass
                 self._connected = True
                 logger.info(f"重連成功 (第 {retry_time + 1} 次嘗試)")
                 return True
             except PyPtt.LoginTooOften:
                 logger.warning("登入太頻繁，放棄本次重連，由上層延遲重試")
+                self._close_service_quietly(new_service)
                 return False
             except PyPtt.LoginError:
                 logger.warning(f"登入失敗，等待 3 秒後再試 ({retry_time + 1}/{max_retry})")
+                self._close_service_quietly(new_service)
                 time.sleep(3)
             except PyPtt.WrongIDorPassword:
                 logger.error("帳號密碼錯誤，放棄重連")
+                self._close_service_quietly(new_service)
                 return False
             except Exception as e:
                 logger.error(f"重連失敗 ({retry_time + 1}/{max_retry}): {e}")
+                self._close_service_quietly(new_service)
                 time.sleep(self.retry_delay)
 
         logger.error(f"重連已達最大嘗試次數 ({max_retry})，放棄重連")
@@ -123,7 +136,7 @@ class UPttService:
                 if not self.reconnect():
                     raise PyPtt.ConnectionClosed()
                 # reconnect 成功，下次迴圈重試原始 API 呼叫
-        return None
+        raise PyPtt.ConnectionClosed()
 
     def get_user_info(self, ptt_id: str) -> Dict[str, str]:
         """
@@ -145,11 +158,10 @@ class UPttService:
         """
         try:
             user_info = self.call('get_user', {'user_id': ptt_id})
-        except Exception as e:
-            # 判斷是否為「查無此人」的錯誤
-            if "NoSuchUser" in str(e):
-                raise ValueError(f"查無此人: {ptt_id}")
-            raise e
+        except PyPtt.NoSuchUser:
+            raise ValueError(f"查無此人: {ptt_id}")
+        except Exception:
+            raise
 
         if not user_info or 'ptt_id' not in user_info:
             raise ValueError(f"無法取得使用者資訊: {ptt_id}")
@@ -177,11 +189,28 @@ class UPttService:
             'is_online': is_online,
         }
 
+    @staticmethod
+    def _close_service_quietly(service):
+        """安全關閉 service 實例，忽略所有例外。"""
+        if service is None:
+            return
+        try:
+            service.close()
+        except Exception:
+            pass
+
     def close(self):
         """關閉連線"""
         self._connected = False
         try:
             self.call('logout')
-            self.service.close()
+        except Exception as e:
+            logger.error(f"登出時發生錯誤: {e}")
+        try:
+            t = threading.Thread(target=self.service.close, daemon=True)
+            t.start()
+            t.join(timeout=5)
+            if t.is_alive():
+                logger.warning("service.close() 超時，放棄等待")
         except Exception as e:
             logger.error(f"關閉連線時發生錯誤: {e}")

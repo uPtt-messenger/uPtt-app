@@ -271,6 +271,12 @@ class PTTWorker(QObject):
                                 'mail_type': 'uptt',
                                 'subject': ''
                             })
+                    else:
+                        logger.error(
+                            f"uPtt mail at index {mail_idx} has malformed content "
+                            f"(div_pos={div_pos}, end={end}); skipping deletion to prevent data loss."
+                        )
+                        continue
 
                 # uPtt 訊息處理完即刪除（含 backup 副本）
                 self.ptt.call('del_mail', {'index': mail_idx})
