@@ -1810,8 +1810,8 @@ class MainWindow(QMainWindow):
     def _handle_disconnected(self, reason):
         """處理非預期斷線（如信箱已滿導致 PyPtt 自動登出）"""
         logger.warning(f"非預期斷線: {reason}")
-        self._do_logout()
         QMessageBox.warning(self, "連線中斷", reason)
+        self._do_logout()
 
     def _do_logout(self):
         """執行登出清理流程（停止 Worker、重設 PTT、清除 UI、切回登入畫面）"""
