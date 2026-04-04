@@ -30,6 +30,7 @@ class PTTWorker(QObject):
     first_time_detected = Signal()          # 首次登入（無 last_poll_time）
     scan_progress = Signal(int, int, str)   # (已掃描數, 總數, 信件標題)
     scan_complete = Signal()                # 首次掃描完成
+    disconnected = Signal(str)  # 非預期斷線（如信箱已滿導致 PyPtt 自動登出）
 
     def __init__(self, ptt_service: UPttService, db):
         super().__init__()
@@ -459,6 +460,15 @@ class PTTWorker(QObject):
                 self.connection_lost.emit()
                 self.status_updated.emit("連線中斷，正在嘗試重新連線...")
             QTimer.singleShot(5000, self._deferred_reconnect)
+        except PyPtt.MailboxFull:
+            # PyPtt 的 del_mail() 偵測到信箱已滿時，會先呼叫 api.logout() 再拋出此例外。
+            # 此時 PTT 連線已中斷，必須停止輪詢並通知 UI 返回登入畫面。
+            logger.error("信箱已滿，PyPtt 已自動登出。停止輪詢。")
+            if self.polling_timer:
+                self.polling_timer.stop()
+            self.disconnected.emit(
+                "郵件信箱已滿，PTT 已自動登出。\n請至 PTT 清理信箱後重新登入。"
+            )
         except Exception as e:
             logger.exception(f"輪詢信件發生錯誤: {e}")
             if not self.ptt.is_connected and self._was_connected:

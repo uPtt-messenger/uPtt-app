@@ -554,6 +554,7 @@ class MainWindow(QMainWindow):
         self.worker.new_message_received.connect(self.on_new_message)
         self.worker.send_result.connect(self.on_send_result)
         self.worker.status_updated.connect(lambda s: logger.info(f"Worker Status: {s}"))
+        self.worker.disconnected.connect(self._handle_disconnected)
         self.worker.login_result.connect(self.on_login_result)
         self.worker.connection_lost.connect(self.on_connection_lost)
         self.worker.connection_restored.connect(self.on_connection_restored)
@@ -1796,14 +1797,24 @@ class MainWindow(QMainWindow):
             self._ver_thread.wait(11000)
 
     def handle_logout(self):
-        """登出並回到登入畫面"""
+        """登出並回到登入畫面（需使用者確認）"""
         confirm = QMessageBox.question(
             self, "確認登出", "確定要登出目前的帳號嗎？",
             QMessageBox.Yes | QMessageBox.No
         )
         if confirm == QMessageBox.No:
             return
+        self._do_logout()
 
+    @Slot(str)
+    def _handle_disconnected(self, reason):
+        """處理非預期斷線（如信箱已滿導致 PyPtt 自動登出）"""
+        logger.warning(f"非預期斷線: {reason}")
+        self._do_logout()
+        QMessageBox.warning(self, "連線中斷", reason)
+
+    def _do_logout(self):
+        """執行登出清理流程（停止 Worker、重設 PTT、清除 UI、切回登入畫面）"""
         logger.info("執行登出程序...")
         try:
             self._stop_all_threads()
@@ -1832,12 +1843,14 @@ class MainWindow(QMainWindow):
             self.setMaximumSize(16777215, 16777215)
             self.setFixedSize(440, 480)
 
+            # 5. 切換畫面
             self.central_stack.setCurrentIndex(0)
             self.login_screen.login_btn.setEnabled(True)
             self.login_screen.login_btn.setText("連線至 PTT")
             self.login_screen.password_input.clear()
             self.login_screen.username_input.setFocus()
 
+            # 6. 重新初始化新的 Worker 與執行緒 (準備下次登入)
             self.init_worker()
             logger.info("登出成功，已回到登入視窗。")
 
