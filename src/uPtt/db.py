@@ -93,6 +93,12 @@ class DatabaseManager:
                 except sqlite3.OperationalError:
                     pass  # 欄位已存在
 
+                # 遷移：為舊資料庫新增封存欄位
+                try:
+                    cursor.execute("ALTER TABLE sessions ADD COLUMN is_archived BOOLEAN DEFAULT 0")
+                except sqlite3.OperationalError:
+                    pass  # 欄位已存在
+
                 # 遷移：為舊資料庫新增信件類型與主旨欄位
                 try:
                     cursor.execute("ALTER TABLE messages ADD COLUMN mail_type TEXT DEFAULT 'uptt'")
@@ -179,6 +185,29 @@ class DatabaseManager:
                 conn.commit()
         except sqlite3.Error as e:
             logger.error(f"隱藏會話失敗：{e}")
+
+    def archive_session(self, account_id: str, session_id: str):
+        """將會話標記為封存（使用者不存在），禁止再輸入訊息或更新在線狀態。"""
+        try:
+            with self._get_connection() as conn:
+                conn.execute("UPDATE sessions SET is_archived = 1 WHERE account_id = ? AND id = ?",
+                             (account_id.lower(), session_id.lower()))
+                conn.commit()
+        except sqlite3.Error as e:
+            logger.error(f"封存會話失敗：{e}")
+
+    def is_session_archived(self, account_id: str, session_id: str) -> bool:
+        """檢查會話是否已被封存。"""
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT is_archived FROM sessions WHERE account_id = ? AND id = ?",
+                    (account_id.lower(), session_id.lower())
+                ).fetchone()
+                return bool(row and row['is_archived'])
+        except sqlite3.Error as e:
+            logger.error(f"查詢封存狀態失敗：{e}")
+            return False
 
     def get_all_sessions(self, account_id: str) -> List[Dict[str, Any]]:
         """取得特定帳號的所有「可見」會話清單。釘選項目排在最前面。"""

@@ -21,6 +21,7 @@ class UPttService:
         self.max_retry = 3
         self.retry_delay = 2  # 秒
         self._connected = False
+        self._closing = False
 
     def login(self, ptt_id: str, ptt_pw: str, force: bool = True) -> bool:
         """
@@ -39,6 +40,7 @@ class UPttService:
             self.ptt_id = ptt_id
             self.ptt_pw = ptt_pw
             self._connected = True
+            self._closing = False
 
             # 登入成功後，嘗試取得正確的大小寫 ID
             try:
@@ -213,6 +215,9 @@ class UPttService:
 
     def close(self):
         """關閉連線"""
+        if self._closing:
+            return
+        self._closing = True
         self._connected = False
         try:
             self.call('logout')

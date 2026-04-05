@@ -425,6 +425,7 @@ class MainWindow(QMainWindow):
     priority_online_requested = Signal(str)
     scan_requested = Signal(int)  # scan_days
     skip_scan_requested = Signal()
+    set_active_chat_requested = Signal(str)
 
     def __init__(self, ptt_service: UPttService, db):
         super().__init__()
@@ -474,6 +475,7 @@ class MainWindow(QMainWindow):
             self.send_requested.disconnect()
             self.user_info_requested.disconnect()
             self.priority_online_requested.disconnect()
+            self.set_active_chat_requested.disconnect()
             self.scan_requested.disconnect()
             self.skip_scan_requested.disconnect()
 
@@ -489,6 +491,7 @@ class MainWindow(QMainWindow):
                 self.worker.connection_lost,
                 self.worker.connection_restored,
                 self.worker.online_status_updated,
+                self.worker.session_archived,
                 self.worker.first_time_detected,
                 self.worker.scan_progress,
                 self.worker.scan_complete,
@@ -506,6 +509,7 @@ class MainWindow(QMainWindow):
         self.send_requested.connect(self.worker.send_message)
         self.user_info_requested.connect(self.worker.get_user_info)
         self.priority_online_requested.connect(self.worker.check_online_priority)
+        self.set_active_chat_requested.connect(self.worker.set_active_chat)
         self.scan_requested.connect(self.worker.do_initial_scan)
         self.skip_scan_requested.connect(self.worker.do_skip_scan)
         self._worker_signals_connected = True
@@ -527,6 +531,7 @@ class MainWindow(QMainWindow):
         self.worker.connection_lost.connect(self.on_connection_lost)
         self.worker.connection_restored.connect(self.on_connection_restored)
         self.worker.online_status_updated.connect(self.on_online_status_updated)
+        self.worker.session_archived.connect(self.on_session_archived)
         self.worker.first_time_detected.connect(self._on_first_time_detected)
         self.worker.scan_progress.connect(self.scan_setup_screen.update_progress)
         self.worker.scan_complete.connect(self._on_scan_complete)
@@ -895,28 +900,35 @@ class MainWindow(QMainWindow):
     @Slot(str, str)
     def on_user_info_error(self, ptt_id, message):
         logger.warning(f"使用者資訊獲取失敗: {ptt_id} -> {message}")
-        
+
         # 彈出警告
         QMessageBox.warning(self, "查詢失敗", f"無法取得使用者 '{ptt_id}' 的資訊：\n{message}")
 
-        # 如果搜尋不到 (NoSuchUser)，則將其從清單中移除
-        if "查無此人" in message:
-            ptt_id_lower = ptt_id.lower()
-            for i in range(self.contact_list.count()):
-                item = self.contact_list.item(i)
-                widget = self.contact_list.itemWidget(item)
-                if widget and widget.ptt_id == ptt_id_lower:
-                    # 如果目前正在與此無效 ID 對話，清空對話區
-                    if self.current_chat_id == ptt_id_lower:
-                        self.current_chat_id = None
-                        self.refresh_chat_display()
-                        self.setWindowTitle(f"uPtt - {self.ptt_service.ptt_id}")
+    @Slot(str)
+    def on_session_archived(self, ptt_id_lower: str):
+        """使用者不存在，將會話封存：禁止輸入、不再更新在線狀態。"""
+        logger.info(f"會話封存: {ptt_id_lower}")
 
-                    # 移除該項目
-                    row = self.contact_list.row(item)
-                    self.contact_list.takeItem(row)
-                    logger.info(f"已從清單中移除無效 ID: {ptt_id}")
-                    break
+        # 更新聯絡人列表項目的外觀
+        for i in range(self.contact_list.count()):
+            item = self.contact_list.item(i)
+            widget = self.contact_list.itemWidget(item)
+            if widget and widget.ptt_id == ptt_id_lower:
+                widget.set_archived(True)
+                break
+
+        # 如果目前正在與此 ID 對話，禁用輸入區
+        if self.current_chat_id == ptt_id_lower:
+            self._set_input_archived(True)
+
+    def _set_input_archived(self, archived: bool):
+        """設定輸入區的封存狀態。"""
+        if archived:
+            self.message_edit.setEnabled(False)
+            self.message_edit.setPlaceholderText("此使用者已不存在，對話已封存")
+        else:
+            self.message_edit.setEnabled(True)
+            self.message_edit.setPlaceholderText("輸入訊息並按下 Enter 發送...")
 
     def handle_add_chat(self):
         target_id = self.new_chat_input.text().strip()
@@ -930,7 +942,7 @@ class MainWindow(QMainWindow):
             self.add_or_select_contact(target_id)
             self.new_chat_input.clear() # 完成後自動清空
 
-    @Slot(bool, str)
+    @Slot()
     def _on_first_time_detected(self):
         """Worker 偵測到首次登入（無 last_poll_time）"""
         self._is_first_time_login = True
@@ -1043,6 +1055,8 @@ class MainWindow(QMainWindow):
             )
             # 更新顯示大小寫
             widget.update_info(s['display_id'], s['nickname'] or "")
+            if s.get('is_archived'):
+                widget.set_archived(True)
             self.contact_list.addItem(item)
             self.contact_list.setItemWidget(item, widget)
 
@@ -1144,9 +1158,14 @@ class MainWindow(QMainWindow):
 
     def on_contact_selected(self, item):
         widget = self.contact_list.itemWidget(item)
+        if not widget:
+            return
         self.current_chat_id = widget.ptt_id
         current_acc = self.ptt_service.ptt_id
-        
+
+        # 通知 worker 開始高頻在線輪詢
+        self.set_active_chat_requested.emit(self.current_chat_id)
+
         # 標記已讀並重置計數
         self.db.mark_as_read(current_acc, self.current_chat_id)
         self.unread_counts[self.current_chat_id] = 0
@@ -1172,7 +1191,13 @@ class MainWindow(QMainWindow):
         # 切換聯絡人時清除回覆狀態
         self.cancel_reply()
         self.refresh_chat_display()
-        self.message_edit.setFocus()
+
+        # 檢查是否為封存會話
+        is_archived = getattr(widget, '_is_archived', False)
+        self._set_input_archived(is_archived)
+
+        if not is_archived:
+            self.message_edit.setFocus()
 
         # 每次切換聯絡人時更新視窗標題與聊天標題列
         self.setWindowTitle(f"uPtt - 與 {widget.ptt_id_display} 對話中")
@@ -1181,8 +1206,9 @@ class MainWindow(QMainWindow):
         self._update_chat_header(widget.ptt_id_display, nickname, widget._is_online)
         self._update_chat_header_tooltip(widget.ptt_id)
 
-        # 切換聯絡人時立即查詢在線狀態
-        self.priority_online_requested.emit(widget.ptt_id)
+        # 封存會話不需要查詢在線狀態
+        if not is_archived:
+            self.priority_online_requested.emit(widget.ptt_id)
 
     def _update_chat_header(self, display_id: str, nickname: str, is_online: Optional[bool] = None):
         """更新聊天標題列的聯絡人資訊。"""
@@ -1332,6 +1358,7 @@ class MainWindow(QMainWindow):
             'is_me': True,
             'reply_info': reply_info,
             'send_status': 'pending',
+            'send_target': self.current_chat_id,
         })
         self.refresh_chat_display()
         self.message_edit.clear()
@@ -1342,6 +1369,8 @@ class MainWindow(QMainWindow):
             if w and w.ptt_id == self.current_chat_id:
                 w.set_last_msg_time(now_str)
                 break
+
+        self._last_send_target = self.current_chat_id
 
         # 2. 將發送請求放入 thread-safe 佇列（繞過 Qt 事件佇列，避免被阻塞操作卡住）
         #    同時 emit signal 作為後備喚醒（worker 閒置時由 slot 觸發 drain）
@@ -1377,8 +1406,10 @@ class MainWindow(QMainWindow):
             reply_info, actual_text = decode_reply(data['text'])
             is_me = data.get('is_me', False)
             msg_ts = data.get('timestamp', datetime.now())
+            msg_ts_sec = msg_ts.replace(microsecond=0) if msg_ts else None
             is_dup = any(
-                m.get('timestamp') == msg_ts and m.get('text') == actual_text and m.get('is_me', False) == is_me
+                (m.get('timestamp', datetime.min).replace(microsecond=0) if m.get('timestamp') else None) == msg_ts_sec
+                and m.get('text') == actual_text and m.get('is_me', False) == is_me
                 for m in self.chat_histories.get(sender, [])
             )
             if not is_dup:
@@ -1401,7 +1432,7 @@ class MainWindow(QMainWindow):
             for i in range(self.contact_list.count()):
                 item = self.contact_list.item(i)
                 widget = self.contact_list.itemWidget(item)
-                if widget.ptt_id == sender:
+                if widget and widget.ptt_id == sender:
                     widget.update_info(sender_id_display, nickname)
                     widget.set_last_msg_time(now_time)
                     break
@@ -1411,8 +1442,10 @@ class MainWindow(QMainWindow):
             msg_ts = data.get('timestamp', datetime.now())
 
             # 去重：避免 on_contact_selected 從 DB 載入後，signal 又重複 append
+            msg_ts_sec = msg_ts.replace(microsecond=0) if msg_ts else None
             is_dup = any(
-                m.get('timestamp') == msg_ts and m.get('text') == actual_text and m.get('is_me', False) == is_me
+                (m.get('timestamp', datetime.min).replace(microsecond=0) if m.get('timestamp') else None) == msg_ts_sec
+                and m.get('text') == actual_text and m.get('is_me', False) == is_me
                 for m in self.chat_histories[sender]
             )
             if not is_dup:
@@ -1453,16 +1486,15 @@ class MainWindow(QMainWindow):
     @Slot(bool, str)
     def on_send_result(self, success, error_msg):
         new_status = 'sent' if success else 'failed'
-        # 找到最後一則 pending 狀態的自己訊息並更新
+        # 只搜尋上次發送目標的 session，避免跨 session 誤判
+        target = getattr(self, '_last_send_target', None)
         updated = False
-        for history in self.chat_histories.values():
-            for msg in reversed(history):
+        if target and target in self.chat_histories:
+            for msg in reversed(self.chat_histories[target]):
                 if msg.get('is_me') and msg.get('send_status') == 'pending':
                     msg['send_status'] = new_status
                     updated = True
                     break
-            if updated:
-                break
         if updated:
             self.refresh_chat_display()
         if not success:
@@ -1546,6 +1578,8 @@ class MainWindow(QMainWindow):
                     last_msg_time=data.get('last_msg_time', ''),
                 )
                 new_widget.set_online(data.get('is_online', False))
+                if data.get('is_archived'):
+                    new_widget.set_archived(True)
                 self.contact_list.insertItem(pinned_count, new_item)
                 self.contact_list.setItemWidget(new_item, new_widget)
                 unread = self.unread_counts.get(sender, 0)
@@ -1569,6 +1603,7 @@ class MainWindow(QMainWindow):
                 # 如果正在與此人對話，清空對話顯示
                 if self.current_chat_id == ptt_id_lower:
                     self.current_chat_id = None
+                    self.set_active_chat_requested.emit("")
                     self.refresh_chat_display()
                     self.setWindowTitle(f"uPtt - {self.ptt_service.ptt_id}")
                 break
@@ -1618,6 +1653,8 @@ class MainWindow(QMainWindow):
                     last_msg_time=data.get('last_msg_time', ''),
                 )
                 new_widget.set_online(data.get('is_online', False))
+                if data.get('is_archived'):
+                    new_widget.set_archived(True)
                 self.contact_list.insertItem(insert_pos, new_item)
                 self.contact_list.setItemWidget(new_item, new_widget)
                 if was_selected:
@@ -1647,6 +1684,8 @@ class MainWindow(QMainWindow):
                     last_msg_time=data.get('last_msg_time', ''),
                 )
                 new_widget.set_online(data.get('is_online', False))
+                if data.get('is_archived'):
+                    new_widget.set_archived(True)
                 self.contact_list.insertItem(insert_pos, new_item)
                 self.contact_list.setItemWidget(new_item, new_widget)
                 if was_selected:
@@ -1720,8 +1759,7 @@ class MainWindow(QMainWindow):
                 self._ver_thread.quit()
                 self._ver_thread.wait(11000)
 
-            # 2. Worker thread 已確認停止，安全關閉 PTT 服務並重建實例
-            self.ptt_service.close()
+            # 2. Worker thread 已確認停止，worker.stop() 已呼叫 ptt.close()，直接重建實例
             self.ptt_service = UPttService()
 
             # 3. 清除 UI 狀態

@@ -375,6 +375,7 @@ class ContactItem(QWidget):
         self.is_pinned = is_pinned
         self.unread_count = unread_count
         self._is_online = False
+        self._is_archived = False
 
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setStyleSheet("background: transparent;")
@@ -532,8 +533,28 @@ class ContactItem(QWidget):
             'unread_count': self.unread_count,
             'is_pinned': self.is_pinned,
             'is_online': self._is_online,
+            'is_archived': self._is_archived,
             'last_msg_time': self.time_label.text(),
         }
+
+    def set_archived(self, archived: bool):
+        """標記此聯絡人為封存狀態（使用者已不存在）。"""
+        self._is_archived = archived
+        if archived:
+            self._is_online = False
+            self._update_online_dot_style()
+            self.id_label.setStyleSheet("""
+                font-weight: bold;
+                font-size: 14px;
+                color: #484F58;
+                background: transparent;
+            """)
+            self.nickname_label.setText("(已不存在)")
+            self.nickname_label.setStyleSheet("""
+                font-size: 11px;
+                color: #6E4040;
+                background: transparent;
+            """)
 
     def set_last_msg_time(self, time_str: str):
         self.time_label.setText(time_str)

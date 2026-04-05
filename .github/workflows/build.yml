@@ -264,6 +264,9 @@ jobs:
     needs: [test, security-analysis]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/beta')
     runs-on: windows-latest
+    permissions:
+      contents: write
+      actions: read
     steps:
       - uses: actions/checkout@v4
 
@@ -317,12 +320,13 @@ jobs:
           key: nuitka-windows-${{ runner.arch }}-v1
           restore-keys: nuitka-windows-${{ runner.arch }}-
 
-      - name: Build with Nuitka
+      - name: Build with Nuitka (standalone)
         shell: pwsh
         run: |
           $env:PYTHONPATH = "src"
+          $VERSION = "${{ steps.config.outputs.VERSION }}"
           python -m nuitka `
-            --onefile `
+            --standalone `
             --windows-console-mode=disable `
             --plugin-enable=pyside6 `
             --include-package=PyPtt `
@@ -330,23 +334,39 @@ jobs:
             --include-package=qasync `
             --include-package-data=uPtt.ui.assets `
             --windows-icon-from-ico=src/uPtt/ui/assets/logo_icon.ico `
-            --output-filename=uPtt.exe `
             --output-dir=dist `
             --assume-yes-for-downloads `
             --windows-dependency-tool=pefile `
             --no-pyi-file `
+            --windows-company-name="uPtt" `
+            --windows-product-name="uPtt" `
+            --windows-product-version="$VERSION" `
+            --windows-file-description="uPtt Messenger for PTT" `
             src/run_app.py
+
+      - name: Rename standalone folder
+        shell: pwsh
+        run: |
+          # Nuitka standalone outputs to dist/run_app.dist — rename to dist/uPtt
+          if (Test-Path "dist\run_app.dist") {
+            Rename-Item "dist\run_app.dist" "uPtt"
+          }
+          # Also rename the executable inside
+          if (Test-Path "dist\uPtt\run_app.exe") {
+            Rename-Item "dist\uPtt\run_app.exe" "uPtt.exe"
+          }
 
       - name: Smoke test Windows binary
         shell: pwsh
         run: |
-          if (-not (Test-Path "dist\uPtt.exe")) {
-            Write-Error "ERROR: dist\uPtt.exe not found"
+          if (-not (Test-Path "dist\uPtt\uPtt.exe")) {
+            Write-Error "ERROR: dist\uPtt\uPtt.exe not found"
+            ls dist
             exit 1
           }
-          Write-Host "Smoke testing: dist\uPtt.exe"
+          Write-Host "Smoke testing: dist\uPtt\uPtt.exe"
           $env:QT_QPA_PLATFORM = "offscreen"
-          $proc = Start-Process -FilePath "dist\uPtt.exe" -ArgumentList "--debug" -PassThru
+          $proc = Start-Process -FilePath "dist\uPtt\uPtt.exe" -ArgumentList "--debug" -PassThru
           Start-Sleep -Seconds 10
           if ($proc.HasExited) {
             if ($proc.ExitCode -ne 0) {
@@ -359,18 +379,23 @@ jobs:
             Write-Host "Smoke test passed (binary was still running after 10s)"
           }
 
-      - name: Package for distribution
+      - name: Build installer with Inno Setup
         shell: pwsh
         run: |
-          cd dist
-          if (Test-Path "uPtt.exe") {
-              Compress-Archive -Path "uPtt.exe" -DestinationPath "uPtt-Windows.zip"
-          }
+          $VERSION = "${{ steps.config.outputs.VERSION }}"
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DVERSION=$VERSION scripts\installer.iss
+
+      - name: Package installer for distribution
+        shell: pwsh
+        run: |
+          # The installer exe is at dist/installer/uPtt-Windows-Setup.exe
+          cd dist\installer
+          Compress-Archive -Path "uPtt-Windows-Setup.exe" -DestinationPath "uPtt-Windows.zip"
 
       - name: Create or Update Release
         uses: softprops/action-gh-release@v1
         with:
-          files: dist/uPtt-Windows.zip
+          files: dist/installer/uPtt-Windows.zip
           tag_name: v${{ steps.config.outputs.VERSION }}
           name: ${{ env.RELEASE_TITLE }}
           prerelease: ${{ steps.config.outputs.IS_PRERELEASE }}
