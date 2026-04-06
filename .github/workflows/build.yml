@@ -383,6 +383,13 @@ jobs:
             Write-Host "Smoke test passed (binary was still running after 10s)"
           }
 
+      - name: Download Inno Setup Chinese Traditional language file
+        shell: pwsh
+        run: |
+          $langDir = "C:\Program Files (x86)\Inno Setup 6\Languages"
+          $url = "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/ChineseTraditional.isl"
+          Invoke-WebRequest -Uri $url -OutFile "$langDir\ChineseTraditional.isl"
+
       - name: Build installer with Inno Setup
         shell: pwsh
         run: |
