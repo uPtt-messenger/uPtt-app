@@ -130,12 +130,12 @@ jobs:
 
           if [ "${{ github.ref }}" = "refs/heads/beta" ]; then
             SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-4)
-            VERSION="${VERSION}beta${SHORT_SHA}"
+            DATE_TAG=$(date -u +%Y%m%d)
+            VERSION="${VERSION}-beta.${DATE_TAG}.${SHORT_SHA}"
             IS_PRERELEASE=true
-            RELEASE_TITLE="uPtt Beta v$VERSION"
-          else
-            RELEASE_TITLE="uPtt Official v$VERSION"
           fi
+
+          RELEASE_TITLE="uPtt v${VERSION}"
 
           VERSION_NUMERIC=$(echo "$VERSION" | grep -oE '^[0-9]+(\.[0-9]+)*')
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
