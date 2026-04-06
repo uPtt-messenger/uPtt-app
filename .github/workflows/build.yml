@@ -109,10 +109,44 @@ jobs:
         # 掃描 requirements.txt 中已知有漏洞的套件（供應鏈攻擊防護）
         run: pip-audit -r requirements.txt
 
-  # 測試通過後，針對 main 與 beta 分支執行編譯
-  build-macos:
+  # 統一版本號計算，確保 macOS 與 Windows 使用完全一致的版本
+  prepare-version:
     needs: [test, security-analysis]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/beta')
+    runs-on: ubuntu-latest
+    outputs:
+      VERSION: ${{ steps.config.outputs.VERSION }}
+      VERSION_NUMERIC: ${{ steps.config.outputs.VERSION_NUMERIC }}
+      IS_PRERELEASE: ${{ steps.config.outputs.IS_PRERELEASE }}
+      RELEASE_TITLE: ${{ steps.config.outputs.RELEASE_TITLE }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure Version and Release
+        id: config
+        run: |
+          VERSION=$(grep "__version__ =" src/uPtt/__init__.py | cut -d '"' -f 2)
+          IS_PRERELEASE=false
+
+          if [ "${{ github.ref }}" = "refs/heads/beta" ]; then
+            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-4)
+            VERSION="${VERSION}beta${SHORT_SHA}"
+            IS_PRERELEASE=true
+            RELEASE_TITLE="uPtt Beta v$VERSION"
+          else
+            RELEASE_TITLE="uPtt Official v$VERSION"
+          fi
+
+          VERSION_NUMERIC=$(echo "$VERSION" | grep -oE '^[0-9]+(\.[0-9]+)*')
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "VERSION_NUMERIC=$VERSION_NUMERIC" >> $GITHUB_OUTPUT
+          echo "IS_PRERELEASE=$IS_PRERELEASE" >> $GITHUB_OUTPUT
+          echo "RELEASE_TITLE=$RELEASE_TITLE" >> $GITHUB_OUTPUT
+          echo "Final Version: $VERSION (numeric: $VERSION_NUMERIC, prerelease: $IS_PRERELEASE)"
+
+  # 測試通過後，針對 main 與 beta 分支執行編譯
+  build-macos:
+    needs: [prepare-version]
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -122,32 +156,16 @@ jobs:
         with:
           python-version: '3.12'
           cache: 'pip'
-      
-      # 處理版本號與發佈設定
-      - name: Configure Version and Release
-        id: config
+
+      - name: Patch version in source
         run: |
-          # 取得原始版本號
-          VERSION=$(grep "__version__ =" src/uPtt/__init__.py | cut -d '"' -f 2)
-          IS_PRERELEASE=false
-          
-          if [ "${{ github.ref }}" = "refs/heads/beta" ]; then
-            # Beta 分支：加上 beta 字樣與 Commit SHA 前四碼
-            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-4)
-            NEW_VERSION="${VERSION}beta${SHORT_SHA}"
-            # 使用 Python 跨平台修改版本號
-            python -c "import sys; c = open('src/uPtt/__init__.py').read().replace('__version__ = \"' + sys.argv[1] + '\"', '__version__ = \"' + sys.argv[2] + '\"'); open('src/uPtt/__init__.py', 'w').write(c)" "$VERSION" "$NEW_VERSION"
-            VERSION=$NEW_VERSION
-            IS_PRERELEASE=true
-            echo "RELEASE_TITLE=uPtt Beta v$VERSION" >> $GITHUB_ENV
-          else
-            # Main 分支：正式版
-            echo "RELEASE_TITLE=uPtt Official v$VERSION" >> $GITHUB_ENV
-          fi
-          
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "IS_PRERELEASE=$IS_PRERELEASE" >> $GITHUB_OUTPUT
-          echo "Final Version to build: $VERSION"
+          VERSION="${{ needs.prepare-version.outputs.VERSION }}"
+          python -c "
+          import re, pathlib
+          f = pathlib.Path('src/uPtt/__init__.py')
+          f.write_text(re.sub(r'__version__ = \".*?\"', '__version__ = \"$VERSION\"', f.read_text()))
+          "
+          echo "RELEASE_TITLE=${{ needs.prepare-version.outputs.RELEASE_TITLE }}" >> $GITHUB_ENV
 
       - name: Install Python dependencies
         run: |
@@ -253,16 +271,15 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: dist/uPtt-macOS.zip
-          tag_name: v${{ steps.config.outputs.VERSION }}
+          tag_name: v${{ needs.prepare-version.outputs.VERSION }}
           name: ${{ env.RELEASE_TITLE }}
-          prerelease: ${{ steps.config.outputs.IS_PRERELEASE }}
+          prerelease: ${{ needs.prepare-version.outputs.IS_PRERELEASE }}
           draft: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-windows:
-    needs: [test, security-analysis]
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/beta')
+    needs: [prepare-version]
     runs-on: windows-latest
     permissions:
       contents: write
@@ -276,27 +293,16 @@ jobs:
           python-version: '3.12'
           cache: 'pip'
 
-      # 處理版本號 (使用 PowerShell 讀取，Python 修改)
-      - name: Configure Version and Release
-        id: config
+      - name: Patch version in source
         shell: bash
         run: |
-          VERSION=$(grep "__version__ =" src/uPtt/__init__.py | cut -d '"' -f 2)
-          IS_PRERELEASE=false
-          
-          if [ "${{ github.ref }}" = "refs/heads/beta" ]; then
-            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-4)
-            NEW_VERSION="${VERSION}beta${SHORT_SHA}"
-            python -c "import sys; c = open('src/uPtt/__init__.py').read().replace('__version__ = \"' + sys.argv[1] + '\"', '__version__ = \"' + sys.argv[2] + '\"'); open('src/uPtt/__init__.py', 'w').write(c)" "$VERSION" "$NEW_VERSION"
-            VERSION=$NEW_VERSION
-            IS_PRERELEASE=true
-            echo "RELEASE_TITLE=uPtt Beta v$VERSION" >> $GITHUB_ENV
-          else
-            echo "RELEASE_TITLE=uPtt Official v$VERSION" >> $GITHUB_ENV
-          fi
-          
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
-          echo "IS_PRERELEASE=$IS_PRERELEASE" >> $GITHUB_OUTPUT
+          VERSION="${{ needs.prepare-version.outputs.VERSION }}"
+          python -c "
+          import re, pathlib
+          f = pathlib.Path('src/uPtt/__init__.py')
+          f.write_text(re.sub(r'__version__ = \".*?\"', '__version__ = \"$VERSION\"', f.read_text()))
+          "
+          echo "RELEASE_TITLE=${{ needs.prepare-version.outputs.RELEASE_TITLE }}" >> $GITHUB_ENV
 
       - name: Install dependencies
         run: |
@@ -324,7 +330,6 @@ jobs:
         shell: pwsh
         run: |
           $env:PYTHONPATH = "src"
-          $VERSION = "${{ steps.config.outputs.VERSION }}"
           python -m nuitka `
             --standalone `
             --windows-console-mode=disable `
@@ -337,10 +342,9 @@ jobs:
             --output-dir=dist `
             --assume-yes-for-downloads `
             --windows-dependency-tool=pefile `
-            --no-pyi-file `
             --windows-company-name="uPtt" `
             --windows-product-name="uPtt" `
-            --windows-product-version="$VERSION" `
+            --windows-product-version="${{ needs.prepare-version.outputs.VERSION_NUMERIC }}" `
             --windows-file-description="uPtt Messenger for PTT" `
             src/run_app.py
 
@@ -382,7 +386,7 @@ jobs:
       - name: Build installer with Inno Setup
         shell: pwsh
         run: |
-          $VERSION = "${{ steps.config.outputs.VERSION }}"
+          $VERSION = "${{ needs.prepare-version.outputs.VERSION }}"
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DVERSION=$VERSION scripts\installer.iss
 
       - name: Package installer for distribution
@@ -396,9 +400,9 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: dist/installer/uPtt-Windows.zip
-          tag_name: v${{ steps.config.outputs.VERSION }}
+          tag_name: v${{ needs.prepare-version.outputs.VERSION }}
           name: ${{ env.RELEASE_TITLE }}
-          prerelease: ${{ steps.config.outputs.IS_PRERELEASE }}
+          prerelease: ${{ needs.prepare-version.outputs.IS_PRERELEASE }}
           draft: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
