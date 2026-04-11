@@ -28,7 +28,7 @@ class MsgType:
     TARGET = '[目標]'
 
 
-DOWNLOAD_URL = "https://github.com/uPtt-messenger/uPttTerm/releases"
+DOWNLOAD_URL = "https://uptt.cc/"
 
 DIVISION_LINE = "__DIVISION_LINE__"
 DIVISION_TYPE = '='  # 用於分隔線的訊息類型
