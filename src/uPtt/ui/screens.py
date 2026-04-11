@@ -1468,17 +1468,17 @@ class MainWindow(QMainWindow):
                     'reply_info': reply_info,
                 })
 
-            if self.current_chat_id == sender:
-                self.refresh_chat_display()
-            else:
-                self.unread_counts[sender] += 1
-                # 更新清單中的未讀計數
-                for i in range(self.contact_list.count()):
-                    item = self.contact_list.item(i)
-                    widget = self.contact_list.itemWidget(item)
-                    if widget.ptt_id == sender:
-                        widget.set_unread(self.unread_counts[sender])
-                        break
+                if self.current_chat_id == sender:
+                    self.refresh_chat_display()
+                else:
+                    self.unread_counts[sender] += 1
+                    # 更新清單中的未讀計數
+                    for i in range(self.contact_list.count()):
+                        item = self.contact_list.item(i)
+                        widget = self.contact_list.itemWidget(item)
+                        if widget.ptt_id == sender:
+                            widget.set_unread(self.unread_counts[sender])
+                            break
 
             self._move_contact_to_top(sender)
 

@@ -294,3 +294,29 @@ def test_send_result_fifo_same_contact(mock_qthread, mock_worker, mock_ver_worke
         # Second result should mark the SECOND pending message
         window.on_send_result(True, "")
         assert msgs[1]['send_status'] == 'sent'
+
+
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_duplicate_message_does_not_inflate_unread(mock_qthread, mock_worker, mock_ver_worker, qtbot, ptt_service_mock, db_mock):
+    """Fix #1: Duplicate messages should not increment unread count."""
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, db_mock)
+        qtbot.addWidget(window)
+
+        now = datetime.now()
+        window.add_or_select_contact("SenderA")
+        window.current_chat_id = None  # simulate not viewing this chat
+
+        msg_data = {
+            'sender': 'SenderA', 'text': 'Hello',
+            'time': now.strftime("%H:%M"), 'full_author': 'SenderA',
+            'timestamp': now, 'mail_type': 'uptt',
+        }
+        window.on_new_message(msg_data)
+        assert window.unread_counts.get('sendera', 0) == 1
+
+        # Send the exact same message again (duplicate)
+        window.on_new_message(msg_data)
+        assert window.unread_counts.get('sendera', 0) == 1  # should NOT be 2
