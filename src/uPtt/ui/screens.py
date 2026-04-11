@@ -675,6 +675,7 @@ class MainWindow(QMainWindow):
         self.scroll_area.setContentsMargins(0, 0, 0, 0)
         
         # 自動捲動到底部 (僅在使用者已接近底部時才觸發，避免閱讀歷史時被強制拉回)
+        self._force_scroll_to_bottom = False
         self.scroll_area.verticalScrollBar().rangeChanged.connect(
             self._on_scroll_range_changed
         )
@@ -1273,9 +1274,13 @@ class MainWindow(QMainWindow):
         self.chat_header.setToolTip("\n".join(lines))
 
     def _on_scroll_range_changed(self, _min, _max):
-        """只在使用者已接近底部時才自動捲動，避免閱讀歷史時被強制拉回。"""
+        """只在使用者已接近底部時才自動捲動，避免閱讀歷史時被強制拉回。
+        切換對話或重新載入時會強制捲到底部。"""
         sb = self.scroll_area.verticalScrollBar()
-        if _max - sb.value() <= 50:
+        if self._force_scroll_to_bottom:
+            self._force_scroll_to_bottom = False
+            sb.setValue(_max)
+        elif _max - sb.value() <= 50:
             sb.setValue(_max)
 
     def refresh_chat_display(self):
@@ -1309,10 +1314,8 @@ class MainWindow(QMainWindow):
                 widget.reply_requested.connect(self.set_reply_to)
             self.messages_layout.addWidget(widget)
         
-        # 滾動到底部
-        self.scroll_area.verticalScrollBar().setValue(
-            self.scroll_area.verticalScrollBar().maximum()
-        )
+        # 標記強制捲到底部，待 rangeChanged 信號觸發時執行
+        self._force_scroll_to_bottom = True
 
     def set_reply_to(self, text: str, is_me: bool):
         """設定目前要回覆的訊息，顯示回覆預覽條。"""
