@@ -1553,12 +1553,14 @@ class MainWindow(QMainWindow):
                     del self.chat_histories[ptt_id_lower]
                 if ptt_id_lower in self.unread_counts:
                     del self.unread_counts[ptt_id_lower]
+                self.session_drafts.pop(ptt_id_lower, None)
                 self.remove_contact_from_sidebar(ptt_id_lower)
                 logger.info(f"已從資料庫與介面刪除對話與紀錄: {ptt_id_lower}")
-                
+
         elif action_type == "CLOSE":
             # 僅隱藏，不刪除訊息
             self.db.hide_session(current_acc, ptt_id_lower)
+            self.session_drafts.pop(ptt_id_lower, None)
             self.remove_contact_from_sidebar(ptt_id_lower)
 
     def _move_contact_to_top(self, sender: str):

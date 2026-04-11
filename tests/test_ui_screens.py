@@ -320,3 +320,37 @@ def test_duplicate_message_does_not_inflate_unread(mock_qthread, mock_worker, mo
         # Send the exact same message again (duplicate)
         window.on_new_message(msg_data)
         assert window.unread_counts.get('sendera', 0) == 1  # should NOT be 2
+
+
+@patch('src.uPtt.ui.screens.QMessageBox')
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_draft_cleared_on_delete(mock_qthread, mock_worker, mock_ver_worker, mock_msg, qtbot, ptt_service_mock, db_mock):
+    """Fix #5: session_drafts should be cleared when a session is deleted."""
+    with patch('os.path.exists', return_value=True):
+        mock_msg.question.return_value = mock_msg.Yes
+        window = MainWindow(ptt_service_mock, db_mock)
+        qtbot.addWidget(window)
+
+        window.add_or_select_contact("DraftUser")
+        window.session_drafts['draftuser'] = "unsent text"
+
+        window.handle_contact_action("DraftUser", "DELETE")
+        assert 'draftuser' not in window.session_drafts
+
+
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_draft_cleared_on_close(mock_qthread, mock_worker, mock_ver_worker, qtbot, ptt_service_mock, db_mock):
+    """Fix #5: session_drafts should be cleared when a session is closed."""
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, db_mock)
+        qtbot.addWidget(window)
+
+        window.add_or_select_contact("CloseUser")
+        window.session_drafts['closeuser'] = "draft text"
+
+        window.handle_contact_action("CloseUser", "CLOSE")
+        assert 'closeuser' not in window.session_drafts
