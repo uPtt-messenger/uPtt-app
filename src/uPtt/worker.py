@@ -681,13 +681,14 @@ class PTTWorker(QObject):
                 return
 
             # 整批去重：若這批水球跟上次完全一樣，代表 CLEAR 沒生效，直接跳過
-            batch_fingerprint = str([
+            # 排序以避免 PTT 回傳順序不同導致誤判為不同批次
+            batch_fingerprint = str(sorted([
                 (wb.get(PyPtt.WaterballField.target, ''),
                  wb.get(PyPtt.WaterballField.content, ''),
                  wb.get(PyPtt.WaterballField.date, ''),
                  wb.get(PyPtt.WaterballField.type))
                 for wb in waterballs
-            ])
+            ]))
             if batch_fingerprint == self._last_waterball_batch:
                 return
             self._last_waterball_batch = batch_fingerprint

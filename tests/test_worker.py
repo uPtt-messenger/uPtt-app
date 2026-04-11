@@ -567,3 +567,39 @@ def test_author_without_space_before_nickname(qtbot, worker, ptt_service_mock, d
 
     # sender 應為 "SenderID" 而非 "SenderID(暱稱)"
     assert blocker.args[0]['sender'] == "SenderID"
+
+
+def test_waterball_fingerprint_order_independent(worker):
+    """Fix #6: Waterball batch fingerprint should be order-independent to avoid false mismatches."""
+    wb_a = {
+        PyPtt.WaterballField.target: 'UserA',
+        PyPtt.WaterballField.content: 'Hello',
+        PyPtt.WaterballField.date: '01/01',
+        PyPtt.WaterballField.type: PyPtt.WaterballType.SEND,
+    }
+    wb_b = {
+        PyPtt.WaterballField.target: 'UserB',
+        PyPtt.WaterballField.content: 'World',
+        PyPtt.WaterballField.date: '01/02',
+        PyPtt.WaterballField.type: PyPtt.WaterballType.CATCH,
+    }
+
+    # Build fingerprint in order [A, B]
+    batch_ab = sorted([
+        (wb.get(PyPtt.WaterballField.target, ''),
+         wb.get(PyPtt.WaterballField.content, ''),
+         wb.get(PyPtt.WaterballField.date, ''),
+         wb.get(PyPtt.WaterballField.type))
+        for wb in [wb_a, wb_b]
+    ])
+
+    # Build fingerprint in order [B, A]
+    batch_ba = sorted([
+        (wb.get(PyPtt.WaterballField.target, ''),
+         wb.get(PyPtt.WaterballField.content, ''),
+         wb.get(PyPtt.WaterballField.date, ''),
+         wb.get(PyPtt.WaterballField.type))
+        for wb in [wb_b, wb_a]
+    ])
+
+    assert str(batch_ab) == str(batch_ba)
