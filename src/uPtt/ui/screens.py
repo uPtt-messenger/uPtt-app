@@ -1755,9 +1755,11 @@ class MainWindow(QMainWindow):
         logger.info("執行登出程序...")
         try:
             # 1. 停止目前的 Worker 與執行緒
-            if hasattr(self, 'worker'):
+            #    使用 BlockingQueuedConnection 確保 stop() 完成後才繼續，
+            #    避免 ptt.close() 尚未完成就被 terminate() 強殺導致 LoginTooOften
+            if hasattr(self, 'worker') and hasattr(self, 'ptt_thread') and self.ptt_thread.isRunning():
                 from PySide6.QtCore import QMetaObject
-                QMetaObject.invokeMethod(self.worker, "stop", Qt.QueuedConnection)
+                QMetaObject.invokeMethod(self.worker, "stop", Qt.BlockingQueuedConnection)
 
             if hasattr(self, 'ptt_thread') and self.ptt_thread.isRunning():
                 self.ptt_thread.quit()
@@ -1815,10 +1817,10 @@ class MainWindow(QMainWindow):
         """徹底退出程式，確保 PTT 登出與執行緒釋放"""
         logger.info("正在執行完全退出程序...")
         try:
-            # 1. 停止 Worker (使用訊號通知)
-            if hasattr(self, 'worker'):
+            # 1. 停止 Worker — BlockingQueuedConnection 確保 ptt.close() 完成
+            if hasattr(self, 'worker') and hasattr(self, 'ptt_thread') and self.ptt_thread.isRunning():
                 from PySide6.QtCore import QMetaObject
-                QMetaObject.invokeMethod(self.worker, "stop", Qt.AutoConnection)
+                QMetaObject.invokeMethod(self.worker, "stop", Qt.BlockingQueuedConnection)
             
             # 2. 等待執行緒結束 (給予較長緩衝)
             if hasattr(self, 'ptt_thread') and self.ptt_thread.isRunning():
