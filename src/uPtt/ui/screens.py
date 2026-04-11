@@ -447,6 +447,7 @@ class MainWindow(QMainWindow):
         self.pinned_ids: set = set()
         self.reply_to: Optional[Dict] = None  # {'sender': str, 'preview': str}
         self._user_info_cache: Dict[str, Dict] = {}  # ptt_id_lower -> user info dict
+        self.session_drafts: Dict[str, str] = {}  # ptt_id_lower -> draft text
         
         # 初始化 UI 與背景執行緒
         self.init_ui()
@@ -1160,6 +1161,11 @@ class MainWindow(QMainWindow):
         widget = self.contact_list.itemWidget(item)
         if not widget:
             return
+
+        # 儲存當前對話的草稿
+        if self.current_chat_id:
+            self.session_drafts[self.current_chat_id] = self.message_edit.text()
+
         self.current_chat_id = widget.ptt_id
         current_acc = self.ptt_service.ptt_id
 
@@ -1188,8 +1194,9 @@ class MainWindow(QMainWindow):
             })
         self.chat_histories[self.current_chat_id] = parsed
 
-        # 切換聯絡人時清除回覆狀態
+        # 切換聯絡人時清除回覆狀態並還原草稿
         self.cancel_reply()
+        self.message_edit.setText(self.session_drafts.get(self.current_chat_id, ""))
         self.refresh_chat_display()
 
         # 檢查是否為封存會話
