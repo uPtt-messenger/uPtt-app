@@ -294,20 +294,24 @@ class DatabaseManager:
                 if is_me:
                     conn.execute("""
                         UPDATE sessions SET
-                            last_message_text = ?,
-                            last_message_time = ?,
+                            last_message_text = CASE
+                                WHEN COALESCE(last_message_time, '1970-01-01') <= ? THEN ?
+                                ELSE last_message_text END,
+                            last_message_time = MAX(COALESCE(last_message_time, '1970-01-01'), ?),
                             is_visible = 1
                         WHERE account_id = ? AND id = ?
-                    """, (summary, timestamp, acc_id_lower, session_id_lower))
+                    """, (timestamp, summary, timestamp, acc_id_lower, session_id_lower))
                 else:
                     conn.execute("""
                         UPDATE sessions SET
-                            last_message_text = ?,
-                            last_message_time = ?,
+                            last_message_text = CASE
+                                WHEN COALESCE(last_message_time, '1970-01-01') <= ? THEN ?
+                                ELSE last_message_text END,
+                            last_message_time = MAX(COALESCE(last_message_time, '1970-01-01'), ?),
                             unread_count = unread_count + 1,
                             is_visible = 1
                         WHERE account_id = ? AND id = ?
-                    """, (summary, timestamp, acc_id_lower, session_id_lower))
+                    """, (timestamp, summary, timestamp, acc_id_lower, session_id_lower))
                 
                 conn.commit()
                 return True

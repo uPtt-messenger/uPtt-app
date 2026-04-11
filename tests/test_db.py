@@ -161,3 +161,23 @@ def test_error_handling(db_manager, monkeypatch):
     db_manager.mark_as_read("user", "session")
     db_manager.set_config("k", "v")
     assert db_manager.get_config("k", "default") == "default"
+
+
+def test_last_message_time_never_goes_backwards(db_manager):
+    """Fix #4: save_message should not let last_message_time regress to an older timestamp."""
+    account_id = "testuser"
+    session_id = "contacta"
+    db_manager.upsert_session(account_id, session_id)
+
+    newer = datetime(2025, 6, 1, 12, 0, 0)
+    older = datetime(2025, 5, 1, 12, 0, 0)
+
+    # Save newer message first
+    db_manager.save_message(account_id, session_id, session_id, account_id, "New msg", newer, False)
+    sessions = db_manager.get_all_sessions(account_id)
+    assert sessions[0]['last_message_text'] == "New msg"
+
+    # Save older message — last_message_time and text should NOT regress
+    db_manager.save_message(account_id, session_id, session_id, account_id, "Old msg", older, False)
+    sessions = db_manager.get_all_sessions(account_id)
+    assert sessions[0]['last_message_text'] == "New msg"
