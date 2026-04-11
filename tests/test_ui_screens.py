@@ -227,3 +227,70 @@ def test_render_svg_exists():
         assert not pixmap.isNull()
     finally:
         if os.path.exists("test_pixmap.svg"): os.remove("test_pixmap.svg")
+
+
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_send_result_matches_correct_message_fifo(mock_qthread, mock_worker, mock_ver_worker, qtbot, ptt_service_mock, db_mock):
+    """Fix #2: on_send_result should match send results in FIFO order across different targets."""
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, db_mock)
+        qtbot.addWidget(window)
+
+        # Send message to contact A
+        window.add_or_select_contact("ContactA")
+        window.message_edit.setText("MsgA")
+        with patch.object(window, 'send_requested'):
+            window.handle_send()
+
+        # Send message to contact B
+        window.add_or_select_contact("ContactB")
+        window.message_edit.setText("MsgB")
+        with patch.object(window, 'send_requested'):
+            window.handle_send()
+
+        # First result should match contactA's pending message
+        window.on_send_result(True, "")
+        msg_a = [m for m in window.chat_histories.get('contacta', []) if m.get('is_me')]
+        assert len(msg_a) == 1
+        assert msg_a[0]['send_status'] == 'sent'
+
+        # Second result should match contactB's pending message
+        window.on_send_result(True, "")
+        msg_b = [m for m in window.chat_histories.get('contactb', []) if m.get('is_me')]
+        assert len(msg_b) == 1
+        assert msg_b[0]['send_status'] == 'sent'
+
+
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_send_result_fifo_same_contact(mock_qthread, mock_worker, mock_ver_worker, qtbot, ptt_service_mock, db_mock):
+    """Fix #2: Two rapid sends to same contact — results should match in FIFO order."""
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, db_mock)
+        qtbot.addWidget(window)
+
+        window.add_or_select_contact("Target")
+        window.message_edit.setText("First")
+        with patch.object(window, 'send_requested'):
+            window.handle_send()
+
+        window.message_edit.setText("Second")
+        with patch.object(window, 'send_requested'):
+            window.handle_send()
+
+        msgs = window.chat_histories['target']
+        assert len(msgs) == 2
+        assert msgs[0]['send_status'] == 'pending'
+        assert msgs[1]['send_status'] == 'pending'
+
+        # First result should mark the FIRST pending message
+        window.on_send_result(True, "")
+        assert msgs[0]['send_status'] == 'sent'
+        assert msgs[1]['send_status'] == 'pending'
+
+        # Second result should mark the SECOND pending message
+        window.on_send_result(True, "")
+        assert msgs[1]['send_status'] == 'sent'

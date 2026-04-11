@@ -1,3 +1,4 @@
+import collections
 import logging
 import os
 import sys
@@ -448,7 +449,8 @@ class MainWindow(QMainWindow):
         self.reply_to: Optional[Dict] = None  # {'sender': str, 'preview': str}
         self._user_info_cache: Dict[str, Dict] = {}  # ptt_id_lower -> user info dict
         self.session_drafts: Dict[str, str] = {}  # ptt_id_lower -> draft text
-        
+        self._pending_send_targets: collections.deque = collections.deque()  # FIFO queue of send targets
+
         # 初始化 UI 與背景執行緒
         self.init_ui()
         self.init_worker()
@@ -1377,7 +1379,7 @@ class MainWindow(QMainWindow):
                 w.set_last_msg_time(now_str)
                 break
 
-        self._last_send_target = self.current_chat_id
+        self._pending_send_targets.append(self.current_chat_id)
 
         # 2. 將發送請求放入 thread-safe 佇列（繞過 Qt 事件佇列，避免被阻塞操作卡住）
         #    同時 emit signal 作為後備喚醒（worker 閒置時由 slot 觸發 drain）
@@ -1493,11 +1495,11 @@ class MainWindow(QMainWindow):
     @Slot(bool, str)
     def on_send_result(self, success, error_msg):
         new_status = 'sent' if success else 'failed'
-        # 只搜尋上次發送目標的 session，避免跨 session 誤判
-        target = getattr(self, '_last_send_target', None)
+        # 從 FIFO 佇列取出對應的 send target，確保多訊息連發時順序正確
+        target = self._pending_send_targets.popleft() if self._pending_send_targets else None
         updated = False
         if target and target in self.chat_histories:
-            for msg in reversed(self.chat_histories[target]):
+            for msg in self.chat_histories[target]:
                 if msg.get('is_me') and msg.get('send_status') == 'pending':
                     msg['send_status'] = new_status
                     updated = True
@@ -1777,6 +1779,7 @@ class MainWindow(QMainWindow):
             self.chat_histories.clear()
             self.unread_counts.clear()
             self.pinned_ids.clear()
+            self._pending_send_targets.clear()
             self.current_chat_id = None
             self.refresh_chat_display()
             self.user_id_label.setText("uPtt")
