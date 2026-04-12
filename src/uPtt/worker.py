@@ -21,14 +21,10 @@ class PTTWorker(QObject):
     login_result = Signal(bool, str)  # (成功與否, 訊息)
     new_message_received = Signal(dict)  # {'sender': str, 'text': str, 'time': str, 'full_author': str}
     send_result = Signal(bool, str)  # (成功與否, 錯誤訊息)
-    user_info_result = Signal(dict)  # {'ptt_id': str, 'nickname': str, 'is_online': bool}
-    user_info_error = Signal(str, str)  # (ID, 錯誤訊息)
-    online_status_updated = Signal(str, bool)  # (ptt_id 小寫, is_online)
     status_updated = Signal(str)
     connection_lost = Signal()       # 連線中斷
     connection_restored = Signal()   # 連線恢復
     first_time_detected = Signal()          # 首次登入（無 last_poll_time）
-    session_archived = Signal(str)           # (ptt_id 小寫) 使用者不存在，會話已封存
     scan_progress = Signal(int, int, str)   # (已掃描數, 總數, 信件標題)
     scan_complete = Signal()                # 首次掃描完成
 
@@ -40,16 +36,12 @@ class PTTWorker(QObject):
         self.last_mail_time: Optional[datetime] = None
         # last_poll_time 在 do_login 成功後才載入（需要帳號 ID 作為 key）
         self.last_poll_time: Optional[datetime] = None
-            
+
         self.is_first_polling = True
         self._was_connected = True  # 追蹤上次連線狀態，用於判斷是否需發射訊號
         self._last_newest_index: Optional[int] = None  # 上次輪詢時的信箱最新索引
-        self._online_check_timer: Optional[QTimer] = None
         self._waterball_timer: Optional[QTimer] = None
-        self._active_chat_online_timer: Optional[QTimer] = None
-        self._active_chat_id: Optional[str] = None  # 目前開啟的對話 ID（小寫）
         self._last_waterball_batch: Optional[str] = None  # 上一批水球的指紋，用於整批去重
-        self._online_check_queue: list[str] = []  # 待檢查在線狀態的聯絡人佇列
         self._send_queue: queue.Queue = queue.Queue()  # Thread-safe 發送佇列
 
     @Slot(str, str)
@@ -106,16 +98,6 @@ class PTTWorker(QObject):
             self._waterball_timer.start(wb_interval)
             logger.info(f"開始輪詢水球，間隔: {wb_interval / 1000}s")
 
-        # 啟動在線狀態定期檢查
-        if self._online_check_timer is None:
-            self._online_check_timer = QTimer()
-            self._online_check_timer.timeout.connect(self._check_all_online_status)
-            online_interval = getattr(config, 'CHECK_ONLINE_STATUS_INTERVAL', 60) * 1000
-            self._online_check_timer.start(online_interval)
-            logger.info(f"開始輪詢在線狀態，間隔: {online_interval / 1000}s")
-            # 首次立即檢查一次
-            self._check_all_online_status()
-
     @Slot()
     def stop_polling(self):
         """暫停所有輪詢計時器（不登出）"""
@@ -125,14 +107,6 @@ class PTTWorker(QObject):
         if self._waterball_timer:
             self._waterball_timer.stop()
             self._waterball_timer = None
-        if self._online_check_timer:
-            self._online_check_timer.stop()
-            self._online_check_timer = None
-        if self._active_chat_online_timer:
-            self._active_chat_online_timer.stop()
-            self._active_chat_online_timer = None
-        self._online_check_queue.clear()
-        self._active_chat_id = None
         logger.info("已暫停所有輪詢")
 
     @Slot()
@@ -624,48 +598,6 @@ class PTTWorker(QObject):
             logger.exception(f"發送訊息過程中發生例外狀況: {e}")
             self.send_result.emit(False, str(e))
 
-    @Slot(str)
-    def get_user_info(self, ptt_id):
-        """主動獲取使用者資訊 (包含暱稱、正確大小寫與在線狀態)"""
-        try:
-            logger.info(f"--- 開始查詢使用者資訊: {ptt_id} ---")
-            info = self.ptt.get_user_info(ptt_id)
-
-            # --- 更新資料庫中的暱稱與顯示 ID (加入 account_id 隔離) ---
-            self.db.upsert_session(
-                account_id=self.ptt.ptt_id,
-                display_id=info['ptt_id'],
-                nickname=info['nickname']
-            )
-
-            self.user_info_result.emit({
-                'ptt_id': info['ptt_id'],
-                'nickname': info['nickname'],
-                'is_online': info['is_online'],
-                'activity': info.get('activity', ''),
-                'login_count': info.get('login_count', ''),
-                'last_login_date': info.get('last_login_date', ''),
-                'legal_post': info.get('legal_post', ''),
-                'illegal_post': info.get('illegal_post', ''),
-                'money': info.get('money', ''),
-            })
-            logger.info(f"成功獲取使用者資訊: {info}")
-
-        except ValueError as e:
-            error_msg = str(e)
-            logger.warning(f"查詢使用者 {ptt_id} 失敗: {error_msg}")
-            if "查無此人" in error_msg and self.ptt.ptt_id:
-                self.db.archive_session(self.ptt.ptt_id, ptt_id)
-                self.session_archived.emit(ptt_id.lower())
-                logger.info(f"使用者 {ptt_id} 不存在，會話已封存")
-            else:
-                self.user_info_error.emit(ptt_id, error_msg)
-        except Exception as e:
-            logger.error(f"獲取使用者 {ptt_id} 資訊過程中發生非預期錯誤: {e}", exc_info=True)
-            self.user_info_error.emit(ptt_id, f"系統錯誤: {str(e)}")
-        finally:
-            logger.info(f"--- 查詢結束: {ptt_id} ---")
-
     def _poll_waterballs(self):
         """輪詢水球訊息"""
         # 優先處理待發送訊息
@@ -774,9 +706,137 @@ class PTTWorker(QObject):
         h = abs(hash(str(date_val))) % 86400
         return now.replace(hour=h // 3600, minute=(h % 3600) // 60, second=h % 60, microsecond=0)
 
+    @Slot()
+    def stop(self):
+        """停止所有背景任務並登出"""
+        try:
+            logger.info("正在停止 Worker...")
+            if self.polling_timer:
+                self.polling_timer.stop()
+            if self._waterball_timer:
+                self._waterball_timer.stop()
+
+            # 關閉 PTT 連線
+            if self.ptt:
+                self.ptt.close()
+            logger.info("Worker 已成功停止")
+        except Exception as e:
+            logger.error(f"停止 Worker 時發生錯誤: {e}")
+
+
+class QueryWorker(QObject):
+    """
+    使用者狀態查詢背景工作者。
+    獨立的 PyPtt session 專職處理 get_user_info、在線輪詢與活躍對話輪詢,
+    不與訊息收發 session 共用 UI 狀態,避免查詢卡住送信。
+    """
+    user_info_result = Signal(dict)
+    user_info_error = Signal(str, str)
+    online_status_updated = Signal(str, bool)
+    session_archived = Signal(str)
+    query_session_degraded = Signal()   # 副 session 無法提供使用者狀態(登入失敗或斷線)
+    query_session_restored = Signal()   # 副 session 恢復正常
+
+    def __init__(self, ptt_service: UPttService, db):
+        super().__init__()
+        self.ptt = ptt_service
+        self.db = db
+        self._online_check_timer: Optional[QTimer] = None
+        self._online_check_queue: list[str] = []
+        self._active_chat_online_timer: Optional[QTimer] = None
+        self._active_chat_id: Optional[str] = None
+        self._degraded: bool = False  # 副 session 目前是否處於降級狀態
+
+    def _mark_degraded(self, reason: str):
+        """進入降級狀態,通知 UI。重複進入不會重複 emit。"""
+        if not self._degraded:
+            self._degraded = True
+            logger.warning(f"[Query] 進入降級狀態: {reason}")
+            self.query_session_degraded.emit()
+
+    def _mark_restored(self):
+        """從降級狀態恢復,通知 UI。"""
+        if self._degraded:
+            self._degraded = False
+            logger.info("[Query] 副 session 已恢復正常")
+            self.query_session_restored.emit()
+
+    @Slot(str, str)
+    def do_login(self, ptt_id: str, ptt_pw: str):
+        """以 kick_other_session=False 登入,與主 session 共存。"""
+        try:
+            self.ptt.login(ptt_id, ptt_pw, force=False)
+            logger.info(f"[Query] 副 session 登入成功: {self.ptt.ptt_id}")
+            self._mark_restored()
+            self._start_online_polling()
+        except Exception as e:
+            logger.warning(f"[Query] 副 session 登入失敗,使用者狀態功能將無法使用: {e}")
+            self._mark_degraded(f"登入失敗: {e}")
+
+    def _start_online_polling(self):
+        """啟動在線狀態定期檢查(登入成功後呼叫)。"""
+        if self._online_check_timer is None:
+            self._online_check_timer = QTimer()
+            self._online_check_timer.timeout.connect(self._check_all_online_status)
+            interval = getattr(config, 'CHECK_ONLINE_STATUS_INTERVAL', 60) * 1000
+            self._online_check_timer.start(interval)
+            logger.info(f"[Query] 開始輪詢在線狀態,間隔: {interval / 1000}s")
+            self._check_all_online_status()
+
+    @Slot(str)
+    def get_user_info(self, ptt_id):
+        """主動獲取使用者資訊 (包含暱稱、正確大小寫與在線狀態)。"""
+        if not self.ptt.ptt_id:
+            logger.info(f"[Query] 副 session 尚未登入,跳過查詢: {ptt_id}")
+            return
+        try:
+            logger.info(f"--- 開始查詢使用者資訊: {ptt_id} ---")
+            info = self.ptt.get_user_info(ptt_id)
+            self._mark_restored()
+
+            self.db.upsert_session(
+                account_id=self.ptt.ptt_id,
+                display_id=info['ptt_id'],
+                nickname=info['nickname']
+            )
+
+            self.user_info_result.emit({
+                'ptt_id': info['ptt_id'],
+                'nickname': info['nickname'],
+                'is_online': info['is_online'],
+                'activity': info.get('activity', ''),
+                'login_count': info.get('login_count', ''),
+                'last_login_date': info.get('last_login_date', ''),
+                'legal_post': info.get('legal_post', ''),
+                'illegal_post': info.get('illegal_post', ''),
+                'money': info.get('money', ''),
+            })
+            logger.info(f"成功獲取使用者資訊: {info}")
+        except ValueError as e:
+            # ValueError 表示查無此人等「對方」的問題,session 本身還是健康的
+            self._mark_restored()
+            error_msg = str(e)
+            logger.warning(f"查詢使用者 {ptt_id} 失敗: {error_msg}")
+            if "查無此人" in error_msg and self.ptt.ptt_id:
+                self.db.archive_session(self.ptt.ptt_id, ptt_id)
+                self.session_archived.emit(ptt_id.lower())
+                logger.info(f"使用者 {ptt_id} 不存在,會話已封存")
+            else:
+                self.user_info_error.emit(ptt_id, error_msg)
+        except PyPtt.ConnectionClosed:
+            self._mark_degraded("連線中斷")
+            logger.warning(f"[Query] 查詢 {ptt_id} 時連線中斷")
+            self.user_info_error.emit(ptt_id, "副 session 連線中斷")
+        except Exception as e:
+            self._mark_degraded(f"查詢例外: {e}")
+            logger.error(f"獲取使用者 {ptt_id} 資訊過程中發生非預期錯誤: {e}", exc_info=True)
+            self.user_info_error.emit(ptt_id, f"系統錯誤: {str(e)}")
+        finally:
+            logger.info(f"--- 查詢結束: {ptt_id} ---")
+
     @Slot(str)
     def check_online_priority(self, ptt_id: str):
-        """立即查詢指定聯絡人的在線狀態（打開對話視窗時優先更新）"""
+        """立即查詢指定聯絡人的在線狀態(打開對話視窗時優先更新)。"""
         if not self.ptt.ptt_id:
             return
         ptt_id_lower = ptt_id.lower()
@@ -785,6 +845,7 @@ class PTTWorker(QObject):
         try:
             logger.info(f"[優先在線查詢] 查詢 {ptt_id_lower}")
             info = self.ptt.get_user_info(ptt_id_lower)
+            self._mark_restored()
             status = "在線" if info['is_online'] else "離線"
             logger.info(f"[優先在線查詢] {ptt_id_lower} → {status}")
             self.online_status_updated.emit(ptt_id_lower, info['is_online'])
@@ -800,22 +861,26 @@ class PTTWorker(QObject):
                 'money': info.get('money', ''),
             })
         except ValueError as e:
+            self._mark_restored()
             if "查無此人" in str(e) and self.ptt.ptt_id:
                 self.db.archive_session(self.ptt.ptt_id, ptt_id_lower)
                 self.session_archived.emit(ptt_id_lower)
-                logger.info(f"[優先在線查詢] {ptt_id} 不存在，會話已封存")
+                logger.info(f"[優先在線查詢] {ptt_id} 不存在,會話已封存")
             else:
                 logger.info(f"[優先在線查詢] {ptt_id} 查詢失敗: {e}")
+        except PyPtt.ConnectionClosed:
+            self._mark_degraded("連線中斷")
+            logger.warning(f"[優先在線查詢] {ptt_id} 連線中斷")
         except Exception as e:
+            self._mark_degraded(f"查詢例外: {e}")
             logger.info(f"[優先在線查詢] {ptt_id} 查詢失敗: {e}")
 
     def _check_all_online_status(self):
-        """定期檢查所有聯絡人的在線狀態（非阻塞式：每次只查一人，讓出事件迴圈）"""
+        """定期檢查所有聯絡人的在線狀態(非阻塞式:每次只查一人,讓出事件迴圈)。"""
         if not self.ptt.ptt_id:
             return
-        # 若上一輪還沒查完，不重複排程
         if self._online_check_queue:
-            logger.info(f"[在線檢查] 上一輪尚未完成（剩餘 {len(self._online_check_queue)} 人），跳過本輪")
+            logger.info(f"[在線檢查] 上一輪尚未完成(剩餘 {len(self._online_check_queue)} 人),跳過本輪")
             return
         try:
             sessions = self.db.get_all_sessions(self.ptt.ptt_id)
@@ -825,47 +890,41 @@ class PTTWorker(QObject):
             ]
             if self._online_check_queue:
                 per_user_delay = getattr(config, 'ONLINE_CHECK_PER_USER_DELAY', 5) * 1000
-                logger.info(f"[在線檢查] 開始新一輪，共 {len(self._online_check_queue)} 位聯絡人")
+                logger.info(f"[在線檢查] 開始新一輪,共 {len(self._online_check_queue)} 位聯絡人")
                 QTimer.singleShot(per_user_delay, self._check_next_online_status)
         except Exception as e:
             logger.warning(f"在線狀態輪詢失敗: {e}")
 
     def _check_next_online_status(self):
-        """從佇列中取出一個聯絡人查詢在線狀態，查完後讓出事件迴圈再查下一個。"""
-        # 優先處理待發送訊息（查詢前）
-        if self._drain_send_queue():
-            # 剛發送完訊息，暫停在線檢查鏈，把連線讓給信件輪詢
-            remaining = len(self._online_check_queue)
-            self._online_check_queue.clear()
-            logger.info(f"[在線檢查] 發送完成，暫停本輪剩餘 {remaining} 人的在線檢查")
-            return
+        """從佇列中取出一個聯絡人查詢在線狀態,查完後讓出事件迴圈再查下一個。"""
         if not self._online_check_queue or not self.ptt.ptt_id:
             self._online_check_queue.clear()
             return
         contact_id = self._online_check_queue.pop(0)
         remaining = len(self._online_check_queue)
         try:
-            logger.info(f"[在線檢查] 查詢 {contact_id}（剩餘 {remaining} 人）")
+            logger.info(f"[在線檢查] 查詢 {contact_id}(剩餘 {remaining} 人)")
             info = self.ptt.get_user_info(contact_id)
+            self._mark_restored()
             status = "在線" if info['is_online'] else "離線"
             logger.info(f"[在線檢查] {contact_id} → {status}")
             self.online_status_updated.emit(contact_id, info['is_online'])
         except ValueError as e:
+            self._mark_restored()
             if "查無此人" in str(e) and self.ptt.ptt_id:
                 self.db.archive_session(self.ptt.ptt_id, contact_id)
                 self.session_archived.emit(contact_id)
-                logger.info(f"[在線檢查] {contact_id} 不存在，會話已封存")
+                logger.info(f"[在線檢查] {contact_id} 不存在,會話已封存")
             else:
                 logger.info(f"[在線檢查] {contact_id} 查詢失敗: {e}")
-        except Exception as e:
-            logger.info(f"[在線檢查] {contact_id} 查詢失敗: {e}")
-        # 查完一人後再 drain 一次，攔截查詢期間到達的發送請求
-        if self._drain_send_queue():
-            remaining = len(self._online_check_queue)
+        except PyPtt.ConnectionClosed:
+            self._mark_degraded("連線中斷")
+            logger.warning(f"[在線檢查] {contact_id} 連線中斷,清空本輪佇列")
             self._online_check_queue.clear()
-            logger.info(f"[在線檢查] 發送完成，暫停本輪剩餘 {remaining} 人的在線檢查")
             return
-        # 確保鏈不會因為未預期的例外而中斷
+        except Exception as e:
+            self._mark_degraded(f"查詢例外: {e}")
+            logger.info(f"[在線檢查] {contact_id} 查詢失敗: {e}")
         try:
             if self._online_check_queue:
                 per_user_delay = getattr(config, 'ONLINE_CHECK_PER_USER_DELAY', 5) * 1000
@@ -873,24 +932,22 @@ class PTTWorker(QObject):
             else:
                 logger.info("[在線檢查] 本輪全部完成")
         except Exception as e:
-            logger.warning(f"在線狀態檢查鏈排程失敗，清空佇列: {e}")
+            logger.warning(f"在線狀態檢查鏈排程失敗,清空佇列: {e}")
             self._online_check_queue.clear()
 
     @Slot(str)
     def set_active_chat(self, ptt_id: str):
-        """設定目前開啟的對話視窗，啟動該使用者的高頻在線狀態輪詢。
+        """設定目前開啟的對話視窗,啟動該使用者的高頻在線狀態輪詢。
 
         傳入空字串表示關閉對話視窗。
         """
         new_id = ptt_id.lower() if ptt_id else None
 
-        # 同一個對話不需重啟 timer
         if new_id == self._active_chat_id:
             return
 
         self._active_chat_id = new_id
 
-        # 停止舊 timer
         if self._active_chat_online_timer:
             self._active_chat_online_timer.stop()
             self._active_chat_online_timer = None
@@ -898,27 +955,27 @@ class PTTWorker(QObject):
         if not new_id or not self.ptt.ptt_id:
             return
 
-        # 跳過自己
         if new_id == self.ptt.ptt_id.lower():
             return
 
-        # 立即查詢一次，再啟動定期輪詢
         self._poll_active_chat_online()
         self._active_chat_online_timer = QTimer()
         self._active_chat_online_timer.timeout.connect(self._poll_active_chat_online)
         interval = getattr(config, 'CHECK_ACTIVE_CHAT_ONLINE_INTERVAL', 10) * 1000
         self._active_chat_online_timer.start(interval)
-        logger.info(f"開始高頻在線輪詢: {new_id}，間隔: {interval / 1000}s")
+        logger.info(f"開始高頻在線輪詢: {new_id},間隔: {interval / 1000}s")
 
     def _poll_active_chat_online(self):
-        """查詢目前開啟對話的使用者在線狀態"""
+        """查詢目前開啟對話的使用者在線狀態。"""
         chat_id = self._active_chat_id
         if not chat_id or not self.ptt.ptt_id:
             return
         try:
             info = self.ptt.get_user_info(chat_id)
+            self._mark_restored()
             self.online_status_updated.emit(chat_id, info['is_online'])
         except ValueError as e:
+            self._mark_restored()
             if "查無此人" in str(e) and self.ptt.ptt_id:
                 if self._active_chat_online_timer:
                     self._active_chat_online_timer.stop()
@@ -926,31 +983,32 @@ class PTTWorker(QObject):
                 self._active_chat_id = None
                 self.db.archive_session(self.ptt.ptt_id, chat_id)
                 self.session_archived.emit(chat_id)
-                logger.info(f"[活躍對話在線檢查] {chat_id} 不存在，會話已封存")
+                logger.info(f"[活躍對話在線檢查] {chat_id} 不存在,會話已封存")
             else:
                 logger.debug(f"[活躍對話在線檢查] {chat_id} 查詢失敗: {e}")
+        except PyPtt.ConnectionClosed:
+            self._mark_degraded("連線中斷")
+            logger.warning(f"[活躍對話在線檢查] {chat_id} 連線中斷")
         except Exception as e:
+            self._mark_degraded(f"查詢例外: {e}")
             logger.debug(f"[活躍對話在線檢查] {chat_id} 查詢失敗: {e}")
 
     @Slot()
     def stop(self):
-        """停止所有背景任務並登出"""
+        """停止 query worker:關閉所有 timer 並登出副 session。"""
         try:
-            logger.info("正在停止 Worker...")
-            if self.polling_timer:
-                self.polling_timer.stop()
-            if self._waterball_timer:
-                self._waterball_timer.stop()
+            logger.info("正在停止 QueryWorker...")
             if self._online_check_timer:
                 self._online_check_timer.stop()
+                self._online_check_timer = None
             if self._active_chat_online_timer:
                 self._active_chat_online_timer.stop()
                 self._active_chat_online_timer = None
             self._active_chat_id = None
+            self._online_check_queue.clear()
 
-            # 關閉 PTT 連線
             if self.ptt:
                 self.ptt.close()
-            logger.info("Worker 已成功停止")
+            logger.info("QueryWorker 已成功停止")
         except Exception as e:
-            logger.error(f"停止 Worker 時發生錯誤: {e}")
+            logger.error(f"停止 QueryWorker 時發生錯誤: {e}")

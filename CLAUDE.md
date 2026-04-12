@@ -34,24 +34,42 @@ Pytest is configured in `pytest.ini` with `--cov=src/uPtt --cov-fail-under=5`. T
 
 ### Threading Model
 - **Main thread:** Qt event loop (UI)
-- **Worker thread (`worker.py`):** All PTT I/O (login, polling mail, sending messages, user info queries)
-- **Communication:** Qt Signals/Slots bridge the two threads
+- **Worker thread (`PTTWorker`):** message I/O — login, polling mail, polling waterball, sending messages
+- **Query thread (`QueryWorker`):** user-status queries — `get_user_info`, periodic online check, active-chat polling
+- **Two PyPtt sessions:** main and query run on their own `UPttService` instances. Same PTT account, two concurrent logins.
+  - Main session logs in with `kick_other_session=True`
+  - Query session logs in ~10s after main success with `kick_other_session=False`; `kick_on_reconnect=False` so reconnect never kicks the main session
+  - Rationale: `get_user_info` can block for seconds; splitting onto a second session stops queries from blocking sends
+- **Reconnect throttle:** `UPttService._reconnect_lock` serializes reconnects across both sessions with a 5s minimum interval, preventing `LoginTooOften` when both drop at once
+- **Communication:** Qt Signals/Slots bridge all three threads
 
 ### Signal Flow
 ```
-UI → Signal (e.g. login_requested) → PTTWorker (background thread)
-PTTWorker → Signal (e.g. login_result) → UI handler
+UI → send_requested            → PTTWorker (main thread)
+UI → user_info_requested       → QueryWorker (query thread)
+UI → priority_online_requested → QueryWorker
+UI → set_active_chat_requested → QueryWorker
+UI → query_login_requested     → QueryWorker.do_login (triggered 10s after main login)
+
+PTTWorker  → new_message_received / send_result / login_result / connection_lost → UI
+QueryWorker → user_info_result / online_status_updated / session_archived        → UI
+QueryWorker → query_session_degraded / query_session_restored                    → UI
 ```
+
+### Failure Modes
+- **Main session down:** `connection_lost` fires; message send/receive halts; reconnect runs on main thread
+- **Query session down:** `query_session_degraded` fires; contact online dots render gray "unknown"; message send/receive unaffected; `query_session_restored` fires after next successful query
+- **Both down:** both signals fire; reconnect throttle serializes recovery
 
 ### Key Modules
 | Module | Role |
 |--------|------|
-| `app.py` | Entry point, window management, single-instance via QLocalServer |
-| `worker.py` | Background thread: polling loop, send/receive, user queries |
-| `ptt.py` | Thin wrapper around PyPtt library with reconnection logic |
+| `app.py` | Entry point, creates both `UPttService` instances, window management, single-instance via QLocalServer |
+| `worker.py` | `PTTWorker` (message I/O) + `QueryWorker` (user status) — two separate background QObjects |
+| `ptt.py` | `UPttService` — thin wrapper around PyPtt with reconnect logic, shared reconnect throttle, `kick_on_reconnect` flag |
 | `db.py` | SQLite database with multi-account isolation |
-| `ui/screens.py` | LoginWindow and MainWindow (chat interface) |
-| `ui/widgets.py` | ChatBubble, WaterballBubble, MailCard custom widgets |
+| `ui/screens.py` | LoginWindow and MainWindow (chat interface), owns both worker threads |
+| `ui/widgets.py` | ChatBubble, WaterballBubble, MailCard, ContactItem (with `set_online_unknown` for degraded mode) |
 | `ui/styles.py` | QSS dark theme stylesheets |
 | `config.py` | Constants: poll intervals (mail 5s, waterball 5s, online 60s), max messages (256) |
 | `contant.py` | Message format templates, commands, URLs (filename typo is legacy, do not rename) |
@@ -85,7 +103,9 @@ Quoted replies are encoded as `[re:@SENDER_ID|TRUNCATED_PREVIEW]\nMESSAGE_TEXT`.
 - Creates fresh PyPtt.Service instance on disconnect
 - Max 5 retries: 3s delay between attempts, 60s for `LoginTooOften`
 - `WrongIDorPassword` gives up immediately
-- Worker emits `connection_lost` / `connection_restored` signals
+- PTTWorker emits `connection_lost` / `connection_restored`; QueryWorker emits `query_session_degraded` / `query_session_restored`
+- **Shared throttle:** `UPttService._reconnect_lock` serializes reconnects across both sessions with a 5s minimum interval (class attribute). Without this, A and B dropping simultaneously would race into `LoginTooOften`.
+- **Kick semantics:** only main session escalates to `kick_other_session=True` on retry; query session's `kick_on_reconnect=False` ensures it can never evict the main session.
 
 ### Waterball Deduplication
 Waterball polling generates a batch fingerprint (hash of all content in current poll). If identical to the previous batch, the entire batch is skipped — this handles cases where PTT's CLEAR API fails.

@@ -105,11 +105,13 @@ def main():
     db_path = os.path.join(db_dir, "uptt_data.db")
     db = DatabaseManager(db_path)
 
-    # 初始化 PTT 服務實例
+    # 初始化雙 PTT 服務實例:主 session 負責收送訊息,副 session 專職使用者狀態查詢
+    # 副 session 重連時絕不可踢掉主 session,故 kick_on_reconnect=False
     ptt_service = UPttService()
+    ptt_query_service = UPttService(kick_on_reconnect=False)
 
     # 建立主視窗，將 db 傳入
-    main_window = MainWindow(ptt_service, db)
+    main_window = MainWindow(ptt_service, ptt_query_service, db)
     main_window.show()
 
     # 當新實例嘗試啟動時，會連線到此 server，我們藉此將主視窗推至最前

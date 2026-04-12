@@ -9,7 +9,12 @@ logger = logging.getLogger("uPtt.ptt")
 class UPttService:
     """PTT 核心服務類別，負責底層 PyPtt 操作"""
 
-    def __init__(self):
+    # 跨實例共享的重連節流:避免主/副 session 同時重連撞上 LoginTooOften
+    _reconnect_lock = threading.Lock()
+    _last_reconnect_ts: float = 0.0
+    _reconnect_min_interval: float = 5.0  # 秒
+
+    def __init__(self, kick_on_reconnect: bool = True):
         self.service: PyPtt.Service = PyPtt.Service(
             pyptt_init_config={'log_level': PyPtt.log.SILENT},
         )
@@ -22,6 +27,8 @@ class UPttService:
         self.retry_delay = 2  # 秒
         self._connected = False
         self._closing = False
+        # 重連時是否允許踢掉其他 session。副 session 必須設為 False,否則會把主 session 踢掉
+        self.kick_on_reconnect = kick_on_reconnect
 
     def login(self, ptt_id: str, ptt_pw: str, force: bool = True) -> bool:
         """
@@ -69,6 +76,15 @@ class UPttService:
         if self.ptt_id is None or self.ptt_pw is None:
             return False
 
+        # 序列化雙 session 的重連請求,避免同時登入撞 LoginTooOften
+        with UPttService._reconnect_lock:
+            elapsed = time.time() - UPttService._last_reconnect_ts
+            if elapsed < UPttService._reconnect_min_interval:
+                wait = UPttService._reconnect_min_interval - elapsed
+                logger.info(f"重連節流:等待 {wait:.1f}s 避免 LoginTooOften")
+                time.sleep(wait)
+            UPttService._last_reconnect_ts = time.time()
+
         max_retry = 3
         for retry_time in range(max_retry):
             new_service = None
@@ -77,10 +93,12 @@ class UPttService:
                     pyptt_init_config={'log_level': PyPtt.log.SILENT},
                 )
                 logging.getLogger("PyPtt").setLevel(logging.WARNING)
+                # 主 session 允許在 retry 時升級為 kick;副 session 永遠不可以
+                kick_this_try = self.kick_on_reconnect and retry_time > 0
                 new_service.call('login', {
                     'ptt_id': self.ptt_id,
                     'ptt_pw': self.ptt_pw,
-                    'kick_other_session': retry_time > 0,
+                    'kick_other_session': kick_this_try,
                 })
                 # Login succeeded — close old service, swap in new one
                 old_service = self.service

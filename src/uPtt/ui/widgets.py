@@ -512,6 +512,13 @@ class ContactItem(QWidget):
         self._is_online = is_online
         self._update_online_dot_style()
 
+    def set_online_unknown(self):
+        """副 session 降級時,把在線狀態點改為「未知」淺灰色。"""
+        self.online_dot.setStyleSheet(
+            "background-color: #7D8590; border-radius: 5px; border: 2px solid #0D1117;"
+        )
+        self.online_dot.setToolTip("使用者狀態暫時無法更新")
+
     def _update_pin_style(self):
         if self.is_pinned:
             self.pin_bar.setStyleSheet("background-color: #A0C4B4; border-radius: 1px;")

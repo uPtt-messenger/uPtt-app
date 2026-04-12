@@ -49,7 +49,8 @@ def test_main_debug_mode(mock_exit, mock_dir, mock_socket, mock_server, mock_ptt
     mock_qapp.assert_called_once()
     mock_main_win.assert_called_once()
     mock_db.assert_called_once()
-    mock_ptt.assert_called_once()
+    # 主 session + 副 session 各一次
+    assert mock_ptt.call_count == 2
     # Debug mode skips QLocalServer logic
     mock_server.assert_not_called()
 

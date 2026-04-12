@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QPushButton, QStackedWidget, QListWidget, QListWidgetItem, QSplitter,
     QScrollArea, QTextEdit, QSystemTrayIcon, QMenu, QMessageBox, QInputDialog
 )
-from PySide6.QtCore import Qt, Signal, Slot, QThread, QSize, QEvent, QUrl
+from PySide6.QtCore import Qt, Signal, Slot, QThread, QSize, QEvent, QUrl, QTimer
 from PySide6.QtGui import QIcon, QAction, QShortcut, QKeySequence, QPixmap, QPainter, QFontMetrics, QDesktopServices, QIntValidator
 from PySide6.QtSvg import QSvgRenderer
 
@@ -18,7 +18,7 @@ from uPtt import __version__, contant
 from uPtt.ui.styles import MAIN_STYLE
 from uPtt.ui.widgets import ChatBubble, WaterballBubble, MailCard, ContactItem, ContactListWidget
 from uPtt.utils import encode_reply, decode_reply, VersionCheckWorker
-from uPtt.worker import PTTWorker
+from uPtt.worker import PTTWorker, QueryWorker
 from uPtt.ptt import UPttService
 
 logger = logging.getLogger("uPtt.ui.screens")
@@ -427,19 +427,21 @@ class MainWindow(QMainWindow):
     scan_requested = Signal(int)  # scan_days
     skip_scan_requested = Signal()
     set_active_chat_requested = Signal(str)
+    query_login_requested = Signal(str, str)  # (ptt_id, ptt_pw) — 觸發副 session 延遲登入
 
-    def __init__(self, ptt_service: UPttService, db):
+    def __init__(self, ptt_service: UPttService, ptt_query_service: UPttService, db):
         super().__init__()
         self.setWindowTitle("uPtt")
-        
+
         # 設定視窗圖示
         icon_path = os.path.join(ASSETS_DIR, "logo_icon.svg")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
-            
+
         # 初始大小設為適合登入視窗的大小
         self.setFixedSize(440, 480)
         self.ptt_service = ptt_service
+        self.ptt_query_service = ptt_query_service
         self.db = db
         self.current_chat_id = None
         self.chat_histories: Dict[str, List[Dict]] = {}
@@ -472,7 +474,7 @@ class MainWindow(QMainWindow):
         self._ver_thread.start()
 
     def init_worker(self):
-        """啟動 PTT 背景 Worker"""
+        """啟動 PTT 背景 Worker(主收送 + 副查詢 兩條獨立 thread)"""
         # 確保清理舊的訊號連線 (避免重複)
         if getattr(self, "_worker_signals_connected", False):
             self.send_requested.disconnect()
@@ -481,20 +483,20 @@ class MainWindow(QMainWindow):
             self.set_active_chat_requested.disconnect()
             self.scan_requested.disconnect()
             self.skip_scan_requested.disconnect()
+            try:
+                self.query_login_requested.disconnect()
+            except RuntimeError:
+                pass
 
         # 斷開舊 Worker → MainWindow 方向的訊號，防止記憶體洩漏
         if hasattr(self, 'worker'):
             for sig in [
                 self.worker.new_message_received,
                 self.worker.send_result,
-                self.worker.user_info_result,
-                self.worker.user_info_error,
                 self.worker.status_updated,
                 self.worker.login_result,
                 self.worker.connection_lost,
                 self.worker.connection_restored,
-                self.worker.online_status_updated,
-                self.worker.session_archived,
                 self.worker.first_time_detected,
                 self.worker.scan_progress,
                 self.worker.scan_complete,
@@ -504,17 +506,38 @@ class MainWindow(QMainWindow):
                 except RuntimeError:
                     pass  # 已斷開
 
+        if hasattr(self, 'query_worker'):
+            for sig in [
+                self.query_worker.user_info_result,
+                self.query_worker.user_info_error,
+                self.query_worker.online_status_updated,
+                self.query_worker.session_archived,
+            ]:
+                try:
+                    sig.disconnect()
+                except RuntimeError:
+                    pass
+
+        # 主 worker(收送訊息)
         self.ptt_thread = QThread()
         self.worker = PTTWorker(self.ptt_service, self.db)
         self.worker.moveToThread(self.ptt_thread)
-        
+
+        # 副 worker(使用者狀態查詢)
+        self.query_thread = QThread()
+        self.query_worker = QueryWorker(self.ptt_query_service, self.db)
+        self.query_worker.moveToThread(self.query_thread)
+
         # 連接發信訊號 (跨執行緒會自動排程)
         self.send_requested.connect(self.worker.send_message)
-        self.user_info_requested.connect(self.worker.get_user_info)
-        self.priority_online_requested.connect(self.worker.check_online_priority)
-        self.set_active_chat_requested.connect(self.worker.set_active_chat)
         self.scan_requested.connect(self.worker.do_initial_scan)
         self.skip_scan_requested.connect(self.worker.do_skip_scan)
+
+        # 連接查詢訊號到副 worker
+        self.user_info_requested.connect(self.query_worker.get_user_info)
+        self.priority_online_requested.connect(self.query_worker.check_online_priority)
+        self.set_active_chat_requested.connect(self.query_worker.set_active_chat)
+        self.query_login_requested.connect(self.query_worker.do_login)
         self._worker_signals_connected = True
 
         # 這裡也改用訊號連接，確保在背景執行緒登入 (且在登出重啟 Worker 後能重新連向新實例)
@@ -524,20 +547,24 @@ class MainWindow(QMainWindow):
             self.login_screen.login_requested.connect(self.worker.do_login)
             self._login_signal_connected = True
 
-        # 連接 Worker 訊號
+        # 連接主 Worker 訊號
         self.worker.new_message_received.connect(self.on_new_message)
         self.worker.send_result.connect(self.on_send_result)
-        self.worker.user_info_result.connect(self.on_user_info_result)
-        self.worker.user_info_error.connect(self.on_user_info_error)
         self.worker.status_updated.connect(lambda s: logger.info(f"Worker Status: {s}"))
         self.worker.login_result.connect(self.on_login_result)
         self.worker.connection_lost.connect(self.on_connection_lost)
         self.worker.connection_restored.connect(self.on_connection_restored)
-        self.worker.online_status_updated.connect(self.on_online_status_updated)
-        self.worker.session_archived.connect(self.on_session_archived)
         self.worker.first_time_detected.connect(self._on_first_time_detected)
         self.worker.scan_progress.connect(self.scan_setup_screen.update_progress)
         self.worker.scan_complete.connect(self._on_scan_complete)
+
+        # 連接副 Worker 訊號
+        self.query_worker.user_info_result.connect(self.on_user_info_result)
+        self.query_worker.user_info_error.connect(self.on_user_info_error)
+        self.query_worker.online_status_updated.connect(self.on_online_status_updated)
+        self.query_worker.session_archived.connect(self.on_session_archived)
+        self.query_worker.query_session_degraded.connect(self.on_query_session_degraded)
+        self.query_worker.query_session_restored.connect(self.on_query_session_restored)
 
         # 掃描設定畫面的訊號
         if hasattr(self, 'scan_setup_screen'):
@@ -548,8 +575,9 @@ class MainWindow(QMainWindow):
             self.scan_setup_screen.scan_skipped.connect(self._on_scan_skipped)
             self._scan_signal_connected = True
 
-        # 啟動執行緒
+        # 啟動兩條執行緒
         self.ptt_thread.start()
+        self.query_thread.start()
 
     def init_ui(self):
         # 使用 QStackedWidget 切換登入與主畫面
@@ -986,6 +1014,12 @@ class MainWindow(QMainWindow):
             self._status_dot.show()
             self.logout_btn.show()
 
+            # 延遲 10 秒觸發副 session 登入,避開 LoginTooOften 且不影響 UI
+            ptt_id = self.ptt_service.ptt_id
+            ptt_pw = self.ptt_service.ptt_pw
+            if ptt_id and ptt_pw:
+                QTimer.singleShot(10000, lambda: self.query_login_requested.emit(ptt_id, ptt_pw))
+
             if getattr(self, '_is_first_time_login', False):
                 # 首次登入：顯示掃描設定畫面
                 self._is_first_time_login = False
@@ -1013,6 +1047,27 @@ class MainWindow(QMainWindow):
         self._status_dot.setStyleSheet("color: #56D364; font-size: 9px; background: transparent;")
         self._status_dot.setToolTip("")
         self.setWindowTitle(f"uPtt - {self.ptt_service.ptt_id}")
+
+    @Slot()
+    def on_query_session_degraded(self):
+        """副 session 降級:使用者狀態資料暫時無法更新,但訊息收發不受影響。"""
+        logger.warning("UI: 副 session 降級,使用者狀態暫時無法更新")
+        # 把所有聯絡人的在線點點改灰色「未知」
+        for i in range(self.contact_list.count()):
+            item = self.contact_list.item(i)
+            widget = self.contact_list.itemWidget(item)
+            if widget:
+                widget.set_online_unknown()
+        current_tooltip = self._status_dot.toolTip()
+        if "訊息收發正常" not in current_tooltip:
+            self._status_dot.setToolTip("使用者狀態暫時無法更新(訊息收發正常)")
+
+    @Slot()
+    def on_query_session_restored(self):
+        """副 session 恢復,使用者狀態功能重新可用。"""
+        logger.info("UI: 副 session 已恢復")
+        if self._status_dot.toolTip() == "使用者狀態暫時無法更新(訊息收發正常)":
+            self._status_dot.setToolTip("")
 
     @Slot(str, bool)
     def on_online_status_updated(self, ptt_id: str, is_online: bool):
@@ -1757,11 +1812,18 @@ class MainWindow(QMainWindow):
 
         logger.info("執行登出程序...")
         try:
-            # 1. 停止目前的 Worker 與執行緒
-            #    使用 BlockingQueuedConnection 確保 stop() 完成後才繼續，
-            #    避免 ptt.close() 尚未完成就被 terminate() 強殺導致 LoginTooOften
+            # 1. 先停止 query worker,再停主 worker(BlockingQueuedConnection 確保 ptt.close() 完成)
+            from PySide6.QtCore import QMetaObject
+            if hasattr(self, 'query_worker') and hasattr(self, 'query_thread') and self.query_thread.isRunning():
+                QMetaObject.invokeMethod(self.query_worker, "stop", Qt.BlockingQueuedConnection)
+
+            if hasattr(self, 'query_thread') and self.query_thread.isRunning():
+                self.query_thread.quit()
+                if not self.query_thread.wait(3000):
+                    self.query_thread.terminate()
+                    self.query_thread.wait()
+
             if hasattr(self, 'worker') and hasattr(self, 'ptt_thread') and self.ptt_thread.isRunning():
-                from PySide6.QtCore import QMetaObject
                 QMetaObject.invokeMethod(self.worker, "stop", Qt.BlockingQueuedConnection)
 
             if hasattr(self, 'ptt_thread') and self.ptt_thread.isRunning():
@@ -1775,8 +1837,9 @@ class MainWindow(QMainWindow):
                 self._ver_thread.quit()
                 self._ver_thread.wait(11000)
 
-            # 2. Worker thread 已確認停止，worker.stop() 已呼叫 ptt.close()，直接重建實例
+            # 2. 兩條 thread 都已停止,兩個 ptt.close() 已完成,重建兩個 service 實例
             self.ptt_service = UPttService()
+            self.ptt_query_service = UPttService(kick_on_reconnect=False)
 
             # 3. 清除 UI 狀態
             self._is_first_time_login = False
@@ -1820,11 +1883,19 @@ class MainWindow(QMainWindow):
         """徹底退出程式，確保 PTT 登出與執行緒釋放"""
         logger.info("正在執行完全退出程序...")
         try:
-            # 1. 停止 Worker — BlockingQueuedConnection 確保 ptt.close() 完成
+            from PySide6.QtCore import QMetaObject
+            # 1. 先停止 query worker,再停主 worker — BlockingQueuedConnection 確保 ptt.close() 完成
+            if hasattr(self, 'query_worker') and hasattr(self, 'query_thread') and self.query_thread.isRunning():
+                QMetaObject.invokeMethod(self.query_worker, "stop", Qt.BlockingQueuedConnection)
+
+            if hasattr(self, 'query_thread') and self.query_thread.isRunning():
+                self.query_thread.quit()
+                if not self.query_thread.wait(3000):
+                    logger.warning("Query 執行緒未在預期時間內結束,跳過等待。")
+
             if hasattr(self, 'worker') and hasattr(self, 'ptt_thread') and self.ptt_thread.isRunning():
-                from PySide6.QtCore import QMetaObject
                 QMetaObject.invokeMethod(self.worker, "stop", Qt.BlockingQueuedConnection)
-            
+
             # 2. 等待執行緒結束 (給予較長緩衝)
             if hasattr(self, 'ptt_thread') and self.ptt_thread.isRunning():
                 self.ptt_thread.quit()

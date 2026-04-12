@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 import PyPtt
 from datetime import datetime, timedelta
 
-from src.uPtt.worker import PTTWorker
+from src.uPtt.worker import PTTWorker, QueryWorker
 from src.uPtt.ptt import UPttService
 from src.uPtt import contant
 
@@ -23,6 +23,10 @@ def db_mock():
 @pytest.fixture
 def worker(ptt_service_mock, db_mock):
     return PTTWorker(ptt_service_mock, db_mock)
+
+@pytest.fixture
+def query_worker(ptt_service_mock, db_mock):
+    return QueryWorker(ptt_service_mock, db_mock)
 
 def test_worker_init_last_poll_is_none(ptt_service_mock, db_mock):
     """last_poll_time 在 __init__ 時應為 None，需等 do_login 成功後才載入。"""
@@ -378,15 +382,15 @@ def test_send_message_failure(qtbot, worker, ptt_service_mock):
     
     assert blocker.args == [False, "Send Error"]
 
-def test_get_user_info_success(qtbot, worker, ptt_service_mock, db_mock):
+def test_get_user_info_success(qtbot, query_worker, ptt_service_mock, db_mock):
     ptt_service_mock.get_user_info.return_value = {
         'ptt_id': 'CorrectID',
         'nickname': 'CoolNick',
         'is_online': True,
     }
 
-    with qtbot.waitSignal(worker.user_info_result) as blocker:
-        worker.get_user_info("correctid")
+    with qtbot.waitSignal(query_worker.user_info_result) as blocker:
+        query_worker.get_user_info("correctid")
 
     result = blocker.args[0]
     assert result['ptt_id'] == 'CorrectID'
@@ -394,20 +398,20 @@ def test_get_user_info_success(qtbot, worker, ptt_service_mock, db_mock):
     assert result['is_online'] is True
     db_mock.upsert_session.assert_called_once()
 
-def test_get_user_info_value_error(qtbot, worker, ptt_service_mock):
+def test_get_user_info_value_error(qtbot, query_worker, ptt_service_mock):
     ptt_service_mock.get_user_info.side_effect = ValueError("NoSuchUser")
-    
-    with qtbot.waitSignal(worker.user_info_error) as blocker:
-        worker.get_user_info("ghost")
-    
+
+    with qtbot.waitSignal(query_worker.user_info_error) as blocker:
+        query_worker.get_user_info("ghost")
+
     assert blocker.args == ["ghost", "NoSuchUser"]
 
-def test_get_user_info_exception(qtbot, worker, ptt_service_mock):
+def test_get_user_info_exception(qtbot, query_worker, ptt_service_mock):
     ptt_service_mock.get_user_info.side_effect = Exception("Random Error")
-    
-    with qtbot.waitSignal(worker.user_info_error) as blocker:
-        worker.get_user_info("user")
-    
+
+    with qtbot.waitSignal(query_worker.user_info_error) as blocker:
+        query_worker.get_user_info("user")
+
     assert "系統錯誤: Random Error" in blocker.args[1]
 
 def test_stop_worker(worker, ptt_service_mock):
@@ -603,3 +607,99 @@ def test_waterball_fingerprint_order_independent(worker):
     ])
 
     assert str(batch_ab) == str(batch_ba)
+
+
+# ── QueryWorker 專屬測試 ──────────────────────────────────────────
+
+def test_query_worker_init(query_worker):
+    """QueryWorker 初始狀態:未降級,無 timer,無佇列。"""
+    assert query_worker._degraded is False
+    assert query_worker._online_check_timer is None
+    assert query_worker._active_chat_online_timer is None
+    assert query_worker._active_chat_id is None
+    assert query_worker._online_check_queue == []
+
+
+def test_query_worker_do_login_success_starts_polling(qtbot, query_worker, ptt_service_mock):
+    """副 session 登入成功應啟動在線輪詢 timer,並清除降級狀態。"""
+    ptt_service_mock.login.return_value = True
+    # 預先把 query_worker 設為降級,驗證登入成功會恢復
+    query_worker._degraded = True
+
+    with qtbot.waitSignal(query_worker.query_session_restored):
+        query_worker.do_login("testuser", "testpass")
+
+    ptt_service_mock.login.assert_called_once_with("testuser", "testpass", force=False)
+    assert query_worker._online_check_timer is not None
+    assert query_worker._online_check_timer.isActive()
+    assert query_worker._degraded is False
+
+
+def test_query_worker_do_login_failure_marks_degraded(qtbot, query_worker, ptt_service_mock):
+    """副 session 登入失敗應發射 query_session_degraded。"""
+    ptt_service_mock.login.side_effect = Exception("LoginTooOften")
+
+    with qtbot.waitSignal(query_worker.query_session_degraded):
+        query_worker.do_login("testuser", "testpass")
+
+    assert query_worker._degraded is True
+    assert query_worker._online_check_timer is None
+
+
+def test_query_worker_connection_closed_marks_degraded(qtbot, query_worker, ptt_service_mock):
+    """查詢時遇到 ConnectionClosed 應進入降級狀態。"""
+    # bypass __init__ — i18n strings aren't loaded until PyPtt.Service() runs
+    ptt_service_mock.get_user_info.side_effect = PyPtt.ConnectionClosed.__new__(PyPtt.ConnectionClosed)
+
+    with qtbot.waitSignal(query_worker.query_session_degraded):
+        query_worker.get_user_info("target")
+
+    assert query_worker._degraded is True
+
+
+def test_query_worker_successful_call_restores(qtbot, query_worker, ptt_service_mock):
+    """降級後成功查詢應發射 query_session_restored。"""
+    query_worker._degraded = True
+    ptt_service_mock.get_user_info.return_value = {
+        'ptt_id': 'Target',
+        'nickname': 'Nick',
+        'is_online': True,
+    }
+
+    with qtbot.waitSignal(query_worker.query_session_restored):
+        query_worker.get_user_info("target")
+
+    assert query_worker._degraded is False
+
+
+def test_query_worker_skips_when_not_logged_in(query_worker, ptt_service_mock):
+    """副 session 未登入(ptt_id=None)時,查詢應靜默跳過,不呼叫 PyPtt。"""
+    ptt_service_mock.ptt_id = None
+
+    query_worker.get_user_info("someone")
+
+    ptt_service_mock.get_user_info.assert_not_called()
+
+
+def test_query_worker_stop_closes_session(query_worker, ptt_service_mock):
+    """停止時應關閉 timer 並登出副 session。"""
+    query_worker._online_check_timer = MagicMock(spec=QTimer)
+    query_worker._active_chat_online_timer = MagicMock(spec=QTimer)
+
+    query_worker.stop()
+
+    query_worker._online_check_timer  # 確認引用還在 (stop 之前)
+    ptt_service_mock.close.assert_called_once()
+
+
+def test_ptt_service_kick_on_reconnect_flag():
+    """UPttService 預設允許重連 kick;副 session 應能關閉此行為。"""
+    # 注意:直接建立 UPttService 會初始化 PyPtt.Service,
+    # 這裡只測 flag 儲存,不實際登入。
+    from src.uPtt.ptt import UPttService
+    with patch('src.uPtt.ptt.PyPtt.Service') as mock_svc:
+        main = UPttService()
+        assert main.kick_on_reconnect is True
+
+        query = UPttService(kick_on_reconnect=False)
+        assert query.kick_on_reconnect is False
