@@ -512,6 +512,8 @@ class MainWindow(QMainWindow):
                 self.query_worker.user_info_error,
                 self.query_worker.online_status_updated,
                 self.query_worker.session_archived,
+                self.query_worker.query_session_degraded,
+                self.query_worker.query_session_restored,
             ]:
                 try:
                     sig.disconnect()
@@ -1015,10 +1017,7 @@ class MainWindow(QMainWindow):
             self.logout_btn.show()
 
             # 延遲 10 秒觸發副 session 登入,避開 LoginTooOften 且不影響 UI
-            ptt_id = self.ptt_service.ptt_id
-            ptt_pw = self.ptt_service.ptt_pw
-            if ptt_id and ptt_pw:
-                QTimer.singleShot(10000, lambda: self.query_login_requested.emit(ptt_id, ptt_pw))
+            QTimer.singleShot(10000, self._trigger_query_login)
 
             if getattr(self, '_is_first_time_login', False):
                 # 首次登入：顯示掃描設定畫面
@@ -1031,6 +1030,13 @@ class MainWindow(QMainWindow):
                 self.message_edit.setFocus()
         else:
             self.login_screen.show_error(message)
+
+    def _trigger_query_login(self):
+        """延遲觸發副 session 登入，在執行時才從 ptt_service 讀取憑證。"""
+        ptt_id = self.ptt_service.ptt_id
+        ptt_pw = self.ptt_service.ptt_pw
+        if ptt_id and ptt_pw:
+            self.query_login_requested.emit(ptt_id, ptt_pw)
 
     @Slot()
     def on_connection_lost(self):
@@ -1174,46 +1180,55 @@ class MainWindow(QMainWindow):
         if current_total_w > 0:
             self.splitter.setSizes([final_w, current_total_w - final_w])
 
+    def _ensure_contact_in_list(self, ptt_id: str, nickname: str = "") -> bool:
+        """確保聯絡人已在側邊欄清單中，但不選取。回傳 True 表示新增。"""
+        ptt_id_lower = ptt_id.lower()
+        for i in range(self.contact_list.count()):
+            widget = self.contact_list.itemWidget(self.contact_list.item(i))
+            if widget and widget.ptt_id == ptt_id_lower:
+                return False  # 已存在
+        item = QListWidgetItem(self.contact_list)
+        item.setSizeHint(QSize(0, 70))
+        widget = ContactItem(ptt_id, nickname)
+        self.contact_list.addItem(item)
+        self.contact_list.setItemWidget(item, widget)
+        if ptt_id_lower not in self.chat_histories:
+            self.chat_histories[ptt_id_lower] = []
+            self.unread_counts[ptt_id_lower] = 0
+        self.user_info_requested.emit(ptt_id_lower)
+        self.update_sidebar_width()
+        return True
+
     def add_or_select_contact(self, ptt_id, nickname=""):
         ptt_id_lower = ptt_id.lower()
-        
+
         # 檢查是否已在清單中 (不分大小寫邏輯比較)
         found_item = None
         for i in range(self.contact_list.count()):
             item = self.contact_list.item(i)
             widget = self.contact_list.itemWidget(item)
             if widget and widget.ptt_id == ptt_id_lower:
-                # 即使已存在，也更新其顯示文字 (避免使用者輸入了不同的大小寫但沒反應)
                 if widget.ptt_id_display != ptt_id:
                     widget.update_info(ptt_id, nickname)
-                
                 found_item = item
                 break
-        
+
         if found_item:
             self.contact_list.setCurrentItem(found_item)
             self.on_contact_selected(found_item)
-            # 即使已存在，也重新請求一次資訊以確保最新 (修正大小寫與暱稱)
             self.user_info_requested.emit(ptt_id_lower)
             return
-        
-        # 新增至清單 (雙行整齊版)
-        item = QListWidgetItem(self.contact_list)
-        item.setSizeHint(QSize(0, 70))
-        widget = ContactItem(ptt_id, nickname)
-        self.contact_list.addItem(item)
-        self.contact_list.setItemWidget(item, widget)
-        
-        if ptt_id_lower not in self.chat_histories:
-            self.chat_histories[ptt_id_lower] = []
-            self.unread_counts[ptt_id_lower] = 0
-            
-        self.contact_list.setCurrentItem(item)
-        self.on_contact_selected(item)
-        
-        # 嘗試獲取使用者資訊以更新暱稱與正確大小寫
-        self.user_info_requested.emit(ptt_id_lower)
-        self.update_sidebar_width() # 立即嘗試更新一次寬度
+
+        # 新增至清單
+        self._ensure_contact_in_list(ptt_id, nickname)
+        # 選取新增的項目
+        for i in range(self.contact_list.count()):
+            item = self.contact_list.item(i)
+            widget = self.contact_list.itemWidget(item)
+            if widget and widget.ptt_id == ptt_id_lower:
+                self.contact_list.setCurrentItem(item)
+                self.on_contact_selected(item)
+                break
 
     def on_contact_selected(self, item):
         widget = self.contact_list.itemWidget(item)
@@ -1444,103 +1459,80 @@ class MainWindow(QMainWindow):
         self.worker.enqueue_send(self.current_chat_id, encoded_text, now)
         self.send_requested.emit(self.current_chat_id, encoded_text, now)
 
+    def _append_if_not_dup(self, sender: str, msg_dict: dict) -> bool:
+        """將訊息加入 chat_histories，若為重複則跳過。回傳 True 表示已新增。"""
+        msg_ts = msg_dict.get('timestamp')
+        msg_ts_sec = msg_ts.replace(microsecond=0) if msg_ts else None
+        is_dup = any(
+            (m.get('timestamp', datetime.min).replace(microsecond=0) if m.get('timestamp') else None) == msg_ts_sec
+            and m.get('text') == msg_dict.get('text') and m.get('is_me', False) == msg_dict.get('is_me', False)
+            for m in self.chat_histories.get(sender, [])
+        )
+        if is_dup:
+            return False
+        self.chat_histories.setdefault(sender, []).append(msg_dict)
+        return True
+
     @Slot(dict)
     def on_new_message(self, data):
-        # sender_id_display 是原始大小寫，sender 是用來當字典 Key 的小寫
         sender_id_display = data['sender']
         sender = sender_id_display.lower()
-        
-        # 檢查是否在封鎖名單
+
         if sender in self.blocked_users:
             logger.info(f"忽略來自已封鎖使用者 '{sender}' 的訊息")
             return
 
-        # 從 full_author 提取暱稱，例如 "CodingMan (小明)"
+        # 從 full_author 提取暱稱
         full_author = data.get('full_author', '')
         nickname = ""
         if '(' in full_author and ')' in full_author:
             nickname = full_author[full_author.find('(')+1 : full_author.rfind(')')]
-        
-        if sender not in self.chat_histories:
-            self.chat_histories[sender] = []
-            self.unread_counts[sender] = 0
-            # 如果是新聯絡人，新增到清單 (帶入原始大小寫 ID 與 暱稱)
-            self.add_or_select_contact(sender_id_display, nickname)
 
-            # add_or_select_contact 內部的 on_contact_selected 會從 DB 載入歷史並覆寫 chat_histories，
-            # 但觸發此訊號的那條訊息可能已在 DB 中（worker 先寫 DB 再 emit），
-            # 所以需要去重後 append，確保當前 session 能看到。
-            reply_info, actual_text = decode_reply(data['text'])
-            is_me = data.get('is_me', False)
-            msg_ts = data.get('timestamp', datetime.now())
-            msg_ts_sec = msg_ts.replace(microsecond=0) if msg_ts else None
-            is_dup = any(
-                (m.get('timestamp', datetime.min).replace(microsecond=0) if m.get('timestamp') else None) == msg_ts_sec
-                and m.get('text') == actual_text and m.get('is_me', False) == is_me
-                for m in self.chat_histories.get(sender, [])
-            )
-            if not is_dup:
-                self.chat_histories.setdefault(sender, []).append({
-                    'text': actual_text,
-                    'time': data['time'],
-                    'timestamp': msg_ts,
-                    'is_me': is_me,
-                    'mail_type': data.get('mail_type', 'uptt'),
-                    'subject': data.get('subject', ''),
-                    'reply_info': reply_info,
-                })
-                if self.current_chat_id == sender:
-                    self.refresh_chat_display()
+        # 確保聯絡人在側邊欄中（不強制選取，避免搶走使用者焦點）
+        self._ensure_contact_in_list(sender_id_display, nickname)
 
-            self._move_contact_to_top(sender)
-        else:
-            # 如果已存在，更新暱稱、ID 與最後訊息時間
-            now_time = datetime.now().strftime("%H:%M")
-            for i in range(self.contact_list.count()):
-                item = self.contact_list.item(i)
-                widget = self.contact_list.itemWidget(item)
-                if widget and widget.ptt_id == sender:
+        # 更新聯絡人資訊與最後訊息時間（只在 nickname 非空時更新，避免水球清除暱稱）
+        now_time = datetime.now().strftime("%H:%M")
+        for i in range(self.contact_list.count()):
+            widget = self.contact_list.itemWidget(self.contact_list.item(i))
+            if widget and widget.ptt_id == sender:
+                if nickname:
                     widget.update_info(sender_id_display, nickname)
-                    widget.set_last_msg_time(now_time)
-                    break
+                elif widget.ptt_id_display != sender_id_display:
+                    # 只更新大小寫，保留現有暱稱
+                    nick_text = widget.nickname_label.text()
+                    existing_nick = nick_text[1:-1] if nick_text.startswith("(") and nick_text.endswith(")") else ""
+                    widget.update_info(sender_id_display, existing_nick)
+                widget.set_last_msg_time(now_time)
+                break
 
-            reply_info, actual_text = decode_reply(data['text'])
-            is_me = data.get('is_me', False)
-            msg_ts = data.get('timestamp', datetime.now())
+        # 解析回覆資訊並去重
+        reply_info, actual_text = decode_reply(data['text'])
+        is_me = data.get('is_me', False)
+        msg_dict = {
+            'text': actual_text,
+            'time': data['time'],
+            'timestamp': data.get('timestamp', datetime.now()),
+            'is_me': is_me,
+            'mail_type': data.get('mail_type', 'uptt'),
+            'subject': data.get('subject', ''),
+            'reply_info': reply_info,
+        }
 
-            # 去重：避免 on_contact_selected 從 DB 載入後，signal 又重複 append
-            msg_ts_sec = msg_ts.replace(microsecond=0) if msg_ts else None
-            is_dup = any(
-                (m.get('timestamp', datetime.min).replace(microsecond=0) if m.get('timestamp') else None) == msg_ts_sec
-                and m.get('text') == actual_text and m.get('is_me', False) == is_me
-                for m in self.chat_histories[sender]
-            )
-            if not is_dup:
-                self.chat_histories[sender].append({
-                    'text': actual_text,
-                    'time': data['time'],
-                    'timestamp': msg_ts,
-                    'is_me': is_me,
-                    'mail_type': data.get('mail_type', 'uptt'),
-                    'subject': data.get('subject', ''),
-                    'reply_info': reply_info,
-                })
+        if self._append_if_not_dup(sender, msg_dict):
+            if self.current_chat_id == sender:
+                self.refresh_chat_display()
+            else:
+                self.unread_counts[sender] = self.unread_counts.get(sender, 0) + 1
+                for i in range(self.contact_list.count()):
+                    widget = self.contact_list.itemWidget(self.contact_list.item(i))
+                    if widget and widget.ptt_id == sender:
+                        widget.set_unread(self.unread_counts[sender])
+                        break
 
-                if self.current_chat_id == sender:
-                    self.refresh_chat_display()
-                else:
-                    self.unread_counts[sender] += 1
-                    # 更新清單中的未讀計數
-                    for i in range(self.contact_list.count()):
-                        item = self.contact_list.item(i)
-                        widget = self.contact_list.itemWidget(item)
-                        if widget.ptt_id == sender:
-                            widget.set_unread(self.unread_counts[sender])
-                            break
+        self._move_contact_to_top(sender)
 
-            self._move_contact_to_top(sender)
-
-        # 桌面通知 (僅限收到的訊息，排除自己從其他終端發出的)
+        # 桌面通知 (僅限收到的訊息，排除自己發出的)
         if not self.isActiveWindow() and not data.get('is_me', False):
             _, notify_text = decode_reply(data['text'])
             self.tray_icon.showMessage(
@@ -1594,8 +1586,10 @@ class MainWindow(QMainWindow):
 
         if action_type == "BLOCK":
             self.blocked_users.add(ptt_id_lower)
-            # 封鎖後也隱藏對話
             self.db.hide_session(current_acc, ptt_id_lower)
+            self.chat_histories.pop(ptt_id_lower, None)
+            self.unread_counts.pop(ptt_id_lower, None)
+            self.session_drafts.pop(ptt_id_lower, None)
             self.remove_contact_from_sidebar(ptt_id_lower)
             QMessageBox.information(self, "已封鎖", f"已將使用者 '{ptt_id}' 加入封鎖名單。")
             
@@ -1621,10 +1615,28 @@ class MainWindow(QMainWindow):
             self.session_drafts.pop(ptt_id_lower, None)
             self.remove_contact_from_sidebar(ptt_id_lower)
 
+    def _rebuild_contact_item(self, data: dict, insert_pos: int, is_pinned: bool) -> QListWidgetItem:
+        """從 data dict 重建 ContactItem 並插入至指定位置。回傳新的 QListWidgetItem。"""
+        new_item = QListWidgetItem()
+        new_item.setSizeHint(QSize(0, 70))
+        new_widget = ContactItem(
+            ptt_id=data['ptt_id_display'],
+            nickname=data['nickname'],
+            unread_count=data.get('unread_count', 0),
+            is_pinned=is_pinned,
+            last_msg_time=data.get('last_msg_time', ''),
+        )
+        new_widget.set_online(data.get('is_online', False))
+        if data.get('is_archived'):
+            new_widget.set_archived(True)
+        self.contact_list.insertItem(insert_pos, new_item)
+        self.contact_list.setItemWidget(new_item, new_widget)
+        return new_item
+
     def _move_contact_to_top(self, sender: str):
         """將指定非釘選聯絡人移至非釘選區頂端 (sender 為小寫)"""
         if sender in self.pinned_ids:
-            return  # 釘選的聯絡人不需移動
+            return
 
         pinned_count = self.contact_list._pinned_count()
 
@@ -1633,27 +1645,15 @@ class MainWindow(QMainWindow):
             widget = self.contact_list.itemWidget(item)
             if widget and widget.ptt_id == sender:
                 if i == pinned_count:
-                    return  # 已在非釘選區頂端
+                    return
                 was_selected = (self.contact_list.currentItem() == item)
                 data = widget.get_data()
                 self.contact_list.removeItemWidget(item)
                 self.contact_list.takeItem(i)
-                new_item = QListWidgetItem()
-                new_item.setSizeHint(QSize(0, 70))
-                new_widget = ContactItem(
-                    ptt_id=data['ptt_id_display'],
-                    nickname=data['nickname'],
-                    is_pinned=False,
-                    last_msg_time=data.get('last_msg_time', ''),
-                )
-                new_widget.set_online(data.get('is_online', False))
-                if data.get('is_archived'):
-                    new_widget.set_archived(True)
-                self.contact_list.insertItem(pinned_count, new_item)
-                self.contact_list.setItemWidget(new_item, new_widget)
+                new_item = self._rebuild_contact_item(data, pinned_count, False)
                 unread = self.unread_counts.get(sender, 0)
                 if unread > 0:
-                    new_widget.set_unread(unread)
+                    self.contact_list.itemWidget(new_item).set_unread(unread)
                 if was_selected:
                     self.contact_list.setCurrentItem(new_item)
                 return
@@ -1698,7 +1698,7 @@ class MainWindow(QMainWindow):
 
     def _move_to_pinned_area(self, ptt_id_lower: str):
         """將項目移至釘選區末尾並標記為釘選。"""
-        insert_pos = self.contact_list._pinned_count()  # 以視覺列表為準
+        insert_pos = self.contact_list._pinned_count()
 
         for i in range(self.contact_list.count()):
             item = self.contact_list.item(i)
@@ -1711,28 +1711,14 @@ class MainWindow(QMainWindow):
                 data = widget.get_data()
                 self.contact_list.removeItemWidget(item)
                 self.contact_list.takeItem(i)
-
-                new_item = QListWidgetItem()
-                new_item.setSizeHint(QSize(0, 70))
-                new_widget = ContactItem(
-                    ptt_id=data['ptt_id_display'],
-                    nickname=data['nickname'],
-                    unread_count=data['unread_count'],
-                    is_pinned=True,
-                    last_msg_time=data.get('last_msg_time', ''),
-                )
-                new_widget.set_online(data.get('is_online', False))
-                if data.get('is_archived'):
-                    new_widget.set_archived(True)
-                self.contact_list.insertItem(insert_pos, new_item)
-                self.contact_list.setItemWidget(new_item, new_widget)
+                new_item = self._rebuild_contact_item(data, insert_pos, True)
                 if was_selected:
                     self.contact_list.setCurrentItem(new_item)
                 return
 
     def _move_pinned_to_unpinned_area(self, ptt_id_lower: str):
         """將取消釘選的項目移至非釘選區頂端。"""
-        insert_pos = self.contact_list._pinned_count() - 1  # 以視覺列表為準，扣除即將取消的項目
+        insert_pos = self.contact_list._pinned_count() - 1
 
         for i in range(self.contact_list.count()):
             item = self.contact_list.item(i)
@@ -1742,21 +1728,7 @@ class MainWindow(QMainWindow):
                 data = widget.get_data()
                 self.contact_list.removeItemWidget(item)
                 self.contact_list.takeItem(i)
-
-                new_item = QListWidgetItem()
-                new_item.setSizeHint(QSize(0, 70))
-                new_widget = ContactItem(
-                    ptt_id=data['ptt_id_display'],
-                    nickname=data['nickname'],
-                    unread_count=data['unread_count'],
-                    is_pinned=False,
-                    last_msg_time=data.get('last_msg_time', ''),
-                )
-                new_widget.set_online(data.get('is_online', False))
-                if data.get('is_archived'):
-                    new_widget.set_archived(True)
-                self.contact_list.insertItem(insert_pos, new_item)
-                self.contact_list.setItemWidget(new_item, new_widget)
+                new_item = self._rebuild_contact_item(data, insert_pos, False)
                 if was_selected:
                     self.contact_list.setCurrentItem(new_item)
                 return
@@ -1801,6 +1773,27 @@ class MainWindow(QMainWindow):
 
         menu.exec(self.contact_list.mapToGlobal(pos))
 
+    def _stop_all_threads(self):
+        """停止所有背景執行緒 (query worker → main worker → version check)。"""
+        from PySide6.QtCore import QMetaObject
+        if hasattr(self, 'query_worker') and hasattr(self, 'query_thread') and self.query_thread.isRunning():
+            QMetaObject.invokeMethod(self.query_worker, "stop", Qt.BlockingQueuedConnection)
+        if hasattr(self, 'query_thread') and self.query_thread.isRunning():
+            self.query_thread.quit()
+            if not self.query_thread.wait(3000):
+                self.query_thread.terminate()
+                self.query_thread.wait()
+        if hasattr(self, 'worker') and hasattr(self, 'ptt_thread') and self.ptt_thread.isRunning():
+            QMetaObject.invokeMethod(self.worker, "stop", Qt.BlockingQueuedConnection)
+        if hasattr(self, 'ptt_thread') and self.ptt_thread.isRunning():
+            self.ptt_thread.quit()
+            if not self.ptt_thread.wait(3000):
+                self.ptt_thread.terminate()
+                self.ptt_thread.wait()
+        if hasattr(self, '_ver_thread') and self._ver_thread.isRunning():
+            self._ver_thread.quit()
+            self._ver_thread.wait(11000)
+
     def handle_logout(self):
         """登出並回到登入畫面"""
         confirm = QMessageBox.question(
@@ -1812,36 +1805,12 @@ class MainWindow(QMainWindow):
 
         logger.info("執行登出程序...")
         try:
-            # 1. 先停止 query worker,再停主 worker(BlockingQueuedConnection 確保 ptt.close() 完成)
-            from PySide6.QtCore import QMetaObject
-            if hasattr(self, 'query_worker') and hasattr(self, 'query_thread') and self.query_thread.isRunning():
-                QMetaObject.invokeMethod(self.query_worker, "stop", Qt.BlockingQueuedConnection)
+            self._stop_all_threads()
 
-            if hasattr(self, 'query_thread') and self.query_thread.isRunning():
-                self.query_thread.quit()
-                if not self.query_thread.wait(3000):
-                    self.query_thread.terminate()
-                    self.query_thread.wait()
-
-            if hasattr(self, 'worker') and hasattr(self, 'ptt_thread') and self.ptt_thread.isRunning():
-                QMetaObject.invokeMethod(self.worker, "stop", Qt.BlockingQueuedConnection)
-
-            if hasattr(self, 'ptt_thread') and self.ptt_thread.isRunning():
-                self.ptt_thread.quit()
-                if not self.ptt_thread.wait(3000):
-                    self.ptt_thread.terminate()
-                    self.ptt_thread.wait()
-
-            # 1.5 停止版本檢查執行緒
-            if hasattr(self, '_ver_thread') and self._ver_thread.isRunning():
-                self._ver_thread.quit()
-                self._ver_thread.wait(11000)
-
-            # 2. 兩條 thread 都已停止,兩個 ptt.close() 已完成,重建兩個 service 實例
             self.ptt_service = UPttService()
             self.ptt_query_service = UPttService(kick_on_reconnect=False)
 
-            # 3. 清除 UI 狀態
+            # 清除 UI 狀態
             self._is_first_time_login = False
             self.scan_setup_screen.reset()
             self.cancel_reply()
@@ -1858,23 +1827,19 @@ class MainWindow(QMainWindow):
             self.chat_header.hide()
             self.setWindowTitle("uPtt")
 
-            # 4. 重設視窗為登入大小
             self.setMinimumSize(0, 0)
             self.setMaximumSize(16777215, 16777215)
             self.setFixedSize(440, 480)
-            
-            # 5. 切換畫面
+
             self.central_stack.setCurrentIndex(0)
             self.login_screen.login_btn.setEnabled(True)
             self.login_screen.login_btn.setText("連線至 PTT")
             self.login_screen.password_input.clear()
             self.login_screen.username_input.setFocus()
-            
-            # 6. 重新初始化新的 Worker 與執行緒 (準備下次登入)
+
             self.init_worker()
-            
             logger.info("登出成功，已回到登入視窗。")
-            
+
         except Exception as e:
             logger.error(f"登出時發生異常: {e}")
             QMessageBox.critical(self, "登出錯誤", f"登出時發生非預期錯誤: {e}")
@@ -1883,37 +1848,14 @@ class MainWindow(QMainWindow):
         """徹底退出程式，確保 PTT 登出與執行緒釋放"""
         logger.info("正在執行完全退出程序...")
         try:
-            from PySide6.QtCore import QMetaObject
-            # 1. 先停止 query worker,再停主 worker — BlockingQueuedConnection 確保 ptt.close() 完成
-            if hasattr(self, 'query_worker') and hasattr(self, 'query_thread') and self.query_thread.isRunning():
-                QMetaObject.invokeMethod(self.query_worker, "stop", Qt.BlockingQueuedConnection)
+            self._stop_all_threads()
 
-            if hasattr(self, 'query_thread') and self.query_thread.isRunning():
-                self.query_thread.quit()
-                if not self.query_thread.wait(3000):
-                    logger.warning("Query 執行緒未在預期時間內結束,跳過等待。")
-
-            if hasattr(self, 'worker') and hasattr(self, 'ptt_thread') and self.ptt_thread.isRunning():
-                QMetaObject.invokeMethod(self.worker, "stop", Qt.BlockingQueuedConnection)
-
-            # 2. 等待執行緒結束 (給予較長緩衝)
-            if hasattr(self, 'ptt_thread') and self.ptt_thread.isRunning():
-                self.ptt_thread.quit()
-                if not self.ptt_thread.wait(3000):
-                    logger.warning("Worker 執行緒未在預期時間內結束，跳過等待。")
-
-            # 2.5 停止版本檢查執行緒
-            if hasattr(self, '_ver_thread') and self._ver_thread.isRunning():
-                self._ver_thread.quit()
-                self._ver_thread.wait(11000)
-
-            # 3. 隱藏系統匣
             if hasattr(self, 'tray_icon'):
                 self.tray_icon.hide()
-            
+
             logger.info("退出程序完成，關閉應用程式。")
             QApplication.quit()
-            
+
         except Exception as e:
             logger.error(f"退出程式時發生異常: {e}")
             QApplication.quit()

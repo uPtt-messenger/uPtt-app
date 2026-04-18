@@ -165,3 +165,109 @@ class TestVersionCheckWorker:
         worker.update_available.connect(lambda v: received.append(v))
         worker.check()  # should not raise
         assert received == []
+
+
+# --- encode_reply / decode_reply / strip_ansi / parse_embedded_timestamp ---
+
+from src.uPtt.utils import encode_reply, decode_reply, strip_ansi, parse_embedded_timestamp, unwrap_ptt_lines
+
+
+def test_encode_decode_reply_roundtrip():
+    """encode_reply → decode_reply 應保持原始內容。"""
+    encoded = encode_reply("SomeUser", "Hello world preview", "My actual reply")
+    info, text = decode_reply(encoded)
+    assert info is not None
+    assert info['sender'] == "SomeUser"
+    assert info['preview'] == "Hello world preview"
+    assert text == "My actual reply"
+
+
+def test_decode_reply_plain_text():
+    """非回覆格式的訊息應回傳 (None, 原文)。"""
+    info, text = decode_reply("Just a normal message")
+    assert info is None
+    assert text == "Just a normal message"
+
+
+def test_strip_ansi():
+    """ANSI 跳脫序列應被完整移除。"""
+    assert strip_ansi("\x1b[1;31mRed\x1b[0m") == "Red"
+    assert strip_ansi("NoAnsi") == "NoAnsi"
+    assert strip_ansi("") == ""
+
+
+def test_msg_to_mail_with_timestamp():
+    """帶 timestamp 參數時應嵌入 [uPtt-ts:...] 標籤。"""
+    from datetime import datetime as _dt
+    ts = _dt(2025, 6, 15, 10, 30, 0)
+    result = msg_to_mail("uPtt", "user1", "test msg", timestamp=ts)
+    assert contant.PTT_MSG_TS_PREFIX in result
+    assert "2025-06-15T10:30:00" in result
+
+
+def test_parse_embedded_timestamp_valid():
+    """應正確解析嵌入的 ISO 時間戳。"""
+    content = f"something{contant.PTT_MSG_DIVISION_LINE}\n{contant.PTT_MSG_TS_PREFIX}2025-06-15T10:30:00{contant.PTT_MSG_TS_SUFFIX}"
+    div_end = content.find(contant.PTT_MSG_DIVISION_LINE) + len(contant.PTT_MSG_DIVISION_LINE)
+    result = parse_embedded_timestamp(content, div_end)
+    assert result is not None
+    assert result.year == 2025
+    assert result.month == 6
+
+
+def test_parse_embedded_timestamp_missing():
+    """沒有時間戳時應回傳 None。"""
+    result = parse_embedded_timestamp("no timestamp here", 0)
+    assert result is None
+
+
+# --- unwrap_ptt_lines tests ---
+
+def test_unwrap_ptt_lines_short_lines():
+    """短行不應被合併。"""
+    text = "Hello\nWorld"
+    assert unwrap_ptt_lines(text) == "Hello\nWorld"
+
+
+def test_unwrap_ptt_lines_long_line_ascii():
+    """超過 78 欄位的 ASCII 行應與下一行合併。"""
+    line1 = "A" * 80
+    line2 = "B" * 10
+    text = f"{line1}\n{line2}"
+    assert unwrap_ptt_lines(text) == line1 + line2
+
+
+def test_unwrap_ptt_lines_cjk_wrap():
+    """全形中文字佔 2 欄位，39 個中文字 = 78 欄位，應與下一行合併。"""
+    line1 = "測" * 39  # 39 * 2 = 78 display width
+    line2 = "試結尾"
+    text = f"{line1}\n{line2}"
+    assert unwrap_ptt_lines(text) == line1 + line2
+
+
+def test_unwrap_ptt_lines_preserves_empty_line():
+    """空行（段落分隔）應被保留。"""
+    text = "Paragraph 1\n\nParagraph 2"
+    assert unwrap_ptt_lines(text) == "Paragraph 1\n\nParagraph 2"
+
+
+def test_unwrap_ptt_lines_multi_wrap():
+    """連續多行被 PTT 換行應全部合併回一行。"""
+    line1 = "A" * 80
+    line2 = "B" * 80
+    line3 = "C" * 10
+    text = f"{line1}\n{line2}\n{line3}"
+    assert unwrap_ptt_lines(text) == line1 + line2 + line3
+
+
+def test_unwrap_ptt_lines_single_line():
+    """單行文字不應被改變。"""
+    text = "Just one line"
+    assert unwrap_ptt_lines(text) == "Just one line"
+
+
+def test_unwrap_ptt_lines_mixed():
+    """混合長短行：長行與下一行合併，短行保留。"""
+    long_line = "X" * 80
+    text = f"short\n{long_line}\ncontinued\nlast"
+    assert unwrap_ptt_lines(text) == f"short\n{long_line}continued\nlast"

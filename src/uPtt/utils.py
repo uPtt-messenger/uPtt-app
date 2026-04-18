@@ -2,6 +2,7 @@ import logging
 import os
 import re
 import sys
+import unicodedata
 
 import requests
 from PySide6.QtCore import QObject, Signal, Slot
@@ -74,6 +75,43 @@ def decode_reply(content: str):
 def strip_ansi(text: str) -> str:
     """移除 ANSI 跳脫序列（PTT 色碼）。"""
     return _ANSI_RE.sub('', text)
+
+
+# PTT BBS 終端機寬度為 80 欄位，編輯器在此寬度自動換行。
+# CJK 字元在行末可能提前換行（佔 2 欄位無法塞入），所以用 78 做門檻。
+_PTT_WRAP_WIDTH = 78
+
+
+def _display_width(line: str) -> int:
+    """計算字串的終端機顯示寬度（全形字元佔 2 欄位）。"""
+    w = 0
+    for ch in line:
+        if unicodedata.east_asian_width(ch) in ('F', 'W'):
+            w += 2
+        else:
+            w += 1
+    return w
+
+
+def unwrap_ptt_lines(text: str) -> str:
+    """移除 PTT BBS 自動插入的換行，保留使用者有意的換行。
+
+    當一行的顯示寬度 >= _PTT_WRAP_WIDTH 時，視為 PTT 自動換行，與下一行合併。
+    """
+    lines = text.split('\n')
+    if len(lines) <= 1:
+        return text
+
+    result = []
+    i = 0
+    while i < len(lines):
+        current = lines[i]
+        while i + 1 < len(lines) and _display_width(lines[i]) >= _PTT_WRAP_WIDTH:
+            i += 1
+            current += lines[i]
+        result.append(current)
+        i += 1
+    return '\n'.join(result)
 
 
 def msg_to_mail(app_name, ptt_id, msg, timestamp=None):

@@ -141,7 +141,8 @@ def test_do_login_exception(qtbot, worker, ptt_service_mock):
     with qtbot.waitSignal(worker.login_result) as blocker:
         worker.do_login("user", "pass")
     
-    assert blocker.args == [False, "Fatal Error"]
+    # 登入失敗時應回傳固定的使用者友善訊息，而非原始 exception 內容
+    assert blocker.args == [False, "連線失敗，請檢查網路連線"]
 
 def test_poll_new_mails_basic(qtbot, worker, ptt_service_mock, db_mock):
     # Mock newest index in search
@@ -380,7 +381,7 @@ def test_send_message_failure(qtbot, worker, ptt_service_mock):
         worker.enqueue_send("receiver", "Hello")
         worker.send_message("receiver", "Hello")
     
-    assert blocker.args == [False, "Send Error"]
+    assert blocker.args == [False, "發送失敗，請稍後再試"]
 
 def test_get_user_info_success(qtbot, query_worker, ptt_service_mock, db_mock):
     ptt_service_mock.get_user_info.return_value = {
@@ -694,8 +695,6 @@ def test_query_worker_stop_closes_session(query_worker, ptt_service_mock):
 
 def test_ptt_service_kick_on_reconnect_flag():
     """UPttService 預設允許重連 kick;副 session 應能關閉此行為。"""
-    # 注意:直接建立 UPttService 會初始化 PyPtt.Service,
-    # 這裡只測 flag 儲存,不實際登入。
     from src.uPtt.ptt import UPttService
     with patch('src.uPtt.ptt.PyPtt.Service') as mock_svc:
         main = UPttService()
@@ -703,3 +702,85 @@ def test_ptt_service_kick_on_reconnect_flag():
 
         query = UPttService(kick_on_reconnect=False)
         assert query.kick_on_reconnect is False
+
+
+# ── 新增測試 ──────────────────────────────────────────────────
+
+def test_do_skip_scan(qtbot, worker, ptt_service_mock, db_mock):
+    """do_skip_scan 應設定 last_poll_time、發射 scan_complete、啟動輪詢。"""
+    ptt_service_mock.ptt_id = "TestUser"
+
+    with qtbot.waitSignal(worker.scan_complete):
+        worker.do_skip_scan()
+
+    assert worker.last_poll_time is not None
+    assert worker.is_first_polling is False
+    db_mock.set_config.assert_called()
+    assert worker.polling_timer is not None
+
+
+def test_connection_lost_signal(qtbot, worker, ptt_service_mock, db_mock):
+    """輪詢時遇到 ConnectionClosed 應發射 connection_lost。"""
+    ptt_service_mock.ptt_id = "TestUser"
+    worker._was_connected = True
+    worker.last_poll_time = datetime.now()
+    ptt_service_mock.call.side_effect = PyPtt.ConnectionClosed()
+
+    with qtbot.waitSignal(worker.connection_lost):
+        worker._poll_new_mails()
+
+
+def test_query_worker_queues_requests_before_login(query_worker, ptt_service_mock):
+    """副 session 登入前的 user_info 請求應被暫存。"""
+    ptt_service_mock.ptt_id = None
+
+    query_worker.get_user_info("friend1")
+    query_worker.get_user_info("friend2")
+
+    ptt_service_mock.get_user_info.assert_not_called()
+    assert len(query_worker._pending_user_info) == 2
+    assert "friend1" in query_worker._pending_user_info
+
+
+def test_query_worker_replays_after_login(qtbot, query_worker, ptt_service_mock, db_mock):
+    """副 session 登入後應將暫存請求排入 replay 佇列。"""
+    ptt_service_mock.ptt_id = None
+    query_worker._pending_user_info = ["friend1", "friend2"]
+
+    ptt_service_mock.login.return_value = True
+    ptt_service_mock.ptt_id = "TestUser"
+    ptt_service_mock.get_user_info.return_value = {
+        'ptt_id': 'Friend1',
+        'nickname': 'nick',
+        'is_online': True,
+    }
+
+    query_worker.do_login("TestUser", "pass")
+
+    # 暫存佇列應已清空，轉移至 replay 佇列（由 QTimer 逐筆處理）
+    assert len(query_worker._pending_user_info) == 0
+    # replay_queue 可能已開始處理（第一筆在 500ms 後），但至少不為空或已完成
+    # 直接驗證 _replay_next_pending 方法可正確執行
+    query_worker._replay_queue = ["friend3"]
+    query_worker._replay_next_pending()
+    ptt_service_mock.get_user_info.assert_called()
+
+
+def test_do_login_wrong_password(qtbot, worker, ptt_service_mock):
+    """帳號密碼錯誤應回傳固定訊息。"""
+    ptt_service_mock.login.side_effect = PyPtt.WrongIDorPassword()
+
+    with qtbot.waitSignal(worker.login_result) as blocker:
+        worker.do_login("user", "wrong")
+
+    assert blocker.args == [False, "帳號或密碼錯誤"]
+
+
+def test_do_login_too_often(qtbot, worker, ptt_service_mock):
+    """登入太頻繁應回傳固定訊息。"""
+    ptt_service_mock.login.side_effect = PyPtt.LoginTooOften()
+
+    with qtbot.waitSignal(worker.login_result) as blocker:
+        worker.do_login("user", "pass")
+
+    assert blocker.args == [False, "登入太頻繁，請稍後再試"]

@@ -37,11 +37,12 @@ def setup_logging(debug_mode: bool):
     root_logger.addHandler(error_file_handler)
 
     if debug_mode:
-        file_handler = logging.FileHandler("uptt_debug.log", mode="w", encoding="utf-8")
+        debug_log_path = os.path.join(error_log_dir, "uptt_debug.log")
+        file_handler = logging.FileHandler(debug_log_path, mode="w", encoding="utf-8")
         file_handler.setFormatter(formatter)
         file_handler.setLevel(logging.DEBUG)
         root_logger.addHandler(file_handler)
-        logging.info("已啟用除錯模式，日誌將同步紀錄至 uptt_debug.log")
+        logging.info(f"已啟用除錯模式，日誌將同步紀錄至 {debug_log_path}")
 
     # 靜音 PyPtt 的 Python logging 輸出，避免 root logger 攔截
     logging.getLogger("PyPtt").setLevel(logging.WARNING)

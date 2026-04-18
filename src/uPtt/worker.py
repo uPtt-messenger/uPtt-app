@@ -12,6 +12,9 @@ from .ptt import UPttService
 
 logger = logging.getLogger("uPtt.worker")
 
+# 後續輪詢時每次最多掃描的信件數量
+MAX_POLL_SCAN = 50
+
 
 class PTTWorker(QObject):
     """
@@ -54,7 +57,7 @@ class PTTWorker(QObject):
                 try:
                     user_info = self.ptt.get_user_info(username)
                     self.db.upsert_account(
-                        ptt_id=user_info['ptt_id'], 
+                        ptt_id=user_info['ptt_id'],
                         display_id=user_info['ptt_id'],
                         nickname=user_info['nickname']
                     )
@@ -77,13 +80,18 @@ class PTTWorker(QObject):
                     self.start_polling()
             else:
                 self.login_result.emit(False, "登入失敗")
+        except PyPtt.WrongIDorPassword:
+            self.login_result.emit(False, "帳號或密碼錯誤")
+        except PyPtt.LoginTooOften:
+            self.login_result.emit(False, "登入太頻繁，請稍後再試")
         except Exception as e:
-            self.login_result.emit(False, str(e))
+            logger.error(f"登入失敗: {e}")
+            self.login_result.emit(False, "連線失敗，請檢查網路連線")
 
     def start_polling(self):
         """開始背景輪詢新信件"""
         if self.polling_timer is None:
-            self.polling_timer = QTimer()
+            self.polling_timer = QTimer(self)
             self.polling_timer.timeout.connect(self._poll_new_mails)
             # 根據 config 設定間隔 (秒轉毫秒)
             interval = getattr(config, 'CHECK_PTT_MAIL_INTERVAL', 10) * 1000
@@ -92,7 +100,7 @@ class PTTWorker(QObject):
 
         # 啟動水球輪詢
         if self._waterball_timer is None:
-            self._waterball_timer = QTimer()
+            self._waterball_timer = QTimer(self)
             self._waterball_timer.timeout.connect(self._poll_waterballs)
             wb_interval = getattr(config, 'CHECK_WATERBALL_INTERVAL', 5) * 1000
             self._waterball_timer.start(wb_interval)
@@ -120,6 +128,140 @@ class PTTWorker(QObject):
         self.scan_complete.emit()
         self.start_polling()
 
+    def _process_single_mail(self, mail, mail_idx: int):
+        """處理單一信件，回傳 (emit_dict_or_None, is_uptt, should_delete)。
+
+        將 do_initial_scan 與 _poll_new_mails 共用的信件處理邏輯抽出，
+        避免兩處重複維護。
+        """
+        current_user = self.ptt.ptt_id
+
+        raw_author = mail.get(PyPtt.MailField.author)
+        if not raw_author:
+            return None, False, False
+        full_author = raw_author.strip()
+        match = re.match(r'[A-Za-z0-9]+', full_author)
+        sender_id = match.group() if match else full_author.split()[0]
+        is_backup = (current_user and sender_id.lower() == current_user.lower())
+
+        msg_date_str = mail.get(PyPtt.MailField.date)
+        try:
+            mail_time = datetime.strptime(msg_date_str, '%a %b %d %H:%M:%S %Y')
+        except (ValueError, TypeError):
+            mail_time = datetime.now()
+
+        raw_title = mail.get(PyPtt.MailField.title)
+        title = str(raw_title) if raw_title is not None else ""
+        is_uptt_msg = contant.PTT_MSG_TITLE in title
+
+        if not is_uptt_msg:
+            # 一般站內信
+            if is_backup:
+                return None, False, False
+            content = mail.get(PyPtt.MailField.content)
+            if content is None:
+                return None, False, False
+            content = utils.strip_ansi(content)
+            self.db.upsert_session(account_id=current_user, display_id=sender_id)
+            is_new = self.db.save_message(
+                account_id=current_user,
+                session_id=sender_id,
+                sender_id=sender_id,
+                receiver_id=current_user,
+                content=content,
+                timestamp=mail_time,
+                is_me=False,
+                mail_type='mail',
+                subject=title
+            )
+            emit_dict = None
+            if is_new:
+                emit_dict = {
+                    'sender': sender_id,
+                    'text': content,
+                    'time': mail_time.strftime("%H:%M"),
+                    'full_author': full_author,
+                    'timestamp': mail_time,
+                    'mail_type': 'mail',
+                    'subject': title
+                }
+            return emit_dict, False, False
+
+        # ── uPtt 訊息 ──
+        content = mail.get(PyPtt.MailField.content)
+        if content is None:
+            logger.warning(f"uPtt mail at index {mail_idx} has no content, skipping")
+            return None, True, is_backup  # 備份副本仍需刪除
+
+        div_pos = content.find(contant.PTT_MSG_DIVISION_LINE)
+        end = content.rfind(contant.PTT_MSG_DIVISION_LINE)
+
+        if div_pos < 0 or end <= div_pos:
+            logger.error(
+                f"uPtt mail at index {mail_idx} has malformed content "
+                f"(div_pos={div_pos}, end={end}); skipping deletion."
+            )
+            return None, True, is_backup  # 備份副本仍需刪除
+
+        start = div_pos + len(contant.PTT_MSG_DIVISION_LINE)
+        text = content[start:end].strip()
+        text = utils.unwrap_ptt_lines(text)
+        embedded_ts = utils.parse_embedded_timestamp(content, end)
+        msg_time = embedded_ts if embedded_ts else mail_time
+
+        # 備份副本（自己發的）也需要存入本地 DB，避免多裝置訊息遺失
+        if is_backup:
+            self.db.upsert_session(account_id=current_user, display_id=sender_id, set_visible=False)
+            # backup 沒有明確的 receiver，但 session_id 就是自己
+            # 不 emit 訊號（UI 已在發送時顯示過），但仍需存到 DB
+            try:
+                self.db.save_message(
+                    account_id=current_user,
+                    session_id=sender_id,
+                    sender_id=current_user,
+                    receiver_id=sender_id,
+                    content=text,
+                    timestamp=msg_time,
+                    is_me=True,
+                    mail_type='uptt'
+                )
+            except Exception as e:
+                logger.error(f"儲存 uPtt backup 訊息失敗 (index={mail_idx}): {e}")
+            return None, True, True  # 仍需刪除
+
+        # 對方發來的 uPtt 訊息
+        self.db.upsert_session(account_id=current_user, display_id=sender_id)
+        try:
+            is_new = self.db.save_message(
+                account_id=current_user,
+                session_id=sender_id,
+                sender_id=sender_id,
+                receiver_id=current_user,
+                content=text,
+                timestamp=msg_time,
+                is_me=False,
+                mail_type='uptt'
+            )
+        except Exception as e:
+            logger.error(
+                f"儲存 uPtt 訊息失敗 (index={mail_idx})，"
+                f"跳過刪除以防資料遺失: {e}"
+            )
+            return None, True, False
+
+        emit_dict = None
+        if is_new:
+            emit_dict = {
+                'sender': sender_id,
+                'text': text,
+                'time': msg_time.strftime("%H:%M"),
+                'full_author': full_author,
+                'timestamp': msg_time,
+                'mail_type': 'uptt',
+                'subject': ''
+            }
+        return emit_dict, True, True
+
     @Slot(int)
     def do_initial_scan(self, scan_days):
         """首次登入信箱掃描，帶進度回報"""
@@ -139,15 +281,13 @@ class PTTWorker(QObject):
             found_uptt = False
             self.is_first_polling = False
 
-            start_idx = total_newest
-            end_idx = 1
             scanned_count = 0
             mails_to_emit = []
             deleted_count = 0
 
             logger.info(f"首次掃描: 總數={total_newest}, 掃描範圍={'全部' if scan_all else f'{scan_days}天'}")
 
-            for mail_idx in range(start_idx, end_idx - 1, -1):
+            for mail_idx in range(total_newest, 0, -1):
                 self._drain_send_queue()
                 mail = self.ptt.call('get_mail', {'index': mail_idx})
 
@@ -156,7 +296,7 @@ class PTTWorker(QObject):
 
                 scanned_count += 1
 
-                # 取得信件日期
+                # 取得信件日期以判斷停止時間
                 msg_date_str = mail.get(PyPtt.MailField.date)
                 try:
                     mail_time = datetime.strptime(msg_date_str, '%a %b %d %H:%M:%S %Y')
@@ -170,10 +310,8 @@ class PTTWorker(QObject):
                 if is_uptt_msg:
                     found_uptt = True
 
-                # 回報進度
                 self.scan_progress.emit(scanned_count, total_newest, title)
 
-                # 提早結束判定（同 _poll_new_mails 邏輯），全部掃描時跳過
                 if stop_time and mail_time < stop_time and not is_uptt_msg:
                     if found_uptt:
                         stop_time = stop_time - timedelta(days=2)
@@ -183,106 +321,19 @@ class PTTWorker(QObject):
                     else:
                         break
 
-                raw_author = mail.get(PyPtt.MailField.author)
-                if not raw_author:
-                    continue
-                full_author = raw_author.strip()
-                # PTT ID 只含英數字，用 regex 避免暱稱黏連時被一起擷取
-                match = re.match(r'[A-Za-z0-9]+', full_author)
-                sender_id = match.group() if match else full_author.split()[0]
-                is_backup = (self.ptt.ptt_id and sender_id.lower() == self.ptt.ptt_id.lower())
-
-                if not is_uptt_msg:
-                    if not is_backup:
-                        content = mail.get(PyPtt.MailField.content)
-                        if content is None:
-                            continue
-                        content = utils.strip_ansi(content)
-                        current_user = self.ptt.ptt_id
-                        self.db.upsert_session(account_id=current_user, display_id=sender_id)
-                        is_new = self.db.save_message(
-                            account_id=current_user,
-                            session_id=sender_id,
-                            sender_id=sender_id,
-                            receiver_id=current_user,
-                            content=content,
-                            timestamp=mail_time,
-                            is_me=False,
-                            mail_type='mail',
-                            subject=title
-                        )
-                        if is_new:
-                            mails_to_emit.append({
-                                'sender': sender_id,
-                                'text': content,
-                                'time': mail_time.strftime("%H:%M"),
-                                'full_author': full_author,
-                                'timestamp': mail_time,
-                                'mail_type': 'mail',
-                                'subject': title
-                            })
-                    continue
-
-                # 處理 uPtt 訊息
-                if not is_backup:
-                    content = mail.get(PyPtt.MailField.content)
-                    if content is None:
-                        logger.warning(f"uPtt mail at index {mail_idx} has no content, skipping")
-                        continue
-                    div_pos = content.find(contant.PTT_MSG_DIVISION_LINE)
-                    end = content.rfind(contant.PTT_MSG_DIVISION_LINE)
-
-                    if div_pos >= 0 and end > div_pos:
-                        start = div_pos + len(contant.PTT_MSG_DIVISION_LINE)
-                        text = content[start:end].strip()
-                        embedded_ts = utils.parse_embedded_timestamp(content, end)
-                        msg_time = embedded_ts if embedded_ts else mail_time
-                        current_user = self.ptt.ptt_id
-                        self.db.upsert_session(account_id=current_user, display_id=sender_id)
-                        try:
-                            is_new = self.db.save_message(
-                                account_id=current_user,
-                                session_id=sender_id,
-                                sender_id=sender_id,
-                                receiver_id=current_user,
-                                content=text,
-                                timestamp=msg_time,
-                                is_me=False,
-                                mail_type='uptt'
-                            )
-                        except Exception as e:
-                            logger.error(
-                                f"儲存 uPtt 訊息失敗 (index={mail_idx})，"
-                                f"跳過刪除以防資料遺失: {e}"
-                            )
-                            continue
-                        if is_new:
-                            mails_to_emit.append({
-                                'sender': sender_id,
-                                'text': text,
-                                'time': msg_time.strftime("%H:%M"),
-                                'full_author': full_author,
-                                'timestamp': msg_time,
-                                'mail_type': 'uptt',
-                                'subject': ''
-                            })
-                    else:
-                        logger.error(
-                            f"uPtt mail at index {mail_idx} has malformed content "
-                            f"(div_pos={div_pos}, end={end}); skipping deletion."
-                        )
-                        continue
-
-                self.ptt.call('del_mail', {'index': mail_idx})
-                deleted_count += 1
-                continue
+                # 使用共用方法處理信件
+                emit_dict, is_uptt, should_delete = self._process_single_mail(mail, mail_idx)
+                if emit_dict:
+                    mails_to_emit.append(emit_dict)
+                if should_delete:
+                    self.ptt.call('del_mail', {'index': mail_idx})
+                    deleted_count += 1
 
             # 更新狀態
             self._last_newest_index = total_newest - deleted_count
             self.last_poll_time = current_poll_start
             self.db.set_config(f'LAST_POLL_TIME_{self.ptt.ptt_id.lower()}', current_poll_start.isoformat())
 
-            # 發射訊號
             for mail_data in reversed(mails_to_emit):
                 self.new_message_received.emit(mail_data)
                 self.last_mail_time = mail_data['timestamp']
@@ -300,17 +351,15 @@ class PTTWorker(QObject):
     def _poll_new_mails(self):
         """
         輪詢新信件的內部邏輯（時間驅動掃描策略）
-        - 全新使用者：掃描過去 7 天，發現 uPtt 訊息則延伸至 9 天
         - 已有紀錄：掃描到上次輪詢時間，發現 uPtt 訊息則多掃 2 天
+        - 非 uPtt 訊息最多掃描 MAX_POLL_SCAN 封，避免長時間斷線後阻塞
         - uPtt 訊息無論多舊都會處理並刪除
         """
         # 優先處理待發送訊息
         self._drain_send_queue()
         try:
-            # 記錄本次輪詢開始的時間
             current_poll_start = datetime.now()
 
-            # 1. 取得信箱總數
             total_newest = self.ptt.call('get_newest_index', {'index_type': PyPtt.NewIndex.MAIL})
 
             # 如果之前是斷線狀態，現在成功了，代表已恢復
@@ -319,12 +368,12 @@ class PTTWorker(QObject):
                 self.connection_restored.emit()
                 self.status_updated.emit("已重新連線")
                 logger.info("連線已恢復")
-            
+
             if not total_newest or total_newest == 0:
                 self.last_poll_time = current_poll_start
                 return
 
-            # 2. 快速跳過：如果信箱最新索引沒有變化，表示沒有新信，不需掃描
+            # 快速跳過：信箱最新索引沒有變化
             if not self.is_first_polling and self._last_newest_index is not None:
                 if total_newest == self._last_newest_index:
                     logger.debug(f"信箱無變化 (總數={total_newest})，跳過掃描")
@@ -332,173 +381,73 @@ class PTTWorker(QObject):
                     self.db.set_config(f'LAST_POLL_TIME_{self.ptt.ptt_id.lower()}', current_poll_start.isoformat())
                     return
                 elif total_newest < self._last_newest_index:
-                    # 索引變小代表有信被刪除，但可能同時有新信到達，不能跳過掃描
                     logger.debug(f"信箱索引減少 ({self._last_newest_index} → {total_newest})，仍繼續掃描")
 
-            # 3. 建立停止時間（時間驅動掃描策略）
-            #    - 全新使用者（無 last_poll_time）：至少掃描過去一週
-            #    - 已有掃描紀錄：掃描到上次掃描時間（含 10 秒緩衝）
-            #    - 若掃描途中發現 uPtt 訊息，自動延伸掃描範圍 2 天（不限次數）
             if self.last_poll_time:
                 stop_time = self.last_poll_time - timedelta(seconds=10)
             else:
                 stop_time = current_poll_start - timedelta(days=7)
 
             found_uptt = False
-
             self.is_first_polling = False
-
-            start_idx = total_newest
-            end_idx = 1
 
             logger.debug(f"輪詢掃描中: 總數={total_newest}, 新增={total_newest - (self._last_newest_index or 0)}, 截止時間={stop_time}")
 
             mails_to_emit = []
             deleted_count = 0
+            scan_count = 0
 
-            # 4. 倒序掃描
-            for mail_idx in range(start_idx, end_idx - 1, -1):
-                # 每封信件之間優先處理待發送訊息
+            for mail_idx in range(total_newest, 0, -1):
                 self._drain_send_queue()
                 mail = self.ptt.call('get_mail', {'index': mail_idx})
 
                 if not mail:
                     continue
 
-                # 取得信件日期
                 msg_date_str = mail.get(PyPtt.MailField.date)
                 try:
                     mail_time = datetime.strptime(msg_date_str, '%a %b %d %H:%M:%S %Y')
                 except (ValueError, TypeError):
                     mail_time = datetime.now()
 
-                # 先解析標題，判斷是否為 uPtt 訊息
                 raw_title = mail.get(PyPtt.MailField.title)
                 title = str(raw_title) if raw_title is not None else ""
                 is_uptt_msg = contant.PTT_MSG_TITLE in title
 
                 if is_uptt_msg:
                     found_uptt = True
+                else:
+                    scan_count += 1  # uPtt 訊息不計入掃描數量
 
-                # --- 核心優化：提早結束判定 (僅對非 uPtt 訊息生效) ---
-                # uPtt 訊息無論多舊都必須處理並刪除，不受時間截止點限制
+                # 提早結束判定 (僅對非 uPtt 訊息生效)
                 if mail_time < stop_time and not is_uptt_msg:
                     if found_uptt:
-                        # 發現過 uPtt 訊息，多掃兩天以確保不遺漏離線訊息
                         stop_time = stop_time - timedelta(days=2)
-                        found_uptt = False  # 重置，若延伸範圍內又有 uPtt 則繼續延伸
+                        found_uptt = False
                         if mail_time < stop_time:
-                            logger.debug(f"已進入舊信區域 (索引 {mail_idx}, 時間 {mail_time}), 延伸掃描後仍超出截止時間 {stop_time}, 停止。")
+                            logger.debug(f"已進入舊信區域 (索引 {mail_idx}, 時間 {mail_time}), 停止。")
                             break
                     else:
                         logger.debug(f"已進入舊信區域 (索引 {mail_idx}, 時間 {mail_time}), 停止本次掃描。")
                         break
 
-                raw_author = mail.get(PyPtt.MailField.author)
-                if not raw_author:
-                    continue
-                full_author = raw_author.strip()
-                # PTT ID 只含英數字，用 regex 避免暱稱黏連時被一起擷取
-                match = re.match(r'[A-Za-z0-9]+', full_author)
-                sender_id = match.group() if match else full_author.split()[0]
-                is_backup = (self.ptt.ptt_id and sender_id.lower() == self.ptt.ptt_id.lower())
+                # 掃描數量上限 (uPtt 訊息不計入，必須全部處理並刪除)
+                if scan_count >= MAX_POLL_SCAN and not is_uptt_msg:
+                    logger.debug(f"已達掃描上限 ({MAX_POLL_SCAN})，停止本次輪詢")
+                    break
 
-                if not is_uptt_msg:
-                    # 一般站內信：儲存為 mail_type='mail' 並顯示
-                    if not is_backup:
-                        content = mail.get(PyPtt.MailField.content)
-                        if content is None:
-                            continue
-                        content = utils.strip_ansi(content)
-                        current_user = self.ptt.ptt_id
-                        self.db.upsert_session(account_id=current_user, display_id=sender_id)
-                        is_new = self.db.save_message(
-                            account_id=current_user,
-                            session_id=sender_id,
-                            sender_id=sender_id,
-                            receiver_id=current_user,
-                            content=content,
-                            timestamp=mail_time,
-                            is_me=False,
-                            mail_type='mail',
-                            subject=title
-                        )
-                        if is_new:
-                            mails_to_emit.append({
-                                'sender': sender_id,
-                                'text': content,
-                                'time': mail_time.strftime("%H:%M"),
-                                'full_author': full_author,
-                                'timestamp': mail_time,
-                                'mail_type': 'mail',
-                                'subject': title
-                            })
-                    continue
+                # 使用共用方法處理信件
+                emit_dict, is_uptt, should_delete = self._process_single_mail(mail, mail_idx)
+                if emit_dict:
+                    mails_to_emit.append(emit_dict)
+                if should_delete:
+                    self.ptt.call('del_mail', {'index': mail_idx})
+                    deleted_count += 1
 
-                # 處理 uPtt 訊息
-                if not is_backup:
-                    content = mail.get(PyPtt.MailField.content)
-                    if content is None:
-                        logger.warning(f"uPtt mail at index {mail_idx} has no content, skipping")
-                        continue
-                    div_pos = content.find(contant.PTT_MSG_DIVISION_LINE)
-                    end = content.rfind(contant.PTT_MSG_DIVISION_LINE)
-
-                    if div_pos >= 0 and end > div_pos:
-                        start = div_pos + len(contant.PTT_MSG_DIVISION_LINE)
-                        text = content[start:end].strip()
-                        # 優先使用發送端嵌入的時間戳，確保兩端排序一致
-                        embedded_ts = utils.parse_embedded_timestamp(content, end)
-                        msg_time = embedded_ts if embedded_ts else mail_time
-                        current_user = self.ptt.ptt_id
-                        self.db.upsert_session(account_id=current_user, display_id=sender_id)
-                        try:
-                            is_new = self.db.save_message(
-                                account_id=current_user,
-                                session_id=sender_id,
-                                sender_id=sender_id,
-                                receiver_id=current_user,
-                                content=text,
-                                timestamp=msg_time,
-                                is_me=False,
-                                mail_type='uptt'
-                            )
-                        except Exception as e:
-                            logger.error(
-                                f"儲存 uPtt 訊息失敗 (index={mail_idx})，"
-                                f"跳過刪除以防資料遺失: {e}"
-                            )
-                            continue
-
-                        if is_new:
-                            mails_to_emit.append({
-                                'sender': sender_id,
-                                'text': text,
-                                'time': msg_time.strftime("%H:%M"),
-                                'full_author': full_author,
-                                'timestamp': msg_time,
-                                'mail_type': 'uptt',
-                                'subject': ''
-                            })
-                    else:
-                        logger.error(
-                            f"uPtt mail at index {mail_idx} has malformed content "
-                            f"(div_pos={div_pos}, end={end}); skipping deletion to prevent data loss."
-                        )
-                        continue
-
-                # uPtt 訊息處理完即刪除（含 backup 副本）
-                self.ptt.call('del_mail', {'index': mail_idx})
-                deleted_count += 1
-                continue
-
-            # 5. 更新本次輪詢成功結束的時間與索引並存入資料庫
-            # 扣除已刪除的 uPtt 信件數，避免下次輪詢誤判「索引減少＝無新信」
             self._last_newest_index = total_newest - deleted_count
             self.last_poll_time = current_poll_start
             self.db.set_config(f'LAST_POLL_TIME_{self.ptt.ptt_id.lower()}', current_poll_start.isoformat())
 
-            # 6. 發射訊號
             for mail_data in reversed(mails_to_emit):
                 self.new_message_received.emit(mail_data)
                 self.last_mail_time = mail_data['timestamp']
@@ -509,11 +458,9 @@ class PTTWorker(QObject):
                 self._was_connected = False
                 self.connection_lost.emit()
                 self.status_updated.emit("連線中斷，正在嘗試重新連線...")
-            # 使用 QTimer.singleShot 延遲重連，避免阻塞 worker thread 事件迴圈
             QTimer.singleShot(5000, self._deferred_reconnect)
         except Exception as e:
             logger.exception(f"輪詢信件發生錯誤: {e}")
-            # 檢查是否為連線相關錯誤
             if not self.ptt.is_connected and self._was_connected:
                 self._was_connected = False
                 self.connection_lost.emit()
@@ -596,7 +543,7 @@ class PTTWorker(QObject):
             self.send_result.emit(True, "")
         except Exception as e:
             logger.exception(f"發送訊息過程中發生例外狀況: {e}")
-            self.send_result.emit(False, str(e))
+            self.send_result.emit(False, "發送失敗，請稍後再試")
 
     def _poll_waterballs(self):
         """輪詢水球訊息"""
@@ -746,6 +693,7 @@ class QueryWorker(QObject):
         self._active_chat_online_timer: Optional[QTimer] = None
         self._active_chat_id: Optional[str] = None
         self._degraded: bool = False  # 副 session 目前是否處於降級狀態
+        self._pending_user_info: list[str] = []  # 副 session 登入前暫存的查詢請求
 
     def _mark_degraded(self, reason: str):
         """進入降級狀態,通知 UI。重複進入不會重複 emit。"""
@@ -769,25 +717,61 @@ class QueryWorker(QObject):
             logger.info(f"[Query] 副 session 登入成功: {self.ptt.ptt_id}")
             self._mark_restored()
             self._start_online_polling()
+            # 重放登入前暫存的查詢請求（以 QTimer 逐筆處理，避免阻塞事件迴圈）
+            self._replay_queue = self._pending_user_info[:]
+            self._pending_user_info.clear()
+            if self._replay_queue:
+                QTimer.singleShot(500, self._replay_next_pending)
         except Exception as e:
             logger.warning(f"[Query] 副 session 登入失敗,使用者狀態功能將無法使用: {e}")
             self._mark_degraded(f"登入失敗: {e}")
 
+    def _replay_next_pending(self):
+        """逐筆重放登入前暫存的 user_info 查詢，每筆間隔 2 秒避免阻塞。"""
+        if not hasattr(self, '_replay_queue') or not self._replay_queue:
+            return
+        queued_id = self._replay_queue.pop(0)
+        self.get_user_info(queued_id)
+        if self._replay_queue:
+            QTimer.singleShot(2000, self._replay_next_pending)
+
     def _start_online_polling(self):
         """啟動在線狀態定期檢查(登入成功後呼叫)。"""
         if self._online_check_timer is None:
-            self._online_check_timer = QTimer()
+            self._online_check_timer = QTimer(self)
             self._online_check_timer.timeout.connect(self._check_all_online_status)
             interval = getattr(config, 'CHECK_ONLINE_STATUS_INTERVAL', 60) * 1000
             self._online_check_timer.start(interval)
             logger.info(f"[Query] 開始輪詢在線狀態,間隔: {interval / 1000}s")
             self._check_all_online_status()
 
+    def _emit_user_info(self, info: dict):
+        """將 get_user_info 回傳的 dict 發射為 user_info_result 訊號。"""
+        self.user_info_result.emit({
+            'ptt_id': info['ptt_id'],
+            'nickname': info['nickname'],
+            'is_online': info['is_online'],
+            'activity': info.get('activity', ''),
+            'login_count': info.get('login_count', ''),
+            'last_login_date': info.get('last_login_date', ''),
+            'legal_post': info.get('legal_post', ''),
+            'illegal_post': info.get('illegal_post', ''),
+            'money': info.get('money', ''),
+        })
+
+    def _handle_no_such_user(self, ptt_id: str):
+        """處理查無此人的情況：封存會話並通知 UI。"""
+        if self.ptt.ptt_id:
+            self.db.archive_session(self.ptt.ptt_id, ptt_id)
+            self.session_archived.emit(ptt_id.lower())
+            logger.info(f"使用者 {ptt_id} 不存在,會話已封存")
+
     @Slot(str)
     def get_user_info(self, ptt_id):
         """主動獲取使用者資訊 (包含暱稱、正確大小寫與在線狀態)。"""
         if not self.ptt.ptt_id:
-            logger.info(f"[Query] 副 session 尚未登入,跳過查詢: {ptt_id}")
+            logger.info(f"[Query] 副 session 尚未登入,暫存查詢: {ptt_id}")
+            self._pending_user_info.append(ptt_id)
             return
         try:
             logger.info(f"--- 開始查詢使用者資訊: {ptt_id} ---")
@@ -800,27 +784,14 @@ class QueryWorker(QObject):
                 nickname=info['nickname']
             )
 
-            self.user_info_result.emit({
-                'ptt_id': info['ptt_id'],
-                'nickname': info['nickname'],
-                'is_online': info['is_online'],
-                'activity': info.get('activity', ''),
-                'login_count': info.get('login_count', ''),
-                'last_login_date': info.get('last_login_date', ''),
-                'legal_post': info.get('legal_post', ''),
-                'illegal_post': info.get('illegal_post', ''),
-                'money': info.get('money', ''),
-            })
+            self._emit_user_info(info)
             logger.info(f"成功獲取使用者資訊: {info}")
         except ValueError as e:
-            # ValueError 表示查無此人等「對方」的問題,session 本身還是健康的
             self._mark_restored()
             error_msg = str(e)
             logger.warning(f"查詢使用者 {ptt_id} 失敗: {error_msg}")
-            if "查無此人" in error_msg and self.ptt.ptt_id:
-                self.db.archive_session(self.ptt.ptt_id, ptt_id)
-                self.session_archived.emit(ptt_id.lower())
-                logger.info(f"使用者 {ptt_id} 不存在,會話已封存")
+            if "查無此人" in error_msg:
+                self._handle_no_such_user(ptt_id)
             else:
                 self.user_info_error.emit(ptt_id, error_msg)
         except PyPtt.ConnectionClosed:
@@ -849,23 +820,11 @@ class QueryWorker(QObject):
             status = "在線" if info['is_online'] else "離線"
             logger.info(f"[優先在線查詢] {ptt_id_lower} → {status}")
             self.online_status_updated.emit(ptt_id_lower, info['is_online'])
-            self.user_info_result.emit({
-                'ptt_id': info['ptt_id'],
-                'nickname': info['nickname'],
-                'is_online': info['is_online'],
-                'activity': info.get('activity', ''),
-                'login_count': info.get('login_count', ''),
-                'last_login_date': info.get('last_login_date', ''),
-                'legal_post': info.get('legal_post', ''),
-                'illegal_post': info.get('illegal_post', ''),
-                'money': info.get('money', ''),
-            })
+            self._emit_user_info(info)
         except ValueError as e:
             self._mark_restored()
-            if "查無此人" in str(e) and self.ptt.ptt_id:
-                self.db.archive_session(self.ptt.ptt_id, ptt_id_lower)
-                self.session_archived.emit(ptt_id_lower)
-                logger.info(f"[優先在線查詢] {ptt_id} 不存在,會話已封存")
+            if "查無此人" in str(e):
+                self._handle_no_such_user(ptt_id_lower)
             else:
                 logger.info(f"[優先在線查詢] {ptt_id} 查詢失敗: {e}")
         except PyPtt.ConnectionClosed:
@@ -911,10 +870,8 @@ class QueryWorker(QObject):
             self.online_status_updated.emit(contact_id, info['is_online'])
         except ValueError as e:
             self._mark_restored()
-            if "查無此人" in str(e) and self.ptt.ptt_id:
-                self.db.archive_session(self.ptt.ptt_id, contact_id)
-                self.session_archived.emit(contact_id)
-                logger.info(f"[在線檢查] {contact_id} 不存在,會話已封存")
+            if "查無此人" in str(e):
+                self._handle_no_such_user(contact_id)
             else:
                 logger.info(f"[在線檢查] {contact_id} 查詢失敗: {e}")
         except PyPtt.ConnectionClosed:
@@ -959,7 +916,7 @@ class QueryWorker(QObject):
             return
 
         self._poll_active_chat_online()
-        self._active_chat_online_timer = QTimer()
+        self._active_chat_online_timer = QTimer(self)
         self._active_chat_online_timer.timeout.connect(self._poll_active_chat_online)
         interval = getattr(config, 'CHECK_ACTIVE_CHAT_ONLINE_INTERVAL', 10) * 1000
         self._active_chat_online_timer.start(interval)
@@ -976,14 +933,12 @@ class QueryWorker(QObject):
             self.online_status_updated.emit(chat_id, info['is_online'])
         except ValueError as e:
             self._mark_restored()
-            if "查無此人" in str(e) and self.ptt.ptt_id:
+            if "查無此人" in str(e):
                 if self._active_chat_online_timer:
                     self._active_chat_online_timer.stop()
                     self._active_chat_online_timer = None
                 self._active_chat_id = None
-                self.db.archive_session(self.ptt.ptt_id, chat_id)
-                self.session_archived.emit(chat_id)
-                logger.info(f"[活躍對話在線檢查] {chat_id} 不存在,會話已封存")
+                self._handle_no_such_user(chat_id)
             else:
                 logger.debug(f"[活躍對話在線檢查] {chat_id} 查詢失敗: {e}")
         except PyPtt.ConnectionClosed:

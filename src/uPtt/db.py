@@ -83,31 +83,22 @@ class DatabaseManager:
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_messages_lookup ON messages(account_id, session_id)")
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_messages_time ON messages(timestamp)")
 
-                # 遷移：為舊資料庫新增釘選相關欄位
-                try:
-                    cursor.execute("ALTER TABLE sessions ADD COLUMN is_pinned BOOLEAN DEFAULT 0")
-                except sqlite3.OperationalError:
-                    pass  # 欄位已存在
-                try:
-                    cursor.execute("ALTER TABLE sessions ADD COLUMN pin_order INTEGER DEFAULT 0")
-                except sqlite3.OperationalError:
-                    pass  # 欄位已存在
-
-                # 遷移：為舊資料庫新增封存欄位
-                try:
-                    cursor.execute("ALTER TABLE sessions ADD COLUMN is_archived BOOLEAN DEFAULT 0")
-                except sqlite3.OperationalError:
-                    pass  # 欄位已存在
-
-                # 遷移：為舊資料庫新增信件類型與主旨欄位
-                try:
-                    cursor.execute("ALTER TABLE messages ADD COLUMN mail_type TEXT DEFAULT 'uptt'")
-                except sqlite3.OperationalError:
-                    pass  # 欄位已存在
-                try:
-                    cursor.execute("ALTER TABLE messages ADD COLUMN subject TEXT DEFAULT ''")
-                except sqlite3.OperationalError:
-                    pass  # 欄位已存在
+                # 遷移：為舊資料庫新增欄位（僅忽略 "duplicate column" 錯誤）
+                migrations = [
+                    "ALTER TABLE sessions ADD COLUMN is_pinned BOOLEAN DEFAULT 0",
+                    "ALTER TABLE sessions ADD COLUMN pin_order INTEGER DEFAULT 0",
+                    "ALTER TABLE sessions ADD COLUMN is_archived BOOLEAN DEFAULT 0",
+                    "ALTER TABLE messages ADD COLUMN mail_type TEXT DEFAULT 'uptt'",
+                    "ALTER TABLE messages ADD COLUMN subject TEXT DEFAULT ''",
+                ]
+                for sql in migrations:
+                    try:
+                        cursor.execute(sql)
+                    except sqlite3.OperationalError as e:
+                        if "duplicate column" in str(e).lower():
+                            pass  # 欄位已存在，正常忽略
+                        else:
+                            raise  # 其他錯誤（如表不存在）應上報
 
                 # 遷移：修正水球時間戳（舊版未補正年份，導致未來日期）—— 只執行一次
                 try:

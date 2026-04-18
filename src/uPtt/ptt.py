@@ -105,8 +105,8 @@ class UPttService:
                 self.service = new_service
                 try:
                     old_service.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"重連時關閉舊 service 發生錯誤 (已忽略): {e}")
                 self._connected = True
                 logger.info(f"重連成功 (第 {retry_time + 1} 次嘗試)")
                 return True

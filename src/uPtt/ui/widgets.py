@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime
+from typing import Optional
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QFrame, QSizePolicy, QStyle, QListWidgetItem, QListWidget, QAbstractItemView,
@@ -8,6 +9,30 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtGui import QAction, QDrag
 from uPtt.ui.styles import get_bubble_style, get_waterball_bubble_style
+
+
+def _apply_bubble_resize(message_label, bubble_container, owner_widget, new_size):
+    """共用的氣泡 resizeEvent 邏輯：動態調整最大寬度 (80%)，防止提前換行。"""
+    total_w = new_size.width()
+    if total_w <= 0:
+        return
+    max_bubble_w = int(total_w * 0.8)
+    message_label.setWordWrap(False)
+    text_ideal_w = message_label.sizeHint().width()
+    label_max_allowed_w = max_bubble_w - 25
+
+    if text_ideal_w > label_max_allowed_w:
+        message_label.setWordWrap(True)
+        message_label.setFixedWidth(label_max_allowed_w)
+    else:
+        message_label.setWordWrap(False)
+        message_label.setFixedWidth(text_ideal_w)
+
+    h = message_label.sizeHint().height()
+    message_label.setMinimumHeight(h)
+    message_label.updateGeometry()
+    bubble_container.updateGeometry()
+    owner_widget.updateGeometry()
 
 logger = logging.getLogger("uPtt.ui.widgets")
 
@@ -18,7 +43,7 @@ class ChatBubble(QWidget):
     reply_requested = Signal(str, bool)  # (message_text, is_me)
 
     def __init__(self, text: str, time_str: str, is_me: bool = False,
-                 reply_info: dict = None, send_status: str = None, parent=None):
+                 reply_info: Optional[dict] = None, send_status: Optional[str] = None, parent=None):
         super().__init__(parent)
         self.is_me = is_me
         self._text = text
@@ -116,43 +141,8 @@ class ChatBubble(QWidget):
         menu.exec(global_pos)
 
     def resizeEvent(self, event):
-        """
-        根據容器寬度動態調整氣泡最大寬度 (80%)，並防止提前換行。
-        """
         super().resizeEvent(event)
-        total_w = event.size().width()
-        if total_w <= 0:
-            return
-            
-        # 1. 計算氣泡容器的最大可用寬度 (視窗寬度的 80%)
-        max_bubble_w = int(total_w * 0.8)
-        
-        # 2. 暫時關閉換行，計算文字在「理想狀態」下所需的寬度
-        # 這能獲取文字最長一行的寬度，避免 QLabel 提前縮小
-        self.message_label.setWordWrap(False)
-        text_ideal_w = self.message_label.sizeHint().width()
-        
-        # 3. 判斷是否需要換行 (考慮到氣泡內邊距與緩衝，約 25px)
-        label_max_allowed_w = max_bubble_w - 25
-        
-        if text_ideal_w > label_max_allowed_w:
-            # 文字太長，開啟換行並限制在 80%
-            self.message_label.setWordWrap(True)
-            self.message_label.setFixedWidth(label_max_allowed_w)
-        else:
-            # 文字尚短，關閉換行並讓寬度剛好貼合文字
-            self.message_label.setWordWrap(False)
-            self.message_label.setFixedWidth(text_ideal_w)
-            
-        # 4. 關鍵：手動將最小高度設定為 sizeHint 的高度，強迫垂直佈局擴張
-        # 因為 wordWrap 改變後，layout 可能不會主動偵測新的高度需求
-        h = self.message_label.sizeHint().height()
-        self.message_label.setMinimumHeight(h)
-        
-        # 通知所有層級佈局需要重新計算
-        self.message_label.updateGeometry()
-        self.bubble_container.updateGeometry()
-        self.updateGeometry()
+        _apply_bubble_resize(self.message_label, self.bubble_container, self, event.size())
 
 class WaterballBubble(QWidget):
     """
@@ -203,26 +193,7 @@ class WaterballBubble(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        total_w = event.size().width()
-        if total_w <= 0:
-            return
-        max_bubble_w = int(total_w * 0.8)
-        self.message_label.setWordWrap(False)
-        text_ideal_w = self.message_label.sizeHint().width()
-        label_max_allowed_w = max_bubble_w - 25
-
-        if text_ideal_w > label_max_allowed_w:
-            self.message_label.setWordWrap(True)
-            self.message_label.setFixedWidth(label_max_allowed_w)
-        else:
-            self.message_label.setWordWrap(False)
-            self.message_label.setFixedWidth(text_ideal_w)
-
-        h = self.message_label.sizeHint().height()
-        self.message_label.setMinimumHeight(h)
-        self.message_label.updateGeometry()
-        self.bubble_container.updateGeometry()
-        self.updateGeometry()
+        _apply_bubble_resize(self.message_label, self.bubble_container, self, event.size())
 
 
 class MailCard(QWidget):
@@ -681,6 +652,8 @@ class ContactListWidget(QListWidget):
                 last_msg_time=data.get('last_msg_time', ''),
             )
             new_widget.set_online(data.get('is_online', False))
+            if data.get('is_archived'):
+                new_widget.set_archived(True)
             self.addItem(new_item)
             self.setItemWidget(new_item, new_widget)
 

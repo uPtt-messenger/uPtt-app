@@ -181,3 +181,83 @@ def test_last_message_time_never_goes_backwards(db_manager):
     db_manager.save_message(account_id, session_id, session_id, account_id, "Old msg", older, False)
     sessions = db_manager.get_all_sessions(account_id)
     assert sessions[0]['last_message_text'] == "New msg"
+
+
+# ── 新增測試：archive / pin / delete ──────────────────────────
+
+def test_archive_session(db_manager):
+    account_id = "testuser"
+    session_id = "friend1"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, session_id)
+
+    assert db_manager.is_session_archived(account_id, session_id) is False
+    db_manager.archive_session(account_id, session_id)
+    assert db_manager.is_session_archived(account_id, session_id) is True
+
+    # 封存的 session 仍然可見
+    sessions = db_manager.get_all_sessions(account_id)
+    assert len(sessions) == 1
+    assert sessions[0]['is_archived'] == 1
+
+
+def test_delete_session(db_manager):
+    account_id = "testuser"
+    session_id = "todelete"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, session_id)
+    db_manager.save_message(account_id, session_id, session_id, account_id, "msg", datetime.now(), False)
+
+    assert len(db_manager.get_messages(account_id, session_id)) == 1
+
+    db_manager.delete_session(account_id, session_id)
+
+    # session 與 messages 都應該被刪除
+    assert len(db_manager.get_all_sessions(account_id)) == 0
+    assert len(db_manager.get_messages(account_id, session_id)) == 0
+
+
+def test_pin_session(db_manager):
+    account_id = "testuser"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, "aaa")
+    db_manager.upsert_session(account_id, "bbb")
+
+    db_manager.set_pin_session(account_id, "bbb", True, 0)
+    sessions = db_manager.get_all_sessions(account_id)
+    # 釘選的 bbb 應排在前面
+    assert sessions[0]['id'] == "bbb"
+    assert sessions[0]['is_pinned'] == 1
+
+
+def test_update_pin_orders(db_manager):
+    account_id = "testuser"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, "aaa")
+    db_manager.upsert_session(account_id, "bbb")
+    db_manager.set_pin_session(account_id, "aaa", True, 0)
+    db_manager.set_pin_session(account_id, "bbb", True, 1)
+
+    # 交換順序
+    db_manager.update_pin_orders(account_id, ["bbb", "aaa"])
+    sessions = db_manager.get_all_sessions(account_id)
+    assert sessions[0]['id'] == "bbb"
+    assert sessions[1]['id'] == "aaa"
+
+
+def test_get_messages_limit(db_manager):
+    account_id = "testuser"
+    session_id = "friend"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, session_id)
+    for i in range(10):
+        db_manager.save_message(
+            account_id, session_id, session_id, account_id,
+            f"msg{i}", datetime(2025, 1, 1, 12, i, 0), False
+        )
+
+    # limit=5 should return the 5 newest
+    msgs = db_manager.get_messages(account_id, session_id, limit=5)
+    assert len(msgs) == 5
+    assert msgs[0]['content'] == "msg5"
+    assert msgs[-1]['content'] == "msg9"
