@@ -1,5 +1,6 @@
 #!/bin/bash
 # scripts/local_build_linux.sh
+set -euo pipefail
 
 # 確保在專案根目錄執行
 cd "$(dirname "$0")/.."
@@ -16,11 +17,10 @@ fi
 # 檢查虛擬環境是否存在，若無則自動建立並安裝依賴
 if [ ! -d ".venv" ]; then
     echo "偵測到找不到 .venv，正在自動建立虛擬環境並安裝依賴套件 (這可能需要一點時間)..."
-    python3 -m venv .venv
-    if [ $? -ne 0 ]; then
+    python3 -m venv .venv || {
         echo "錯誤: 建立虛擬環境失敗。請確保系統已安裝 python3-venv。"
         exit 1
-    fi
+    }
     source .venv/bin/activate
     echo "正在升級 pip..."
     pip install --upgrade pip
@@ -52,12 +52,6 @@ python -m nuitka \
     --output-filename=uptt \
     --assume-yes-for-downloads \
     src/run_app.py
-
-# 檢查編譯是否成功
-if [ $? -ne 0 ]; then
-    echo "編譯失敗！"
-    exit 1
-fi
 
 # 整理產出物名稱 (與 CI/CD 流程一致)
 echo "正在整理產出物..."

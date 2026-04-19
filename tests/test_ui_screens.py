@@ -239,6 +239,22 @@ def test_fully_quit(mock_qthread, mock_worker, mock_query_worker, mock_ver_worke
         # Should call invokeMethod for worker.stop
         mock_invoke.assert_called()
 
+@patch('PySide6.QtCore.QMetaObject.invokeMethod')
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.QueryWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_fully_quit_is_reentrant_safe(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, mock_invoke, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
+    # Regression: closeEvent can re-fire during QApplication.quit tear-down,
+    # so fully_quit must short-circuit on re-entry (see PRs #15 / #17).
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        window._stop_all_threads = MagicMock()
+        window.fully_quit()
+        window.fully_quit()
+        assert window._stop_all_threads.call_count == 1
+
 def test_render_svg_exists():
     from src.uPtt.ui.screens import render_svg
     with open("test_pixmap.svg", "w") as f:
