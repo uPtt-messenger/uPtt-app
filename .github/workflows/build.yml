@@ -278,6 +278,117 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  build-linux:
+    needs: [prepare-version]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Patch version in source
+        run: |
+          VERSION="${{ needs.prepare-version.outputs.VERSION }}"
+          python -c "
+          import re, pathlib
+          f = pathlib.Path('src/uPtt/__init__.py')
+          f.write_text(re.sub(r'__version__ = \".*?\"', '__version__ = \"$VERSION\"', f.read_text()))
+          "
+          echo "RELEASE_TITLE=${{ needs.prepare-version.outputs.RELEASE_TITLE }}" >> $GITHUB_ENV
+
+      - name: Install system dependencies (Linux Qt6)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libopengl0 libxkbcommon-x11-0 libdbus-1-3 libxcb-cursor0 \
+            libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 \
+            libxcb-xinerama0 libxcb-xfixes0 libxcb-shape0 librsvg2-bin patchelf
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install nuitka zstandard
+
+      - name: Cache Nuitka (Linux)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/Nuitka
+          key: nuitka-linux-${{ hashFiles('src/**/*.py', 'requirements.txt') }}
+          restore-keys: nuitka-linux-
+
+      - name: Build with Nuitka (standalone)
+        run: |
+          PYTHONPATH=src python -m nuitka \
+            --standalone \
+            --plugin-enable=pyside6 \
+            --include-qt-plugins=sensible \
+            --include-package=PyPtt \
+            --include-package=websockets \
+            --include-package=qasync \
+            --include-package-data=uPtt.ui.assets \
+            --output-dir=dist \
+            --output-filename=uptt \
+            src/run_app.py
+
+      - name: Rename standalone folder and binary
+        run: |
+          if [ -d "dist/run_app.dist" ]; then
+            mv dist/run_app.dist dist/uPtt
+          fi
+          # 不再需要手動改名執行檔，因為編譯時已指定 --output-filename
+          if [ -f "dist/uPtt/uptt" ]; then
+            chmod +x dist/uPtt/uptt
+          fi
+
+      - name: Smoke test Linux binary
+        run: |
+          if [ ! -f "dist/uPtt/uptt" ]; then
+            echo "ERROR: dist/uPtt/uptt not found"
+            ls -R dist/
+            exit 1
+          fi
+          echo "Smoke testing: dist/uPtt/uptt"
+          # 使用 QT_QPA_PLATFORM=offscreen 確保在無介面環境下能執行
+          QT_QPA_PLATFORM=offscreen ./dist/uPtt/uptt --debug &
+          BG_PID=$!
+          sleep 10
+          if kill -0 "$BG_PID" 2>/dev/null; then
+            kill "$BG_PID"
+            echo "Smoke test passed (binary was still running after 10s)"
+          else
+            wait "$BG_PID"
+            EXIT_CODE=$?
+            if [ "$EXIT_CODE" -ne 0 ]; then
+              echo "ERROR: Binary crashed with exit code $EXIT_CODE"
+              exit 1
+            fi
+            echo "Smoke test passed (binary exited cleanly)"
+          fi
+
+      - name: Package for distribution
+        run: |
+          cd dist
+          tar -czf uPtt-Linux.tar.gz uPtt/
+
+      - name: Create or Update Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/uPtt-Linux.tar.gz
+          tag_name: v${{ needs.prepare-version.outputs.VERSION }}
+          name: ${{ env.RELEASE_TITLE }}
+          prerelease: ${{ needs.prepare-version.outputs.IS_PRERELEASE }}
+          draft: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build-windows:
     needs: [prepare-version]
     runs-on: windows-latest

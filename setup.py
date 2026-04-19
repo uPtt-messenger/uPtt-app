@@ -15,7 +15,7 @@ with open("requirements.txt", "r", encoding="utf-8") as f:
     requirements = f.read().splitlines()
 
 setuptools.setup(
-    name=about['__name__'],
+    name=about['__app_name__'],
     version=about['__version__'],
     author=about['__author__'],
     author_email=about['__author_email__'],

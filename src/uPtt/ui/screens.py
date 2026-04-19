@@ -452,6 +452,7 @@ class MainWindow(QMainWindow):
         self._user_info_cache: Dict[str, Dict] = {}  # ptt_id_lower -> user info dict
         self.session_drafts: Dict[str, str] = {}  # ptt_id_lower -> draft text
         self._pending_send_targets: collections.deque = collections.deque()  # FIFO queue of send targets
+        self._quitting = False  # 退出程序旗標，防止遞迴
 
         # 初始化 UI 與背景執行緒
         self.init_ui()
@@ -1846,6 +1847,10 @@ class MainWindow(QMainWindow):
 
     def fully_quit(self):
         """徹底退出程式，確保 PTT 登出與執行緒釋放"""
+        if self._quitting:
+            return
+        self._quitting = True
+
         logger.info("正在執行完全退出程序...")
         try:
             self._stop_all_threads()
