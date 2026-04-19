@@ -2,6 +2,7 @@ __pycache__/
 .idea/
 build/
 dist/
+dist_local/
 .DS_Store
 *venv*/
 coverage.xml

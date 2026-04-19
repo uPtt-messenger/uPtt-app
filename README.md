@@ -13,7 +13,7 @@
 
 <p align="center">
   <a href="https://github.com/uPtt-messenger/uPttTerm/blob/main/LICENSE"><img src="https://img.shields.io/badge/授權條款-GPL--3.0-green.svg" alt="License"></a>
-  <img src="https://img.shields.io/badge/平台-Windows%20|%20macOS-lightgrey" alt="Platform">
+  <img src="https://img.shields.io/badge/平台-Windows%20|%20macOS%20|%20Linux-lightgrey" alt="Platform">
   <a href="https://uptt-messenger.github.io/uPtt-app/"><img src="https://img.shields.io/badge/官方網站-uPtt-A0C4B4?style=flat&logo=github" alt="Website"></a>
 </p>
 
@@ -93,6 +93,7 @@ PTT（批踢踢）是台灣最具生命力的網路社群，但傳統的 Telnet 
 
 *   **Windows:** 下載 `.exe` 執行檔，執行後即可啟動。
 *   **macOS:** 下載 `.dmg` 映像檔，將 `uPtt` 拖移至「應用程式」資料夾即可使用。
+*   **Linux (Ubuntu/Debian):** 下載 `.tar.gz` 壓縮檔，解壓後執行 `./uptt` 即可。
 
 ---
 
@@ -104,6 +105,7 @@ PTT（批踢踢）是台灣最具生命力的網路社群，但傳統的 Telnet 
 2.  **安裝依賴：** `pip install -r requirements.txt`
 3.  **執行：** `python3 src/run_app.py`
 4.  **測試：** `pytest --cov=src/uPtt tests/`
+5.  **Linux 編譯驗證：** `./scripts/local_build_linux.sh`
 
 ---
 

@@ -9,7 +9,7 @@
 
 <p align="center">
   <a href="https://github.com/uPtt-messenger/uPttTerm/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-green.svg" alt="License"></a>
-  <img src="https://img.shields.io/badge/Platform-Windows%20|%20macOS-lightgrey" alt="Platform">
+  <img src="https://img.shields.io/badge/Platform-Windows%20|%20macOS%20|%20Linux-lightgrey" alt="Platform">
   <a href="https://uptt-messenger.github.io/uPtt-app/"><img src="https://img.shields.io/badge/Website-uPtt-A0C4B4?style=flat&logo=github" alt="Website"></a>
 </p>
 
@@ -93,6 +93,7 @@ Head to [GitHub Releases](https://github.com/uPtt-messenger/uPtt-app/releases) t
 
 * **Windows:** Download the `.exe` file and run it.
 * **macOS:** Download the `.dmg` file and drag `uPtt` to your Applications folder.
+* **Linux (Ubuntu/Debian):** Download the `.tar.gz` file, extract, and run `./uptt`.
 
 ---
 
@@ -104,6 +105,7 @@ Built with **Python 3.12** and **PySide6**. To set up a development environment:
 2. **Install dependencies:** `pip install -r requirements.txt`
 3. **Run:** `python3 src/run_app.py`
 4. **Test:** `pytest --cov=src/uPtt tests/`
+5. **Verify Linux Build:** `./scripts/local_build_linux.sh`
 
 ---
 
