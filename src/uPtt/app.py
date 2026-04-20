@@ -38,9 +38,7 @@ def setup_linux_im():
                     os.environ["QT_IM_MODULE"] = "ibus"
                 elif os.path.exists("/usr/bin/fcitx") or os.path.exists("/usr/bin/fcitx5"):
                     os.environ["QT_IM_MODULE"] = "fcitx"
-                # 某些環境可能需要 wayland 作為 IM 模組
-                elif os.environ.get("XDG_SESSION_TYPE") == "wayland":
-                    os.environ["QT_IM_MODULE"] = "wayland"
+
 
         # 確保 XMODIFIERS 也有設定 (IBus/Fcitx 需要)
         if "XMODIFIERS" not in os.environ:
@@ -98,8 +96,8 @@ def main():
     parser.add_argument("--debug", action="store_true", help="啟用除錯模式並記錄至檔案")
     args = parser.parse_args()
 
-    setup_linux_im()
     setup_logging(args.debug)
+    setup_linux_im()
 
     # 初始化 Qt 應用程式
     qt_app = QApplication(sys.argv)
