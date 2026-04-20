@@ -8,6 +8,19 @@ from src.uPtt.worker import PTTWorker, QueryWorker
 from src.uPtt.ptt import UPttService
 from src.uPtt import contant
 
+@pytest.fixture(autouse=True)
+def patch_pyptt_i18n():
+    """全域 Patch PyPtt.i18n 屬性，避免 Exception 實例化時因缺少語系字串而失敗。"""
+    attributes = {
+        'mail_box_full': '郵件已滿',
+        'connection_closed': '連線中斷',
+        'wrong_id_pw': '帳號或密碼錯誤',
+        'login_too_often': '登入太頻繁',
+        'require_login': '請先登入',
+    }
+    with patch.multiple(PyPtt.i18n, create=True, **attributes):
+        yield
+
 @pytest.fixture
 def ptt_service_mock():
     service = MagicMock(spec=UPttService)
@@ -800,9 +813,8 @@ def test_do_login_too_often(qtbot, worker, ptt_service_mock):
 
 
 def _make_mailbox_full():
-    """建立 PyPtt.MailboxFull 例外（patch 測試環境中缺少的 i18n 屬性）。"""
-    with patch.object(PyPtt.i18n, 'mail_box_full', '郵件已滿', create=True):
-        return PyPtt.MailboxFull()
+    """建立 PyPtt.MailboxFull 例外。"""
+    return PyPtt.MailboxFull()
 
 
 def _make_uptt_mail_call_side_effect(mail_idx_to_fail_on=None):
