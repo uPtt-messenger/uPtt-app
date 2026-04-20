@@ -324,10 +324,10 @@ jobs:
           key: nuitka-linux-${{ hashFiles('src/**/*.py', 'requirements.txt') }}
           restore-keys: nuitka-linux-
 
-      - name: Build with Nuitka (standalone)
+      - name: Build with Nuitka (onefile)
         run: |
           PYTHONPATH=src python -m nuitka \
-            --standalone \
+            --onefile \
             --plugin-enable=pyside6 \
             --include-qt-plugins=sensible \
             --include-package=PyPtt \
@@ -336,14 +336,18 @@ jobs:
             --include-package-data=uPtt.ui.assets \
             --output-dir=dist \
             --output-filename=uptt \
+            --assume-yes-for-downloads \
             src/run_app.py
 
-      - name: Rename standalone folder and binary
+      - name: Organize onefile binary and set permissions
         run: |
-          if [ -d "dist/run_app.dist" ]; then
-            mv dist/run_app.dist dist/uPtt
+          rm -rf dist/uPtt
+          mkdir -p dist/uPtt
+          
+          if [ -f "dist/uptt" ]; then
+            mv dist/uptt dist/uPtt/
           fi
-          # 不再需要手動改名執行檔，因為編譯時已指定 --output-filename
+          
           if [ -f "dist/uPtt/uptt" ]; then
             chmod +x dist/uPtt/uptt
           fi
