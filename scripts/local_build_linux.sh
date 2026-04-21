@@ -37,11 +37,14 @@ fi
 # 設定路徑讓 Nuitka 能找到原始碼
 export PYTHONPATH=src
 
-# 執行 Nuitka 編譯 (Standalone 模式)
-echo "正在開始本地編譯 (Standalone 模式)..."
+# 清除舊的編譯快取與產出，避免分支切換或舊檔案干擾
+rm -rf dist_local/*.build dist_local/*.onefile-build dist_local/uPtt dist_local/uptt
+
+# 執行 Nuitka 編譯 (onefile 模式)
+echo "正在開始本地編譯 (onefile 模式)..."
 # 注意：使用 --output-filename 指定執行檔名稱，避免手動改名導致路徑偵測失敗
 python -m nuitka \
-    --standalone \
+    --onefile \
     --plugin-enable=pyside6 \
     --include-qt-plugins=sensible \
     --include-package=PyPtt \
@@ -55,10 +58,13 @@ python -m nuitka \
 
 # 整理產出物名稱 (與 CI/CD 流程一致)
 echo "正在整理產出物..."
-if [ -d "dist_local/run_app.dist" ]; then
-    # 如果已存在舊的 uPtt 資料夾則先移除
-    rm -rf dist_local/uPtt
-    mv dist_local/run_app.dist dist_local/uPtt
+# 建立一個 uPtt 目錄來存放這唯一的執行檔，保持與 CI 流程結構一致
+rm -rf dist_local/uPtt
+mkdir -p dist_local/uPtt
+
+# onefile 產出的檔案會直接位於 --output-dir 下
+if [ -f "dist_local/uptt" ]; then
+    mv dist_local/uptt dist_local/uPtt/
 fi
 
 # 確保執行檔具備執行權限 (雖然 Nuitka 預設會給)
