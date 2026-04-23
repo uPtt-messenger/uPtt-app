@@ -8,6 +8,19 @@ from src.uPtt.worker import PTTWorker, QueryWorker
 from src.uPtt.ptt import UPttService
 from src.uPtt import contant
 
+@pytest.fixture(autouse=True)
+def patch_pyptt_i18n():
+    """全域 Patch PyPtt.i18n 屬性，避免 Exception 實例化時因缺少語系字串而失敗。"""
+    attributes = {
+        'mail_box_full': '郵件已滿',
+        'connection_closed': '連線中斷',
+        'wrong_id_pw': '帳號或密碼錯誤',
+        'login_too_often': '登入太頻繁',
+        'require_login': '請先登入',
+    }
+    with patch.multiple(PyPtt.i18n, create=True, **attributes):
+        yield
+
 @pytest.fixture
 def ptt_service_mock():
     service = MagicMock(spec=UPttService)
@@ -784,3 +797,205 @@ def test_do_login_too_often(qtbot, worker, ptt_service_mock):
         worker.do_login("user", "pass")
 
     assert blocker.args == [False, "登入太頻繁，請稍後再試"]
+
+
+# --- Issue #11: 使用者信箱已滿 (MailboxFull) 處理 ---
+#
+# 背景：
+# PyPtt 的 del_mail() 在刪信後檢查 is_mailbox_full，若為 True 會：
+#   1. 呼叫 api.logout() — 立即中斷 PTT 連線、清除內部 _is_login
+#   2. raise MailboxFull() — 拋出例外（message="郵件已滿"）
+#
+# 在生產環境中，PyPtt.Service() 建立時會呼叫 i18n.init()，
+# 此時 i18n.mail_box_full = "郵件已滿" 存在，MailboxFull 可正常實例化。
+# 但測試環境中我們使用 MagicMock 取代 UPttService，未建立真正的 PyPtt.Service，
+# 因此 i18n.mail_box_full 不存在，需要 patch 才能建立 MailboxFull 例外物件。
+
+
+def _make_mailbox_full():
+    """建立 PyPtt.MailboxFull 例外。"""
+    return PyPtt.MailboxFull()
+
+
+def _make_uptt_mail_call_side_effect(mail_idx_to_fail_on=None):
+    """
+    建立模擬 ptt.call 的 side_effect：
+    - get_newest_index：回傳 1
+    - get_mail：回傳一封合法的 uPtt 訊息
+    - del_mail：若 index 符合 mail_idx_to_fail_on，拋出 MailboxFull
+    """
+    mailbox_full_exc = _make_mailbox_full()
+
+    def call_side_effect(api, args=None):
+        if api == 'get_newest_index':
+            return 1
+        if api == 'get_mail':
+            return {
+                PyPtt.MailField.title: contant.PTT_MSG_TITLE,
+                PyPtt.MailField.author: "SenderUser (Nick)",
+                PyPtt.MailField.date: "Wed Apr  1 10:00:00 2026",
+                PyPtt.MailField.content: (
+                    f"Header\n{contant.PTT_MSG_DIVISION_LINE}\n"
+                    f"Hello\n{contant.PTT_MSG_DIVISION_LINE}\nFooter"
+                ),
+            }
+        if api == 'del_mail':
+            idx = (args or {}).get('index')
+            if mail_idx_to_fail_on is not None and idx == mail_idx_to_fail_on:
+                raise mailbox_full_exc
+        return None
+    return call_side_effect
+
+
+def test_poll_mailbox_full_emits_disconnected(worker, ptt_service_mock, qtbot):
+    """
+    當 del_mail 因自身信箱已滿拋出 MailboxFull 時，
+    worker 應發射 disconnected 訊號（而非通用的 status_updated），
+    讓 UI 可以正確處理並返回登入畫面。
+    """
+    worker.is_first_polling = False
+    ptt_service_mock.call.side_effect = _make_uptt_mail_call_side_effect(mail_idx_to_fail_on=1)
+
+    with qtbot.waitSignal(worker.disconnected) as blocker:
+        worker._poll_new_mails()
+
+    assert "信箱已滿" in blocker.args[0]
+
+
+def test_poll_mailbox_full_stops_polling_timer(worker, ptt_service_mock, qtbot):
+    """
+    MailboxFull 發生時，worker 應停止 polling timer，
+    防止後續輪詢持續拋出 RequireLogin 錯誤。
+    """
+    worker.is_first_polling = False
+    worker.polling_timer = MagicMock(spec=QTimer)
+
+    ptt_service_mock.call.side_effect = _make_uptt_mail_call_side_effect(mail_idx_to_fail_on=1)
+
+    with qtbot.waitSignal(worker.disconnected):
+        worker._poll_new_mails()
+
+    worker.polling_timer.stop.assert_called_once()
+
+
+def test_poll_mailbox_full_no_new_message_signal(worker, ptt_service_mock, db_mock, qtbot):
+    """
+    當 MailboxFull 在 del_mail 中斷輪詢迴圈時（訊息處理完畢後才拋出），
+    new_message_received 訊號不應被發射，
+    因為例外在 emit 區塊之前就中止了迴圈。
+
+    此測試記錄現有行為：緩衝在 mails_to_emit 中的訊息會因此遺失。
+    """
+    worker.is_first_polling = False
+    ptt_service_mock.call.side_effect = _make_uptt_mail_call_side_effect(mail_idx_to_fail_on=1)
+
+    signals_received = []
+    worker.new_message_received.connect(lambda d: signals_received.append(d))
+
+    worker._poll_new_mails()
+
+    # MailboxFull 在 emit 區塊前中止，不應發射任何訊號
+    assert signals_received == []
+
+
+def test_poll_mailbox_full_does_not_emit_status_updated(worker, ptt_service_mock, qtbot):
+    """
+    MailboxFull 應走 disconnected 路徑，不應發射通用的 status_updated 訊號。
+    """
+    worker.is_first_polling = False
+    ptt_service_mock.call.side_effect = _make_uptt_mail_call_side_effect(mail_idx_to_fail_on=1)
+
+    status_signals = []
+    worker.status_updated.connect(lambda s: status_signals.append(s))
+
+    worker._poll_new_mails()
+
+    assert status_signals == []
+
+
+def test_poll_generic_exception_still_emits_status_updated(worker, ptt_service_mock, qtbot):
+    """
+    非 MailboxFull 的例外（如網路逾時、伺服器錯誤等）
+    仍應走通用的 status_updated 路徑，確保修復未影響既有行為。
+    """
+    ptt_service_mock.call.side_effect = Exception("random network error")
+
+    with qtbot.waitSignal(worker.status_updated) as blocker:
+        worker._poll_new_mails()
+
+    assert "輪詢錯誤" in blocker.args[0]
+    assert "random network error" in blocker.args[0]
+
+
+# --- Issue #11: UPttService 層級測試 ---
+# 以下測試直接驗證 ptt.py 的 UPttService.call() 行為，
+# 確認 MailboxFull 的傳播路徑與狀態不一致問題。
+
+
+def test_mailbox_full_bypasses_retry_mechanism():
+    """
+    驗證 UPttService.call() 的重連機制不處理 MailboxFull。
+
+    ptt.py 的 call() 只對 ConnectionClosed 做自動重連（最多 3 次）。
+    MailboxFull 不是 ConnectionClosed 的子類別，
+    因此應直接傳播到上層，不觸發任何重試。
+    """
+    service = UPttService()
+    service.ptt_id = "TestUser"
+    service.ptt_pw = "TestPass"
+
+    mailbox_full_exc = _make_mailbox_full()
+
+    # Mock PyPtt.Service.call 讓 del_mail 拋出 MailboxFull
+    service.service = MagicMock()
+    service.service.call.side_effect = mailbox_full_exc
+
+    with pytest.raises(PyPtt.MailboxFull):
+        service.call('del_mail', {'index': 1})
+
+    # 驗證只呼叫了一次（沒有重試）
+    assert service.service.call.call_count == 1
+
+    # 驗證狀態不一致：UPttService 仍然以為已登入
+    assert service.ptt_id == "TestUser"
+    assert service.ptt_pw == "TestPass"
+
+
+def test_mailbox_full_state_inconsistency():
+    """
+    驗證信箱滿時的狀態不一致問題（Issue #11 的根因）。
+
+    流程：
+    1. del_mail 拋出 MailboxFull → UPttService.ptt_id/ptt_pw 仍有值
+    2. 但 PyPtt 內部已 logout（_is_login=False、連線已關）
+    3. 下一次 API 呼叫 → PyPtt 內部拋出 RequireLogin
+    4. RequireLogin 也非 ConnectionClosed → 不重連 → 持續失敗
+
+    這證明 MailboxFull 會造成程式進入無法自動恢復的錯誤狀態。
+    """
+    service = UPttService()
+    service.ptt_id = "TestUser"
+    service.ptt_pw = "TestPass"
+
+    mailbox_full_exc = _make_mailbox_full()
+
+    # Mock PyPtt.Service.call
+    service.service = MagicMock()
+
+    # 第一次呼叫：del_mail → MailboxFull（模擬 PyPtt 內部已 logout）
+    service.service.call.side_effect = mailbox_full_exc
+    with pytest.raises(PyPtt.MailboxFull):
+        service.call('del_mail', {'index': 1})
+
+    # 狀態不一致：UPttService 以為還在線
+    assert service.ptt_id is not None
+    assert service.ptt_pw is not None
+
+    # 第二次呼叫：模擬 PyPtt 內部 _is_login=False 後的行為
+    service.service.call.side_effect = PyPtt.RequireLogin("require login")
+    with pytest.raises(PyPtt.RequireLogin):
+        service.call('get_newest_index', {'index_type': PyPtt.NewIndex.MAIL})
+
+    # RequireLogin 也不觸發重連（非 ConnectionClosed），只呼叫一次
+    # call_count = 2（del_mail 一次 + get_newest_index 一次）
+    assert service.service.call.call_count == 2
