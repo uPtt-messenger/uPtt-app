@@ -1,4 +1,3 @@
-import collections
 import logging
 import os
 import sys
@@ -421,7 +420,7 @@ class ScanSetupScreen(QWidget):
 
 class MainWindow(QMainWindow):
     """主聊天畫面"""
-    send_requested = Signal(str, str, object)
+    send_requested = Signal(str, str, object, int)  # (receiver_id, text, timestamp, db_msg_id)
     user_info_requested = Signal(str)
     priority_online_requested = Signal(str)
     scan_requested = Signal(int)  # scan_days
@@ -451,7 +450,6 @@ class MainWindow(QMainWindow):
         self.reply_to: Optional[Dict] = None  # {'sender': str, 'preview': str}
         self._user_info_cache: Dict[str, Dict] = {}  # ptt_id_lower -> user info dict
         self.session_drafts: Dict[str, str] = {}  # ptt_id_lower -> draft text
-        self._pending_send_targets: collections.deque = collections.deque()  # FIFO queue of send targets
         self._quitting = False  # 退出程序旗標，防止遞迴
 
         # 初始化 UI 與背景執行緒
@@ -1018,6 +1016,12 @@ class MainWindow(QMainWindow):
             self._status_dot.show()
             self.logout_btn.show()
 
+            # 上次執行若崩潰／強制結束，pending 訊息可能沒被更新狀態；登入後立刻
+            # 標記為 failed，避免 ⏳ bubble 永久殘留。
+            reaped = self.db.fail_dangling_pending(corrected_id)
+            if reaped:
+                logger.info(f"已將 {reaped} 筆殘留 pending 訊息標記為 failed")
+
             # 延遲 10 秒觸發副 session 登入,避開 LoginTooOften 且不影響 UI
             QTimer.singleShot(10000, self._trigger_query_login)
 
@@ -1258,7 +1262,7 @@ class MainWindow(QMainWindow):
         for m in messages:
             ts = datetime.fromisoformat(m['timestamp']) if isinstance(m['timestamp'], str) else m['timestamp']
             reply_info, actual_text = decode_reply(m['content'])
-            parsed.append({
+            entry = {
                 'text': actual_text,
                 'time': ts.strftime("%H:%M"),
                 'timestamp': ts,
@@ -1266,7 +1270,11 @@ class MainWindow(QMainWindow):
                 'mail_type': m.get('mail_type', 'uptt'),
                 'subject': m.get('subject', ''),
                 'reply_info': reply_info,
-            })
+                'msg_id': m.get('id', -1),
+            }
+            if entry['is_me']:
+                entry['send_status'] = m.get('send_status') or 'sent'
+            parsed.append(entry)
         self.chat_histories[self.current_chat_id] = parsed
 
         # 切換聯絡人時清除回覆狀態並還原草稿
@@ -1423,8 +1431,10 @@ class MainWindow(QMainWindow):
         if not text or not self.current_chat_id:
             return
 
-        # 若有待回覆訊息，編碼回覆前綴
+        # 若有待回覆訊息，編碼回覆前綴。先快照下 reply_to 以便後續 UNIQUE 衝突
+        # 時還原（避免使用者重複按 Enter 後 reply context 被吞掉）。
         reply_info = None
+        saved_reply_to = self.reply_to.copy() if self.reply_to else None
         if self.reply_to:
             encoded_text = encode_reply(self.reply_to['sender'], self.reply_to['preview'], text)
             reply_info = self.reply_to.copy()
@@ -1435,14 +1445,44 @@ class MainWindow(QMainWindow):
         # 1. 立即顯示在 UI (這部分仍在主執行緒)
         now = datetime.now()
         now_str = now.strftime("%H:%M")
-        self.chat_histories[self.current_chat_id].append({
+        receiver_id = self.current_chat_id
+        current_acc = self.ptt_service.ptt_id
+
+        # 預先寫入 DB 為 pending，取得 row id 作為訊息識別子；切換對話 / 重啟後仍可
+        # 還原此訊息與其狀態。
+        self.db.upsert_session(account_id=current_acc, display_id=receiver_id)
+        msg_id = self.db.save_pending_message(
+            account_id=current_acc,
+            session_id=receiver_id,
+            sender_id=current_acc,
+            receiver_id=receiver_id,
+            content=encoded_text,
+            timestamp=now,
+        )
+        if msg_id is None:
+            # UNIQUE 衝突（同 account/session/sender/content/timestamp）—— 視為重複按下，
+            # 直接吞掉此次發送，避免在 UI 留下永遠不會更新狀態的 ⏳ bubble。
+            # 此處輸入框尚未 clear，保留使用者原文方便其調整後再送；同時還原 reply
+            # 預覽（已在前面被 cancel_reply 隱藏）。
+            logger.warning(
+                f"重複的發送請求被略過（receiver={receiver_id}, ts={now.isoformat()}）"
+            )
+            if saved_reply_to:
+                self.reply_to = saved_reply_to
+                display_id = self._get_contact_display_id(saved_reply_to['sender'])
+                preview = saved_reply_to['preview']
+                self.reply_bar_label.setText(f"↩ @{display_id}: {preview[:60]}")
+                self.reply_bar.show()
+            return
+
+        self.chat_histories[receiver_id].append({
             'text': text,
             'time': now_str,
             'timestamp': now,
             'is_me': True,
             'reply_info': reply_info,
             'send_status': 'pending',
-            'send_target': self.current_chat_id,
+            'msg_id': msg_id,
         })
         self.refresh_chat_display()
         self.message_edit.clear()
@@ -1450,16 +1490,14 @@ class MainWindow(QMainWindow):
         # 更新聯絡人列表上的最後訊息時間
         for i in range(self.contact_list.count()):
             w = self.contact_list.itemWidget(self.contact_list.item(i))
-            if w and w.ptt_id == self.current_chat_id:
+            if w and w.ptt_id == receiver_id:
                 w.set_last_msg_time(now_str)
                 break
 
-        self._pending_send_targets.append(self.current_chat_id)
-
         # 2. 將發送請求放入 thread-safe 佇列（繞過 Qt 事件佇列，避免被阻塞操作卡住）
         #    同時 emit signal 作為後備喚醒（worker 閒置時由 slot 觸發 drain）
-        self.worker.enqueue_send(self.current_chat_id, encoded_text, now)
-        self.send_requested.emit(self.current_chat_id, encoded_text, now)
+        self.worker.enqueue_send(receiver_id, encoded_text, now, msg_id)
+        self.send_requested.emit(receiver_id, encoded_text, now, msg_id)
 
     def _append_if_not_dup(self, sender: str, msg_dict: dict) -> bool:
         """將訊息加入 chat_histories，若為重複則跳過。回傳 True 表示已新增。"""
@@ -1520,6 +1558,10 @@ class MainWindow(QMainWindow):
             'subject': data.get('subject', ''),
             'reply_info': reply_info,
         }
+        # PTT 可能會把自己寄出的信透過輪詢路徑回送（多裝置 backup 等情境）；補上
+        # send_status 才能在 UI 顯示 ✓，保持與 handle_send 路徑一致。
+        if is_me:
+            msg_dict['send_status'] = 'sent'
 
         if self._append_if_not_dup(sender, msg_dict):
             if self.current_chat_id == sender:
@@ -1544,19 +1586,21 @@ class MainWindow(QMainWindow):
                 3000
             )
 
-    @Slot(bool, str)
-    def on_send_result(self, success, error_msg):
+    @Slot(int, bool, str)
+    def on_send_result(self, msg_id, success, error_msg):
         new_status = 'sent' if success else 'failed'
-        # 從 FIFO 佇列取出對應的 send target，確保多訊息連發時順序正確
-        target = self._pending_send_targets.popleft() if self._pending_send_targets else None
-        updated = False
-        if target and target in self.chat_histories:
-            for msg in self.chat_histories[target]:
-                if msg.get('is_me') and msg.get('send_status') == 'pending':
-                    msg['send_status'] = new_status
-                    updated = True
+        # 以 msg_id 對應到實際的 chat_histories 項目（可能不在當前對話）
+        updated_chat: Optional[str] = None
+        if msg_id > 0:
+            for chat_id, history in self.chat_histories.items():
+                for msg in history:
+                    if msg.get('msg_id') == msg_id:
+                        msg['send_status'] = new_status
+                        updated_chat = chat_id
+                        break
+                if updated_chat:
                     break
-        if updated:
+        if updated_chat == self.current_chat_id:
             self.refresh_chat_display()
         if not success:
             QMessageBox.warning(self, "發送失敗", f"無法發送訊息: {error_msg}")
@@ -1816,8 +1860,17 @@ class MainWindow(QMainWindow):
     def _do_logout(self):
         """執行登出清理流程（停止 Worker、重設 PTT、清除 UI、切回登入畫面）"""
         logger.info("執行登出程序...")
+        outgoing_acc = self.ptt_service.ptt_id
         try:
-            self._stop_all_threads()
+            try:
+                self._stop_all_threads()
+            finally:
+                # _stop_all_threads 可能 terminate worker，未完成的 send 會留下殘留
+                # pending row；放在 finally 確保即使 stop 拋例外也會清理。
+                if outgoing_acc:
+                    reaped = self.db.fail_dangling_pending(outgoing_acc)
+                    if reaped:
+                        logger.info(f"登出時清理 {reaped} 筆殘留 pending 訊息")
 
             self.ptt_service = UPttService()
             self.ptt_query_service = UPttService(kick_on_reconnect=False)
@@ -1830,7 +1883,6 @@ class MainWindow(QMainWindow):
             self.chat_histories.clear()
             self.unread_counts.clear()
             self.pinned_ids.clear()
-            self._pending_send_targets.clear()
             self.current_chat_id = None
             self.refresh_chat_display()
             self.user_id_label.setText("uPtt")

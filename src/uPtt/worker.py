@@ -23,7 +23,7 @@ class PTTWorker(QObject):
     # 訊號定義
     login_result = Signal(bool, str)  # (成功與否, 訊息)
     new_message_received = Signal(dict)  # {'sender': str, 'text': str, 'time': str, 'full_author': str}
-    send_result = Signal(bool, str)  # (成功與否, 錯誤訊息)
+    send_result = Signal(int, bool, str)  # (DB row id, 成功與否, 錯誤訊息)；msg_id=-1 代表無對應 DB row
     status_updated = Signal(str)
     connection_lost = Signal()       # 連線中斷
     connection_restored = Signal()   # 連線恢復
@@ -488,13 +488,14 @@ class PTTWorker(QObject):
 
     # ── 發送訊息：優先佇列機制 ──────────────────────────────
 
-    def enqueue_send(self, receiver_id: str, text: str, timestamp=None):
+    def enqueue_send(self, receiver_id: str, text: str, timestamp=None, msg_id: int = -1):
         """Thread-safe: 從任何執行緒將發送請求加入優先佇列。
 
         UI 直接呼叫此方法（不經 Qt 事件佇列），確保請求在阻塞操作
-        之間被 _drain_send_queue() 即時撈出處理。
+        之間被 _drain_send_queue() 即時撈出處理。msg_id 為 UI 預先寫入 DB
+        的 pending 訊息 row id，發送結果透過此 id 對應回 DB 與 UI bubble。
         """
-        self._send_queue.put((receiver_id, text, timestamp))
+        self._send_queue.put((receiver_id, text, timestamp, msg_id))
 
     def _drain_send_queue(self) -> bool:
         """處理所有待發送訊息。在每個阻塞操作之間協作式呼叫。
@@ -505,24 +506,25 @@ class PTTWorker(QObject):
         sent = False
         while not self._send_queue.empty():
             try:
-                receiver_id, text, timestamp = self._send_queue.get_nowait()
+                receiver_id, text, timestamp, msg_id = self._send_queue.get_nowait()
             except queue.Empty:
                 break
             logger.info(f"[發送插隊] 偵測到待發送訊息，暫停當前任務，優先發送給 {receiver_id}")
-            self._do_send(receiver_id, text, timestamp)
+            self._do_send(receiver_id, text, timestamp, msg_id)
             sent = True
         return sent
 
-    @Slot(str, str, object)
-    def send_message(self, receiver_id, text, timestamp=None):
+    @Slot(str, str, object, int)
+    def send_message(self, receiver_id, text, timestamp=None, msg_id: int = -1):
         """由 signal 觸發的後備路徑：worker 閒置時直接處理佇列。
 
         訊息已由 enqueue_send 放入佇列，此處僅負責喚醒 drain，不再入列。
         """
         self._drain_send_queue()
 
-    def _do_send(self, receiver_id, text, timestamp):
-        """實際執行站內信發送。"""
+    def _do_send(self, receiver_id, text, timestamp, msg_id: int = -1):
+        """實際執行站內信發送。pending row 由 UI 預先寫入 DB；此處只負責
+        呼叫 PyPtt 並依結果更新 send_status。"""
         try:
             receiver_id = receiver_id.strip()
             send_time = timestamp if isinstance(timestamp, datetime) else datetime.now()
@@ -537,23 +539,16 @@ class PTTWorker(QObject):
                 'backup': False
             })
 
-            current_user = self.ptt.ptt_id
-            self.db.upsert_session(account_id=current_user, display_id=receiver_id)
-            self.db.save_message(
-                account_id=current_user,
-                session_id=receiver_id,
-                sender_id=current_user,
-                receiver_id=receiver_id,
-                content=text,
-                timestamp=send_time,
-                is_me=True
-            )
+            if msg_id > 0:
+                self.db.update_message_status(msg_id, 'sent')
 
             logger.info(f"訊息已成功發送至 {receiver_id}")
-            self.send_result.emit(True, "")
+            self.send_result.emit(msg_id, True, "")
         except Exception as e:
             logger.exception(f"發送訊息過程中發生例外狀況: {e}")
-            self.send_result.emit(False, "發送失敗，請稍後再試")
+            if msg_id > 0:
+                self.db.update_message_status(msg_id, 'failed')
+            self.send_result.emit(msg_id, False, "發送失敗，請稍後再試")
 
     def _poll_waterballs(self):
         """輪詢水球訊息"""

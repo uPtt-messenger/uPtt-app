@@ -16,8 +16,12 @@ class DatabaseManager:
         self.db_path = Path(db_path)
         self._init_db()
 
+    # 合法的 send_status 值。新增狀態時務必同步更新 ChatBubble (widgets.py) 的渲染分支。
+    _ALLOWED_SEND_STATUS = frozenset({'pending', 'sent', 'failed'})
+
     def _get_connection(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
+        # timeout=30：UI 與 worker 兩條 thread 都會寫，避免短暫 busy 直接 raise。
+        conn = sqlite3.connect(self.db_path, timeout=30)
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -25,6 +29,8 @@ class DatabaseManager:
         try:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             with self._get_connection() as conn:
+                # WAL 讓讀者不阻塞寫者；UI 寫 pending 時不會被 worker 的輪詢讀寫卡住。
+                conn.execute("PRAGMA journal_mode=WAL")
                 cursor = conn.cursor()
                 
                 # 1. 帳號表
@@ -66,6 +72,7 @@ class DatabaseManager:
                         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                         is_read BOOLEAN DEFAULT 0,
                         is_me BOOLEAN NOT NULL,
+                        send_status TEXT DEFAULT 'sent',
                         FOREIGN KEY (account_id, session_id) REFERENCES sessions (account_id, id),
                         UNIQUE(account_id, session_id, sender_id, content, timestamp)
                     )
@@ -90,6 +97,7 @@ class DatabaseManager:
                     "ALTER TABLE sessions ADD COLUMN is_archived BOOLEAN DEFAULT 0",
                     "ALTER TABLE messages ADD COLUMN mail_type TEXT DEFAULT 'uptt'",
                     "ALTER TABLE messages ADD COLUMN subject TEXT DEFAULT ''",
+                    "ALTER TABLE messages ADD COLUMN send_status TEXT DEFAULT 'sent'",
                 ]
                 for sql in migrations:
                     try:
@@ -309,6 +317,82 @@ class DatabaseManager:
         except sqlite3.Error as e:
             logger.error(f"儲存訊息失敗：{e}")
             raise
+
+    def save_pending_message(self, account_id: str, session_id: str, sender_id: str,
+                             receiver_id: str, content: str, timestamp: datetime) -> Optional[int]:
+        """插入一筆 send_status='pending' 的自送訊息，回傳 row id 供後續 update_message_status 使用。
+
+        失敗（含 UNIQUE 衝突或資料庫錯誤）時回傳 None。
+        """
+        acc_id_lower = account_id.lower()
+        session_id_lower = session_id.lower()
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute("""
+                    INSERT OR IGNORE INTO messages
+                        (account_id, session_id, sender_id, receiver_id, content, timestamp,
+                         is_me, is_read, mail_type, subject, send_status)
+                    VALUES (?, ?, ?, ?, ?, ?, 1, 1, 'uptt', '', 'pending')
+                """, (acc_id_lower, session_id_lower, sender_id.lower(), receiver_id.lower(),
+                      content, timestamp))
+                if cursor.rowcount == 0:
+                    return None
+                msg_id = cursor.lastrowid
+
+                summary = content
+                if summary.startswith('[re:@') and ']\n' in summary:
+                    summary = summary[summary.index(']\n') + 2:]
+                conn.execute("""
+                    UPDATE sessions SET
+                        last_message_text = CASE
+                            WHEN COALESCE(last_message_time, '1970-01-01') <= ? THEN ?
+                            ELSE last_message_text END,
+                        last_message_time = MAX(COALESCE(last_message_time, '1970-01-01'), ?),
+                        is_visible = 1
+                    WHERE account_id = ? AND id = ?
+                """, (timestamp, summary, timestamp, acc_id_lower, session_id_lower))
+                conn.commit()
+                return msg_id
+        except sqlite3.Error as e:
+            logger.error(f"儲存待發送訊息失敗：{e}")
+            return None
+
+    def update_message_status(self, message_id: int, send_status: str) -> bool:
+        """以 row id 更新訊息的 send_status（'sent' / 'failed' / 'pending'）。回傳是否有更新。"""
+        if send_status not in self._ALLOWED_SEND_STATUS:
+            raise ValueError(
+                f"未知的 send_status: {send_status!r}（允許值：{sorted(self._ALLOWED_SEND_STATUS)}）"
+            )
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute(
+                    "UPDATE messages SET send_status = ? WHERE id = ?",
+                    (send_status, message_id)
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+        except sqlite3.Error as e:
+            logger.error(f"更新訊息狀態失敗 (id={message_id})：{e}")
+            return False
+
+    def fail_dangling_pending(self, account_id: str) -> int:
+        """將指定帳號所有殘留的 'pending' 自送訊息標記為 'failed'。
+
+        應用情境：上次執行因崩潰/強制結束等原因，pending row 沒能被 worker 更新狀態；
+        登入後呼叫此方法清理，避免 ⏳ bubble 永久殘留。回傳被改寫的列數。
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.execute(
+                    "UPDATE messages SET send_status = 'failed' "
+                    "WHERE account_id = ? AND send_status = 'pending'",
+                    (account_id.lower(),)
+                )
+                conn.commit()
+                return cursor.rowcount
+        except sqlite3.Error as e:
+            logger.error(f"清理殘留 pending 訊息失敗：{e}")
+            return 0
 
     def get_messages(self, account_id: str, session_id: str, limit: int = 50) -> List[Dict[str, Any]]:
         """取得特定帳號與特定對象的歷史訊息。"""

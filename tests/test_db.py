@@ -245,6 +245,157 @@ def test_update_pin_orders(db_manager):
     assert sessions[1]['id'] == "aaa"
 
 
+def test_migration_adds_send_status_to_old_db(tmp_path):
+    """A pre-existing DB lacking send_status should gain the column on next init,
+    with existing self-sent rows defaulting to 'sent'."""
+    db_path = tmp_path / "legacy.db"
+    # Build a legacy schema without send_status
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("""
+            CREATE TABLE messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                sender_id TEXT NOT NULL,
+                receiver_id TEXT NOT NULL,
+                content TEXT NOT NULL,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                is_read BOOLEAN DEFAULT 0,
+                is_me BOOLEAN NOT NULL,
+                UNIQUE(account_id, session_id, sender_id, content, timestamp)
+            )
+        """)
+        conn.execute("""
+            INSERT INTO messages (account_id, session_id, sender_id, receiver_id, content, is_me)
+            VALUES ('alice', 'bob', 'alice', 'bob', 'old', 1)
+        """)
+        conn.commit()
+
+    # Re-opening through DatabaseManager triggers the migration
+    DatabaseManager(str(db_path))
+
+    with sqlite3.connect(str(db_path)) as conn:
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(messages)").fetchall()]
+        assert 'send_status' in cols
+        # Existing row defaults to 'sent'
+        row = conn.execute("SELECT send_status FROM messages WHERE content = 'old'").fetchone()
+        assert row[0] == 'sent'
+
+
+def test_send_status_column_exists_with_default_sent(db_manager):
+    """Migration: messages table must have send_status column defaulting to 'sent'."""
+    with db_manager._get_connection() as conn:
+        cols = {row['name']: row for row in conn.execute("PRAGMA table_info(messages)").fetchall()}
+        assert 'send_status' in cols
+        assert cols['send_status']['dflt_value'] in ("'sent'", '"sent"')
+
+
+def test_save_pending_then_update_status(db_manager):
+    """Round trip: save_pending_message → update_message_status drives send_status."""
+    account_id = "alice"
+    session_id = "bob"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, session_id)
+
+    ts = datetime(2026, 4, 24, 12, 0, 0)
+    msg_id = db_manager.save_pending_message(account_id, session_id, account_id, session_id, "ping", ts)
+    assert isinstance(msg_id, int) and msg_id > 0
+
+    msgs = db_manager.get_messages(account_id, session_id)
+    assert len(msgs) == 1
+    assert msgs[0]['send_status'] == 'pending'
+    assert msgs[0]['is_me'] == 1
+
+    assert db_manager.update_message_status(msg_id, 'sent') is True
+    msgs = db_manager.get_messages(account_id, session_id)
+    assert msgs[0]['send_status'] == 'sent'
+
+    assert db_manager.update_message_status(msg_id, 'failed') is True
+    msgs = db_manager.get_messages(account_id, session_id)
+    assert msgs[0]['send_status'] == 'failed'
+
+
+def test_save_pending_returns_none_on_duplicate(db_manager):
+    """UNIQUE constraint: same (account, session, sender, content, timestamp) twice → None."""
+    account_id = "alice"
+    session_id = "bob"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, session_id)
+
+    ts = datetime(2026, 4, 24, 12, 0, 0)
+    first = db_manager.save_pending_message(account_id, session_id, account_id, session_id, "dup", ts)
+    second = db_manager.save_pending_message(account_id, session_id, account_id, session_id, "dup", ts)
+    assert first is not None
+    assert second is None
+
+
+def test_save_pending_updates_session_summary(db_manager):
+    """Pending messages should also surface in the contact list (last_message_text)."""
+    account_id = "alice"
+    session_id = "bob"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, session_id)
+
+    ts = datetime(2026, 4, 24, 12, 0, 0)
+    db_manager.save_pending_message(account_id, session_id, account_id, session_id, "summary check", ts)
+    sessions = db_manager.get_all_sessions(account_id)
+    assert sessions[0]['last_message_text'] == "summary check"
+
+
+def test_update_message_status_rejects_unknown_value(db_manager):
+    account_id = "alice"
+    session_id = "bob"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, session_id)
+    msg_id = db_manager.save_pending_message(
+        account_id, session_id, account_id, session_id, "x", datetime.now()
+    )
+    with pytest.raises(ValueError):
+        db_manager.update_message_status(msg_id, "delivered")
+
+
+def test_fail_dangling_pending_marks_only_account_rows(db_manager):
+    """殘留 pending 訊息只清理目標帳號，不影響其他帳號或非 pending 狀態。"""
+    db_manager.upsert_account("alice", "alice")
+    db_manager.upsert_account("bob", "bob")
+    db_manager.upsert_session("alice", "carol")
+    db_manager.upsert_session("bob", "dave")
+
+    pending_id = db_manager.save_pending_message(
+        "alice", "carol", "alice", "carol", "stuck", datetime(2026, 1, 1, 8, 0, 0)
+    )
+    sent_id = db_manager.save_pending_message(
+        "alice", "carol", "alice", "carol", "ok", datetime(2026, 1, 1, 9, 0, 0)
+    )
+    db_manager.update_message_status(sent_id, 'sent')
+    other_pending_id = db_manager.save_pending_message(
+        "bob", "dave", "bob", "dave", "stuck-other", datetime(2026, 1, 1, 10, 0, 0)
+    )
+
+    reaped = db_manager.fail_dangling_pending("alice")
+    assert reaped == 1
+
+    with db_manager._get_connection() as conn:
+        rows = {r['id']: r['send_status'] for r in conn.execute("SELECT id, send_status FROM messages").fetchall()}
+        assert rows[pending_id] == 'failed'
+        assert rows[sent_id] == 'sent'
+        assert rows[other_pending_id] == 'pending'
+
+
+def test_save_message_default_send_status(db_manager):
+    """Existing save_message path (incoming + own backups) must default to 'sent'
+    so historical messages still render ✓."""
+    account_id = "alice"
+    session_id = "bob"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, session_id)
+
+    ts = datetime(2026, 4, 24, 12, 0, 0)
+    db_manager.save_message(account_id, session_id, session_id, account_id, "incoming", ts, False)
+    msgs = db_manager.get_messages(account_id, session_id)
+    assert msgs[0]['send_status'] == 'sent'
+
+
 def test_get_messages_limit(db_manager):
     account_id = "testuser"
     session_id = "friend"

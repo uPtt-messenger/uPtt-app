@@ -380,21 +380,53 @@ def test_send_message_success(qtbot, worker, ptt_service_mock, db_mock):
     worker.ptt.ptt_id = "SenderID"
 
     with qtbot.waitSignal(worker.send_result) as blocker:
-        worker.enqueue_send("ReceiverID", "Hello PTT")
-        worker.send_message("ReceiverID", "Hello PTT")
+        worker.enqueue_send("ReceiverID", "Hello PTT", None, 42)
+        worker.send_message("ReceiverID", "Hello PTT", None, 42)
 
-    assert blocker.args == [True, ""]
+    assert blocker.args == [42, True, ""]
     ptt_service_mock.call.assert_called()
-    db_mock.save_message.assert_called_once()
+    # Pending row 由 UI 端寫入，worker 只更新狀態
+    db_mock.save_message.assert_not_called()
+    db_mock.update_message_status.assert_called_once_with(42, 'sent')
 
-def test_send_message_failure(qtbot, worker, ptt_service_mock):
+def test_send_message_failure(qtbot, worker, ptt_service_mock, db_mock):
     ptt_service_mock.call.side_effect = Exception("Send Error")
 
     with qtbot.waitSignal(worker.send_result) as blocker:
-        worker.enqueue_send("receiver", "Hello")
-        worker.send_message("receiver", "Hello")
-    
-    assert blocker.args == [False, "發送失敗，請稍後再試"]
+        worker.enqueue_send("receiver", "Hello", None, 7)
+        worker.send_message("receiver", "Hello", None, 7)
+
+    assert blocker.args == [7, False, "發送失敗，請稍後再試"]
+    db_mock.update_message_status.assert_called_once_with(7, 'failed')
+
+
+def test_send_message_updates_db_before_emitting_signal(qtbot, worker, ptt_service_mock, db_mock):
+    """on_send_result may reload from DB; status update must happen first."""
+    worker.ptt.ptt_id = "SenderID"
+    call_order = []
+    db_mock.update_message_status.side_effect = lambda *a, **k: call_order.append('db')
+
+    def emit_recorder(*args):
+        call_order.append('emit')
+
+    worker.send_result.connect(emit_recorder)
+    worker.enqueue_send("ReceiverID", "Hello", None, 99)
+    worker.send_message("ReceiverID", "Hello", None, 99)
+    qtbot.wait(50)
+
+    assert call_order == ['db', 'emit']
+
+
+def test_send_message_no_msg_id_skips_status_update(qtbot, worker, ptt_service_mock, db_mock):
+    """msg_id <= 0 時（UI pending 寫入失敗），仍應發出，但不更新 DB 狀態。"""
+    worker.ptt.ptt_id = "SenderID"
+
+    with qtbot.waitSignal(worker.send_result) as blocker:
+        worker.enqueue_send("ReceiverID", "Hello", None, -1)
+        worker.send_message("ReceiverID", "Hello", None, -1)
+
+    assert blocker.args == [-1, True, ""]
+    db_mock.update_message_status.assert_not_called()
 
 def test_get_user_info_success(qtbot, query_worker, ptt_service_mock, db_mock):
     ptt_service_mock.get_user_info.return_value = {
