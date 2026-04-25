@@ -4,7 +4,7 @@
 #define MyAppName "uPtt"
 #define MyAppExeName "uPtt.exe"
 #define MyAppPublisher "uPtt"
-#define MyAppURL "https://github.com/uPtt-messenger/uPttTerm"
+#define MyAppURL "https://github.com/uPtt-messenger/uPtt-app"
 
 ; VERSION is passed via /D flag from CI: iscc /DVERSION=x.y.z
 #ifndef VERSION

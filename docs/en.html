@@ -121,6 +121,12 @@
         <div class="section-label">How It Works</div>
         <h2 class="section-title">How It Works</h2>
         <p class="section-desc">uPtt connects directly to PTT's official servers, using internal mail as the message transport layer — no third-party relay needed.</p>
+        
+        <div class="alert alert-danger fade-in" style="max-width: 800px; margin: 0 auto 40px; padding: 20px; background: rgba(248, 81, 73, 0.1); border: 1px solid rgba(248, 81, 73, 0.4); border-radius: 8px; color: #ff7b72; text-align: center;">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" style="vertical-align: middle; margin-right: 8px;"><path d="M12 7a.75.75 0 0 1 .75.75v4.5a.75.75 0 0 1-1.5 0v-4.5A.75.75 0 0 1 12 7Zm0 9a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path><path d="M1 12C1 5.925 5.925 1 12 1s11 4.925 11 11-4.925 11-11 11S1 18.075 1 12Zm11-9.5A8.5 8.5 0 0 0 3.5 12c0 4.694 3.806 8.5 8.5 8.5s8.5-3.806 8.5-8.5A8.5 8.5 0 0 0 12 2.5Z"></path></svg>
+            <strong>Warning:</strong> Please do not manually delete mailbox items while using uPtt to avoid accidental deletions.
+        </div>
+
         <div class="flow-diagram">
             <div class="flow-step fade-in">
                 <div class="flow-number">1</div>
@@ -231,6 +237,23 @@
                 <h3>Windows</h3>
                 <p>.exe installer</p>
             </a>
+        </div>
+
+        <h3 style="font-family: var(--font-mono); margin-top: 56px; margin-bottom: 12px; font-size: 1.1rem;">Or install via pip (Python 3.12+)</h3>
+        <p class="section-desc" style="margin: 0 auto 20px;">
+            Stable builds on <a href="https://pypi.org/project/uPtt/" target="_blank" rel="noopener" style="color: var(--accent);">PyPI</a>,
+            preview builds (Beta / RC) are also auto-published.
+        </p>
+        <div class="code-block fade-in" style="max-width: 720px; margin: 0 auto; text-align: left;">
+            <code>
+                <span class="comment"># Stable</span><br>
+                <span class="prompt">$ </span><span class="cmd">pip install uPtt</span><br>
+                <span class="prompt">$ </span><span class="cmd">uptt</span><br>
+                <br>
+                <span class="comment"># Preview (Beta / RC)</span><br>
+                <span class="prompt">$ </span><span class="cmd">pip install --pre uPtt</span><br>
+                <span class="prompt">$ </span><span class="cmd">uptt</span>
+            </code>
         </div>
     </div>
 </section>

@@ -126,6 +126,12 @@
         <div class="section-label">How It Works</div>
         <h2 class="section-title">運作原理</h2>
         <p class="section-desc">uPtt 直接連接 PTT 官方伺服器，以站內信作為訊息傳輸層，無需第三方中繼。</p>
+        
+        <div class="alert alert-danger fade-in" style="max-width: 800px; margin: 0 auto 40px; padding: 20px; background: rgba(248, 81, 73, 0.1); border: 1px solid rgba(248, 81, 73, 0.4); border-radius: 8px; color: #ff7b72; text-align: center;">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" style="vertical-align: middle; margin-right: 8px;"><path d="M12 7a.75.75 0 0 1 .75.75v4.5a.75.75 0 0 1-1.5 0v-4.5A.75.75 0 0 1 12 7Zm0 9a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path><path d="M1 12C1 5.925 5.925 1 12 1s11 4.925 11 11-4.925 11-11 11S1 18.075 1 12Zm11-9.5A8.5 8.5 0 0 0 3.5 12c0 4.694 3.806 8.5 8.5 8.5s8.5-3.806 8.5-8.5A8.5 8.5 0 0 0 12 2.5Z"></path></svg>
+            <strong>重要警告：</strong> 使用 uPtt 時請勿手動操作刪除信箱內容，以免造成程式誤刪。
+        </div>
+
         <div class="flow-diagram">
             <div class="flow-step fade-in">
                 <div class="flow-number">1</div>
@@ -236,6 +242,23 @@
                 <h3>Windows</h3>
                 <p>.exe 執行檔</p>
             </a>
+        </div>
+
+        <h3 style="font-family: var(--font-mono); margin-top: 56px; margin-bottom: 12px; font-size: 1.1rem;">或透過 pip 安裝（Python 3.12+）</h3>
+        <p class="section-desc" style="margin: 0 auto 20px;">
+            正式版發佈於 <a href="https://pypi.org/project/uPtt/" target="_blank" rel="noopener" style="color: var(--accent);">PyPI</a>，
+            預覽版（Beta / RC）亦同步自動更新。
+        </p>
+        <div class="code-block fade-in" style="max-width: 720px; margin: 0 auto; text-align: left;">
+            <code>
+                <span class="comment"># 正式版</span><br>
+                <span class="prompt">$ </span><span class="cmd">pip install uPtt</span><br>
+                <span class="prompt">$ </span><span class="cmd">uptt</span><br>
+                <br>
+                <span class="comment"># 預覽版（Beta / RC）</span><br>
+                <span class="prompt">$ </span><span class="cmd">pip install --pre uPtt</span><br>
+                <span class="prompt">$ </span><span class="cmd">uptt</span>
+            </code>
         </div>
     </div>
 </section>

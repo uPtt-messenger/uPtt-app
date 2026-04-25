@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/uPtt-messenger/uPttTerm/blob/main/LICENSE"><img src="https://img.shields.io/badge/授權條款-GPL--3.0-green.svg" alt="License"></a>
+  <a href="https://github.com/uPtt-messenger/uPtt-app/blob/main/LICENSE"><img src="https://img.shields.io/badge/授權條款-GPL--3.0-green.svg" alt="License"></a>
   <img src="https://img.shields.io/badge/平台-Windows%20|%20macOS%20|%20Linux-lightgrey" alt="Platform">
   <a href="https://uptt-messenger.github.io/uPtt-app/"><img src="https://img.shields.io/badge/官方網站-uPtt-A0C4B4?style=flat&logo=github" alt="Website"></a>
 </p>
@@ -80,6 +80,9 @@ PTT（批踢踢）是台灣最具生命力的網路社群，但傳統的 Telnet 
 
 為了提供如同通訊軟體的流暢體驗，uPtt 採用了以下機制：
 
+> [!CAUTION]
+> **使用 uPtt 時，請勿在其他 PTT 終端（如終端機或 APP）手動操作刪除信箱內容，以免造成程式同步邏輯誤刪或錯誤。**
+
 1.  **訊息即時處理：** 系統成功解析訊息並存入本地資料庫後，會**自動刪除**該筆 PTT 站內信，以維持信箱整潔。
 2.  **一般站內信顯示：** 非 uPtt 格式的普通站內信（例如系統公告、其他人寄來的一般信）**不會被刪除**，但同樣會以信件卡片的形式顯示在對應聯絡人的對話紀錄中。
 3.  **安全性建議：** 本程式內建嚴謹的判斷邏輯，僅自動刪除 uPtt 專屬格式訊息。若您對自動刪除機制有所疑慮，請在 PTT 系統設定中開啟「外部信箱備份」。
@@ -94,6 +97,20 @@ PTT（批踢踢）是台灣最具生命力的網路社群，但傳統的 Telnet 
 *   **Windows:** 下載 `.exe` 執行檔，執行後即可啟動。
 *   **macOS:** 下載 `.dmg` 映像檔，將 `uPtt` 拖移至「應用程式」資料夾即可使用。
 *   **Linux (Ubuntu/Debian):** 下載 `.tar.gz` 壓縮檔，解壓後執行 `./uptt` 即可。
+
+### 透過 pip 安裝（需 Python 3.12+）
+
+正式版 — 發佈於 [PyPI](https://pypi.org/project/uPtt/)，由 `v*` tag 觸發：
+```bash
+pip install uPtt
+uptt
+```
+
+預覽版 — 每次 `main` / `beta` commit 都會自動發佈至 [PyPI](https://pypi.org/project/uPtt/)，版本格式 `X.Y.ZrcN` 或 `X.Y.ZbN`：
+```bash
+pip install --pre uPtt
+uptt
+```
 
 ---
 

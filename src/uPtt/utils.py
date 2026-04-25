@@ -153,7 +153,7 @@ def get_latest_github_release_version():
 
     logger.info("Checking latest version from GitHub Releases...")
     try:
-        url = "https://api.github.com/repos/uPtt-messenger/uPttTerm/releases/latest"
+        url = "https://api.github.com/repos/uPtt-messenger/uPtt-app/releases/latest"
         response = requests.get(url, timeout=10)
         response.raise_for_status()
         data = response.json()

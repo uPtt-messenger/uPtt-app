@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/uPtt-messenger/uPttTerm/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-green.svg" alt="License"></a>
+  <a href="https://github.com/uPtt-messenger/uPtt-app/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-green.svg" alt="License"></a>
   <img src="https://img.shields.io/badge/Platform-Windows%20|%20macOS%20|%20Linux-lightgrey" alt="Platform">
   <a href="https://uptt-messenger.github.io/uPtt-app/"><img src="https://img.shields.io/badge/Website-uPtt-A0C4B4?style=flat&logo=github" alt="Website"></a>
 </p>
@@ -80,6 +80,9 @@
 
 To deliver a smooth messaging experience, uPtt uses the following mechanisms:
 
+> [!CAUTION]
+> **Warning: Please do not manually delete mailbox items in other PTT terminals (like Telnet or mobile apps) while using uPtt to avoid accidental deletions or synchronization errors.**
+
 1. **Automatic mail cleanup:** After a message is parsed and saved to the local database, the corresponding PTT mail is **automatically deleted** to keep your inbox clean.
 2. **Plain mail preserved:** Non-uPtt mail (system announcements, regular mail) is **never deleted**, but still displayed as mail cards in the relevant chat history.
 3. **Safety note:** The app only auto-deletes mail that matches the uPtt message format. If you have concerns, enable "External mailbox backup" in your PTT settings.
@@ -94,6 +97,20 @@ Head to [GitHub Releases](https://github.com/uPtt-messenger/uPtt-app/releases) t
 * **Windows:** Download the `.exe` file and run it.
 * **macOS:** Download the `.dmg` file and drag `uPtt` to your Applications folder.
 * **Linux (Ubuntu/Debian):** Download the `.tar.gz` file, extract, and run `./uptt`.
+
+### Install via pip (requires Python 3.12+)
+
+Stable — published to [PyPI](https://pypi.org/project/uPtt/), triggered by `v*` tags:
+```bash
+pip install uPtt
+uptt
+```
+
+Preview — every `main` / `beta` commit is auto-published to [PyPI](https://pypi.org/project/uPtt/) as `X.Y.ZrcN` or `X.Y.ZbN`:
+```bash
+pip install --pre uPtt
+uptt
+```
 
 ---
 

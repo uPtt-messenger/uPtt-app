@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - '**'
+    tags:
+      - 'v*'
   pull_request:
     branches:
       - main
@@ -51,7 +53,7 @@ jobs:
   # 第一階段：執行測試 (在 Linux 執行以節省資源)
   test:
     needs: [changes]
-    if: needs.changes.outputs.src == 'true' || github.event_name == 'workflow_dispatch'
+    if: needs.changes.outputs.src == 'true' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -83,7 +85,7 @@ jobs:
   # 靜態安全分析 + 依賴套件漏洞掃描
   security-analysis:
     needs: [changes]
-    if: needs.changes.outputs.src == 'true' || github.event_name == 'workflow_dispatch'
+    if: needs.changes.outputs.src == 'true' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -112,26 +114,45 @@ jobs:
   # 統一版本號計算，確保 macOS 與 Windows 使用完全一致的版本
   prepare-version:
     needs: [test, security-analysis]
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/beta')
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/beta' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     outputs:
       VERSION: ${{ steps.config.outputs.VERSION }}
       VERSION_NUMERIC: ${{ steps.config.outputs.VERSION_NUMERIC }}
       IS_PRERELEASE: ${{ steps.config.outputs.IS_PRERELEASE }}
       RELEASE_TITLE: ${{ steps.config.outputs.RELEASE_TITLE }}
+      PYPI_VERSION: ${{ steps.config.outputs.PYPI_VERSION }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Configure Version and Release
         id: config
         run: |
-          VERSION=$(grep "__version__ =" src/uPtt/__init__.py | cut -d '"' -f 2)
+          BASE_VERSION=$(grep "__version__ =" src/uPtt/__init__.py | cut -d '"' -f 2)
+          REF="${{ github.ref }}"
+          RUN_NUMBER="${{ github.run_number }}"
           IS_PRERELEASE=false
 
-          if [ "${{ github.ref }}" = "refs/heads/beta" ]; then
+          if [[ "$REF" == refs/tags/v* ]]; then
+            # Tag push → 正式發布；版本直接取自 tag 名稱（去掉前綴 v）
+            TAG_VERSION="${REF#refs/tags/v}"
+            VERSION="${TAG_VERSION}"
+            PYPI_VERSION="${TAG_VERSION}"
+            # 若 tag 本身帶 pre-release 標記（a/b/rc/dev），視為預覽版
+            if [[ "$TAG_VERSION" =~ (a|b|rc|dev) ]]; then
+              IS_PRERELEASE=true
+            fi
+          elif [[ "$REF" == "refs/heads/beta" ]]; then
+            # Beta 分支 → 推送到 PyPI，版本標記為 beta (b)
             SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-4)
             DATE_TAG=$(date -u +%Y%m%d)
-            VERSION="${VERSION}-beta.${DATE_TAG}.${SHORT_SHA}"
+            VERSION="${BASE_VERSION}-beta.${DATE_TAG}.${SHORT_SHA}"
+            PYPI_VERSION="${BASE_VERSION}b${RUN_NUMBER}"
+            IS_PRERELEASE=true
+          else
+            # main 分支 → 推送到 PyPI，版本標記為 release candidate (rc)
+            VERSION="${BASE_VERSION}"
+            PYPI_VERSION="${BASE_VERSION}rc${RUN_NUMBER}"
             IS_PRERELEASE=true
           fi
 
@@ -142,7 +163,9 @@ jobs:
           echo "VERSION_NUMERIC=$VERSION_NUMERIC" >> $GITHUB_OUTPUT
           echo "IS_PRERELEASE=$IS_PRERELEASE" >> $GITHUB_OUTPUT
           echo "RELEASE_TITLE=$RELEASE_TITLE" >> $GITHUB_OUTPUT
+          echo "PYPI_VERSION=$PYPI_VERSION" >> $GITHUB_OUTPUT
           echo "Final Version: $VERSION (numeric: $VERSION_NUMERIC, prerelease: $IS_PRERELEASE)"
+          echo "PyPI: $PYPI_VERSION (Always pushing to PyPI)"
 
   # 測試通過後，針對 main 與 beta 分支執行編譯
   build-macos:
@@ -528,3 +551,44 @@ jobs:
           draft: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # 發佈到 PyPI
+  # - Tag push (v*) → 正式版本或 Pre-release
+  # - main / beta push → Pre-release 版本 (rc 或 b)
+  # 使用 Trusted Publishing (OIDC)，請先至 PyPI 專案設定新增主分支與 beta 分支的發布權限
+  publish-pypi:
+    needs: [prepare-version]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Patch version in source (PEP 440 compliant)
+        run: |
+          VERSION="${{ needs.prepare-version.outputs.PYPI_VERSION }}"
+          python -c "
+          import re, pathlib
+          f = pathlib.Path('src/uPtt/__init__.py')
+          f.write_text(re.sub(r'__version__ = \".*?\"', '__version__ = \"$VERSION\"', f.read_text()))
+          "
+          grep __version__ src/uPtt/__init__.py
+
+      - name: Install build tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Publish to PyPI (Trusted Publishing)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true

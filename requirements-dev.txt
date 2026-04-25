@@ -1,8 +1,9 @@
 setuptools
 wheel
 twine
-pytest
+pytest~=9.0.3
 pytest-cov
+pytest-qt~=4.4.0
 pytest-asyncio
 nuitka
 zstandard
