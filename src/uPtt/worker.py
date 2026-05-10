@@ -153,7 +153,7 @@ class PTTWorker(QObject):
 
         raw_title = mail.get(PyPtt.MailField.title)
         title = str(raw_title) if raw_title is not None else ""
-        is_uptt_msg = contant.PTT_MSG_TITLE in title
+        is_uptt_msg = (title == contant.PTT_MSG_TITLE)
 
         if not is_uptt_msg:
             # 一般站內信
@@ -306,7 +306,7 @@ class PTTWorker(QObject):
 
                 raw_title = mail.get(PyPtt.MailField.title)
                 title = str(raw_title) if raw_title is not None else ""
-                is_uptt_msg = contant.PTT_MSG_TITLE in title
+                is_uptt_msg = (title == contant.PTT_MSG_TITLE)
 
                 if is_uptt_msg:
                     found_uptt = True
@@ -413,7 +413,7 @@ class PTTWorker(QObject):
 
                 raw_title = mail.get(PyPtt.MailField.title)
                 title = str(raw_title) if raw_title is not None else ""
-                is_uptt_msg = contant.PTT_MSG_TITLE in title
+                is_uptt_msg = (title == contant.PTT_MSG_TITLE)
 
                 if is_uptt_msg:
                     found_uptt = True
