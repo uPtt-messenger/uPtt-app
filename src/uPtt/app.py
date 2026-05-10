@@ -1,5 +1,6 @@
 import argparse
 import logging
+import shutil
 import sys
 import os
 
@@ -27,10 +28,10 @@ def setup_linux_im():
         else:
             # 如果使用者沒有手動設定 QT_IM_MODULE，嘗試自動設定常見值
             if "QT_IM_MODULE" not in os.environ:
-                if os.path.exists("/usr/bin/ibus"):
+                if shutil.which("ibus"):
                     os.environ["QT_IM_MODULE"] = "ibus"
-                elif os.path.exists("/usr/bin/fcitx") or os.path.exists("/usr/bin/fcitx5"):
-                    os.environ["QT_IM_MODULE"] = "fcitx"
+                elif shutil.which("fcitx5") or shutil.which("fcitx"):
+                    os.environ["QT_IM_MODULE"] = "fcitx"  # fcitx5 的 Qt module 名稱仍為 "fcitx"
 
 
         # 確保 XMODIFIERS 也有設定 (IBus/Fcitx 需要)
