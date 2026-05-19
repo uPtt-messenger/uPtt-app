@@ -198,11 +198,39 @@ class PTTWorker(QObject):
         end = content.rfind(contant.PTT_MSG_DIVISION_LINE)
 
         if div_pos < 0 or end <= div_pos:
-            logger.error(
+            if is_backup:
+                return None, True, True  # 格式異常的自己寄出備份：靜默刪除
+            # 對方在 PTT 回覆時刪去 uPtt 格式（例如 Re: 標題仍符合但內文無分隔線）
+            # 以一般站內信顯示，不刪除（與一般站內信行為一致）
+            logger.warning(
                 f"uPtt mail at index {mail_idx} has malformed content "
-                f"(div_pos={div_pos}, end={end}); skipping deletion."
+                f"(div_pos={div_pos}, end={end}); falling back to regular mail display"
             )
-            return None, True, is_backup  # 備份副本仍需刪除
+            content = utils.strip_ansi(content)
+            self.db.upsert_session(account_id=current_user, display_id=sender_id)
+            is_new = self.db.save_message(
+                account_id=current_user,
+                session_id=sender_id,
+                sender_id=sender_id,
+                receiver_id=current_user,
+                content=content,
+                timestamp=mail_time,
+                is_me=False,
+                mail_type='mail',
+                subject=title
+            )
+            emit_dict = None
+            if is_new:
+                emit_dict = {
+                    'sender': sender_id,
+                    'text': content,
+                    'time': mail_time.strftime("%H:%M"),
+                    'full_author': full_author,
+                    'timestamp': mail_time,
+                    'mail_type': 'mail',
+                    'subject': title
+                }
+            return emit_dict, True, False
 
         start = div_pos + len(contant.PTT_MSG_DIVISION_LINE)
         text = content[start:end].strip()
