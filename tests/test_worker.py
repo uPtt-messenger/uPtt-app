@@ -565,10 +565,10 @@ def test_poll_content_none_skips_gracefully(worker, ptt_service_mock, db_mock):
 
 
 def test_poll_malformed_uptt_content_falls_back_to_mail(qtbot, worker, ptt_service_mock, db_mock):
-    """對方在 PTT 回覆 uPtt 信件並刪去格式時，應 fallback 為一般站內信顯示，不刪除信件"""
+    """標題完全符合 uPtt 格式但內文缺少 division line 時，應 fallback 為一般站內信顯示，不刪除信件"""
     call_log = []
     plain_content = "你好，這是回覆"
-    reply_title = f"Re: {contant.PTT_MSG_TITLE}"
+    reply_title = contant.PTT_MSG_TITLE  # exact match，但內文無 division line
 
     def call_side_effect(api, args=None):
         call_log.append(api)
