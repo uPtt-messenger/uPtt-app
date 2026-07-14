@@ -67,8 +67,12 @@ class UPttService:
         重新建立連線並登入。
         遵循 PyPtt 官方範例：建立全新 Service 實例再重新登入。
 
-        注意：此方法會短暫 sleep（最多 3 秒/次），避免長時間阻塞 Qt 事件迴圈。
-        LoginTooOften 時直接放棄，由上層 Worker 使用 QTimer 延遲重試。
+        退避策略（對齊 CLAUDE.md）：最多重試 5 次，一般失敗間隔 3 秒、
+        LoginTooOften 間隔 60 秒；WrongIDorPassword 立即放棄。
+
+        _reconnect_lock 只涵蓋「5s 最小間隔判定 + 單次 login 呼叫」，序列化
+        主/副兩個 session 的登入；backoff sleep 一律在鎖外，避免一方 backoff
+        時卡死另一方最長 300s。
 
         Returns:
             bool: 重連成功與否
@@ -76,16 +80,16 @@ class UPttService:
         if self.ptt_id is None or self.ptt_pw is None:
             return False
 
-        # 序列化雙 session 的重連請求,避免同時登入撞 LoginTooOften
-        with UPttService._reconnect_lock:
-            elapsed = time.time() - UPttService._last_reconnect_ts
-            if elapsed < UPttService._reconnect_min_interval:
-                wait = UPttService._reconnect_min_interval - elapsed
-                logger.info(f"重連節流:等待 {wait:.1f}s 避免 LoginTooOften")
-                time.sleep(wait)
-            UPttService._last_reconnect_ts = time.time()
+        max_retry = 5
 
-        max_retry = 3
+        # 跨 session 5s 最小間隔:判定用共享時間戳(鎖內),實際等待在鎖外,
+        # 避免一方等待時卡死另一方。
+        with UPttService._reconnect_lock:
+            wait = UPttService._reconnect_min_interval - (time.time() - UPttService._last_reconnect_ts)
+        if wait > 0:
+            logger.info(f"重連節流:等待 {wait:.1f}s 避免 LoginTooOften")
+            time.sleep(wait)
+
         for retry_time in range(max_retry):
             new_service = None
             try:
@@ -95,11 +99,15 @@ class UPttService:
                 logging.getLogger("PyPtt").setLevel(logging.WARNING)
                 # 主 session 允許在 retry 時升級為 kick;副 session 永遠不可以
                 kick_this_try = self.kick_on_reconnect and retry_time > 0
-                new_service.call('login', {
-                    'ptt_id': self.ptt_id,
-                    'ptt_pw': self.ptt_pw,
-                    'kick_other_session': kick_this_try,
-                })
+                # 鎖只涵蓋「時間戳更新 + 單次 login 呼叫」,序列化主/副 session;
+                # backoff sleep 一律在鎖外(見下方 except),避免一方 backoff 卡死另一方。
+                with UPttService._reconnect_lock:
+                    UPttService._last_reconnect_ts = time.time()
+                    new_service.call('login', {
+                        'ptt_id': self.ptt_id,
+                        'ptt_pw': self.ptt_pw,
+                        'kick_other_session': kick_this_try,
+                    })
                 # Login succeeded — close old service, swap in new one
                 old_service = self.service
                 self.service = new_service
@@ -110,18 +118,18 @@ class UPttService:
                 self._connected = True
                 logger.info(f"重連成功 (第 {retry_time + 1} 次嘗試)")
                 return True
-            except PyPtt.LoginTooOften:
-                logger.warning("登入太頻繁，放棄本次重連，由上層延遲重試")
-                self._close_service_quietly(new_service)
-                return False
-            except PyPtt.LoginError:
-                logger.warning(f"登入失敗，等待 3 秒後再試 ({retry_time + 1}/{max_retry})")
-                self._close_service_quietly(new_service)
-                time.sleep(3)
             except PyPtt.WrongIDorPassword:
                 logger.error("帳號密碼錯誤，放棄重連")
                 self._close_service_quietly(new_service)
                 return False
+            except PyPtt.LoginTooOften:
+                logger.warning(f"登入太頻繁，等待 60 秒後再試 ({retry_time + 1}/{max_retry})")
+                self._close_service_quietly(new_service)
+                time.sleep(60)
+            except PyPtt.LoginError:
+                logger.warning(f"登入失敗，等待 3 秒後再試 ({retry_time + 1}/{max_retry})")
+                self._close_service_quietly(new_service)
+                time.sleep(3)
             except Exception as e:
                 logger.error(f"重連失敗 ({retry_time + 1}/{max_retry}): {e}")
                 self._close_service_quietly(new_service)
