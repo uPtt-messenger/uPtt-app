@@ -1,6 +1,7 @@
 import argparse
 import logging
 import shutil
+import ssl
 import sys
 import os
 
@@ -41,6 +42,16 @@ def setup_linux_im():
                 os.environ["XMODIFIERS"] = "@im=ibus"
             elif im_module == "fcitx":
                 os.environ["XMODIFIERS"] = "@im=fcitx"
+
+
+def _ensure_ssl_ca():
+    """若系統找不到 CA bundle（macOS Python.org 安裝常見），改用 certifi。"""
+    if not ssl.get_default_verify_paths().cafile:
+        try:
+            import certifi
+            os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+        except ImportError:
+            pass
 
 
 # --- 日誌設定 ---
@@ -92,6 +103,7 @@ def main():
 
     setup_logging(args.debug)
     setup_linux_im()
+    _ensure_ssl_ca()
 
     # 初始化 Qt 應用程式
     qt_app = QApplication(sys.argv)
