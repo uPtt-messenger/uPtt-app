@@ -1879,6 +1879,14 @@ class MainWindow(QMainWindow):
             self._is_first_time_login = False
             self.scan_setup_screen.reset()
             self.cancel_reply()
+            # clear() 不會刪除 setItemWidget() 綁定的 widget，且 removeItemWidget() 也只是解除
+            # 綁定（widget 仍留在 viewport 底下存活），需額外 deleteLater() 才會真正釋放。
+            for i in range(self.contact_list.count()):
+                item = self.contact_list.item(i)
+                old_widget = self.contact_list.itemWidget(item)
+                self.contact_list.removeItemWidget(item)
+                if old_widget:
+                    old_widget.deleteLater()
             self.contact_list.clear()
             self.chat_histories.clear()
             self.unread_counts.clear()

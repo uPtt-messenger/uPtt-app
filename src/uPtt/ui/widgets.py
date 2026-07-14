@@ -637,8 +637,14 @@ class ContactListWidget(QListWidget):
         moved = items_data.pop(source_row)
         items_data.insert(target_row, moved)
 
-        # 清除並重建清單
+        # 清除並重建清單。removeItemWidget() 只解除綁定，widget 仍留在 viewport 底下
+        # 存活，須額外 deleteLater() 才會真的釋放（否則每次拖曳都洩漏舊 ContactItem）。
         while self.count() > 0:
+            item = self.item(0)
+            old_widget = self.itemWidget(item)
+            self.removeItemWidget(item)
+            if old_widget:
+                old_widget.deleteLater()
             self.takeItem(0)
 
         for data in items_data:
