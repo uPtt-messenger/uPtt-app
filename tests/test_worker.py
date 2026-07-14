@@ -539,8 +539,11 @@ def test_poll_index_decrease_still_scans(worker, ptt_service_mock, db_mock):
 
 
 def test_poll_content_none_skips_gracefully(worker, ptt_service_mock, db_mock):
-    """信件 content 為 None 時應跳過而非崩潰"""
+    """信件 content 為 None 時應跳過而非崩潰，non-backup 不刪除（保守策略）"""
+    call_log = []
+
     def call_side_effect(api, args=None):
+        call_log.append(api)
         if api == 'get_newest_index':
             return 1
         if api == 'get_mail':
@@ -555,11 +558,44 @@ def test_poll_content_none_skips_gracefully(worker, ptt_service_mock, db_mock):
     ptt_service_mock.call.side_effect = call_side_effect
     worker.is_first_polling = False
 
-    # 不應拋出 KeyError
     worker._poll_new_mails()
 
-    # save_message 不應被呼叫（因為 content 為 None，直接跳過）
     db_mock.save_message.assert_not_called()
+    assert 'del_mail' not in call_log
+
+
+def test_poll_malformed_uptt_content_falls_back_to_mail(qtbot, worker, ptt_service_mock, db_mock):
+    """標題完全符合 uPtt 格式但內文缺少 division line 時，應 fallback 為一般站內信顯示，不刪除信件"""
+    call_log = []
+    plain_content = "你好，這是回覆"
+    reply_title = contant.PTT_MSG_TITLE  # exact match，但內文無 division line
+
+    def call_side_effect(api, args=None):
+        call_log.append(api)
+        if api == 'get_newest_index':
+            return 1
+        if api == 'get_mail':
+            return {
+                PyPtt.MailField.title: reply_title,
+                PyPtt.MailField.author: "SenderID (Nick)",
+                PyPtt.MailField.date: datetime.now().strftime('%a %b %d %H:%M:%S %Y'),
+                PyPtt.MailField.content: plain_content,
+            }
+        return None
+
+    ptt_service_mock.call.side_effect = call_side_effect
+    db_mock.save_message.return_value = True
+    worker.is_first_polling = False
+
+    with qtbot.waitSignal(worker.new_message_received) as blocker:
+        worker._poll_new_mails()
+
+    assert 'del_mail' not in call_log
+    saved_kwargs = db_mock.save_message.call_args.kwargs
+    assert saved_kwargs['mail_type'] == 'mail'
+    assert saved_kwargs['subject'] == reply_title
+    assert blocker.args[0]['mail_type'] == 'mail'
+    assert blocker.args[0]['sender'] == 'SenderID'
 
 
 def test_initial_scan_save_failure_skips_deletion(ptt_service_mock, db_mock):
