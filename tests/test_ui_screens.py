@@ -787,3 +787,34 @@ def test_settings_dialog_clamps_below_floor(qtbot, tmp_path):
     assert dlg.mail_spin.value() == config.MAIL_INTERVAL_MIN  # QSpinBox 夾住
     dlg._save()
     assert db.get_config(config.SETTING_MAIL_INTERVAL) == config.MAIL_INTERVAL_MIN
+
+
+# M-3：reply_bar_label（回覆列：對方 ID＋訊息預覽）與 progress_title（掃描信件主旨）
+# 皆為 PTT 來源的不受信任內容，須強制 PlainText 算繪，禁止 HTML 注入。
+HTML_PAYLOAD = '<img src=x onerror=alert(1)>'
+
+
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.QueryWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_reply_bar_label_html_not_rendered_as_richtext(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+
+        window.reply_bar_label.setText(HTML_PAYLOAD)
+
+        assert window.reply_bar_label.textFormat() == Qt.TextFormat.PlainText
+        assert window.reply_bar_label.text() == HTML_PAYLOAD
+
+
+def test_scan_setup_progress_title_html_not_rendered_as_richtext(qtbot):
+    from src.uPtt.ui.screens import ScanSetupScreen
+    screen = ScanSetupScreen()
+    qtbot.addWidget(screen)
+
+    screen.update_progress(1, 10, HTML_PAYLOAD)
+
+    assert screen.progress_title.textFormat() == Qt.TextFormat.PlainText
+    assert screen.progress_title.text() == HTML_PAYLOAD

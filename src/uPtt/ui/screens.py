@@ -339,6 +339,8 @@ class ScanSetupScreen(QWidget):
         self.progress_count.setStyleSheet("color: #E6EDF3; font-size: 24px; font-weight: bold; background: transparent;")
 
         self.progress_title = QLabel("")
+        # 掃描中顯示的信件主旨，來源為任意 PTT 使用者，禁止 HTML 算繪
+        self.progress_title.setTextFormat(Qt.TextFormat.PlainText)
         self.progress_title.setAlignment(Qt.AlignCenter)
         self.progress_title.setStyleSheet("color: #5C6773; font-size: 12px; background: transparent;")
         self.progress_title.setWordWrap(True)
@@ -863,6 +865,8 @@ class MainWindow(QMainWindow):
         reply_bar_layout.setSpacing(8)
 
         self.reply_bar_label = QLabel()
+        # 回覆列顯示對方 ID＋訊息預覽，皆為不受信任內容，禁止 HTML 算繪
+        self.reply_bar_label.setTextFormat(Qt.TextFormat.PlainText)
         self.reply_bar_label.setStyleSheet("color: #8B949E; font-size: 12px;")
         self.reply_bar_label.setWordWrap(False)
 
@@ -899,6 +903,8 @@ class MainWindow(QMainWindow):
         chat_header_avatar_container.setStyleSheet("background: transparent;")
 
         self.chat_header_avatar = QLabel(chat_header_avatar_container)
+        # 頭像字首取自對方 ID（不受信任內容），一併禁止 HTML 算繪
+        self.chat_header_avatar.setTextFormat(Qt.TextFormat.PlainText)
         self.chat_header_avatar.setFixedSize(36, 36)
         self.chat_header_avatar.move(0, 2)
         self.chat_header_avatar.setAlignment(Qt.AlignCenter)
@@ -925,10 +931,14 @@ class MainWindow(QMainWindow):
         chat_header_text_layout.setSpacing(1)
 
         self.chat_header_id = QLabel()
+        # 聊天標題列顯示對方 ID（不受信任內容），禁止 HTML 算繪
+        self.chat_header_id.setTextFormat(Qt.TextFormat.PlainText)
         self.chat_header_id.setStyleSheet(
             "font-weight: bold; font-size: 14px; color: #E6EDF3; background: transparent;"
         )
         self.chat_header_nick = QLabel()
+        # 對方暱稱為不受信任的 PTT 內容，禁止 HTML 算繪
+        self.chat_header_nick.setTextFormat(Qt.TextFormat.PlainText)
         self.chat_header_nick.setStyleSheet(
             "font-size: 11px; color: #8B949E; background: transparent;"
         )

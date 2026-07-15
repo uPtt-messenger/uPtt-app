@@ -111,9 +111,11 @@ class ChatBubble(QWidget):
             quote_layout.setSpacing(1)
 
             sender_label = QLabel(f"@{reply_info['sender']}")
+            sender_label.setTextFormat(Qt.PlainText)  # 引用來源同屬不受信任內容
             sender_label.setStyleSheet("color: #A0C4B4; font-size: 11px; font-weight: bold; background: transparent;")
 
             preview_label = QLabel(reply_info['preview'])
+            preview_label.setTextFormat(Qt.PlainText)  # 引用預覽同屬不受信任內容
             preview_label.setStyleSheet("color: #8B949E; font-size: 11px; background: transparent;")
             preview_label.setWordWrap(True)
 
@@ -122,6 +124,9 @@ class ChatBubble(QWidget):
             self.content_layout.addWidget(quote_frame)
 
         self.message_label = QLabel(text)
+        # 站內信內容來自任意 PTT 使用者（信任邊界）；強制純文字算繪，
+        # 避免預設 AutoText 把夾帶的 <img src=遠端>/<a> 當 rich text 執行。
+        self.message_label.setTextFormat(Qt.PlainText)
         self.message_label.setWordWrap(True)
         self.message_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         # 移除硬編碼寬度，改由 resizeEvent 動態控制
@@ -207,6 +212,7 @@ class WaterballBubble(QWidget):
 
         # 訊息內容
         self.message_label = QLabel(text)
+        self.message_label.setTextFormat(Qt.PlainText)  # 不受信任內容，禁止 HTML 算繪
         self.message_label.setWordWrap(True)
         self.message_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.message_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
@@ -271,6 +277,7 @@ class MailCard(QWidget):
         icon_label.setFixedWidth(20)
 
         subject_label = QLabel(subject if subject else "(無主旨)")
+        subject_label.setTextFormat(Qt.PlainText)  # 信件主旨為不受信任內容
         subject_label.setStyleSheet("""
             font-weight: bold;
             font-size: 13px;
@@ -296,6 +303,7 @@ class MailCard(QWidget):
         lines = text.splitlines()
         preview_text = "\n".join(lines[:self.MAX_LINES])
         content_label = QLabel(preview_text if preview_text else " ")
+        content_label.setTextFormat(Qt.PlainText)  # 不受信任內容，禁止 HTML 算繪
         content_label.setWordWrap(True)
         content_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         content_label.setStyleSheet("color: #CDD5DF; font-size: 13px; border: none;")
@@ -406,6 +414,8 @@ class ContactItem(QWidget):
         avatar_container.setStyleSheet("background: transparent;")
 
         self.avatar_label = QLabel(ptt_id[0].upper() if ptt_id else "?", avatar_container)
+        # 頭像字首取自對方 ID（不受信任內容），一併禁止 HTML 算繪
+        self.avatar_label.setTextFormat(Qt.TextFormat.PlainText)
         self.avatar_label.setFixedSize(36, 36)
         self.avatar_label.move(0, 2)
         self.avatar_label.setAlignment(Qt.AlignCenter)
@@ -435,6 +445,8 @@ class ContactItem(QWidget):
         text_layout.setSpacing(2)
 
         self.id_label = QLabel(self.ptt_id_display)
+        # 對方 PTT ID/暱稱同屬不受信任內容，禁止 HTML 算繪；一次設定，setText 更新時沿用
+        self.id_label.setTextFormat(Qt.TextFormat.PlainText)
         self.id_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.id_label.setStyleSheet("""
             font-weight: bold;
@@ -444,6 +456,7 @@ class ContactItem(QWidget):
         """)
 
         self.nickname_label = QLabel(f"({nickname})" if nickname else "")
+        self.nickname_label.setTextFormat(Qt.TextFormat.PlainText)
         self.nickname_label.setFixedHeight(14)
         self.nickname_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.nickname_label.setWordWrap(False)
