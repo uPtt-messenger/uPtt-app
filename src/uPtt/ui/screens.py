@@ -2061,6 +2061,10 @@ class MainWindow(QMainWindow):
             self.chat_histories.clear()
             self.unread_counts.clear()
             self.pinned_ids.clear()
+            # 這三個以對方 ID 為 key、非 account 隔離，不清會跨帳號殘留草稿/封鎖/資訊快取
+            self.blocked_users.clear()
+            self._user_info_cache.clear()
+            self.session_drafts.clear()
             self.current_chat_id = None
             self.refresh_chat_display()
             self.user_id_label.setText("uPtt")
