@@ -170,16 +170,16 @@ QLineEdit#new-chat-input:focus {
     border-top: 1px solid #21262D;
 }
 
-QLineEdit#message-edit {
+QPlainTextEdit#message-edit {
     border: 1px solid #30363D;
     border-radius: 8px;
     background-color: #0D1117;
     color: #E6EDF3;
-    padding: 8px 12px;
+    padding: 6px 12px;
     font-size: 14px;
 }
 
-QLineEdit#message-edit:focus {
+QPlainTextEdit#message-edit:focus {
     border-color: #A0C4B4;
 }
 

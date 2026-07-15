@@ -47,6 +47,10 @@ class PTTWorker(QObject):
         self._waterball_timer: Optional[QTimer] = None
         self._last_waterball_batch: Optional[str] = None  # 上一批水球的指紋，用於整批去重
         self._send_queue: queue.Queue = queue.Queue()  # Thread-safe 發送佇列
+        # 輪詢間隔（毫秒）。預設取自 config，do_login 時以 DB 設定覆寫。快取於此避免
+        # start_polling 內再讀 DB（否則會打亂 do_login 對 get_config 呼叫序的既有測試）。
+        self._mail_interval_ms = getattr(config, 'CHECK_PTT_MAIL_INTERVAL', 10) * 1000
+        self._wb_interval_ms = getattr(config, 'CHECK_WATERBALL_INTERVAL', 5) * 1000
 
     @Slot(str, str)
     def do_login(self, username, password):
@@ -64,6 +68,15 @@ class PTTWorker(QObject):
                     )
                 except Exception as e:
                     logger.warning(f"登入後更新帳號資訊失敗: {e}")
+
+                # 載入使用者自訂的輪詢間隔（無則 fallback config 預設）。須在 last_poll_time
+                # 之前讀取，讓 get_config 的最後一次呼叫仍為 LAST_POLL_TIME。
+                self._mail_interval_ms = config.get_setting_interval(
+                    self.db, config.SETTING_MAIL_INTERVAL,
+                    config.CHECK_PTT_MAIL_INTERVAL, config.MAIL_INTERVAL_MIN) * 1000
+                self._wb_interval_ms = config.get_setting_interval(
+                    self.db, config.SETTING_WATERBALL_INTERVAL,
+                    config.CHECK_WATERBALL_INTERVAL, config.WATERBALL_INTERVAL_MIN) * 1000
 
                 # 登入成功後，載入該帳號的 last_poll_time
                 poll_key = f'LAST_POLL_TIME_{self.ptt.ptt_id.lower()}'
@@ -94,18 +107,16 @@ class PTTWorker(QObject):
         if self.polling_timer is None:
             self.polling_timer = QTimer(self)
             self.polling_timer.timeout.connect(self._poll_new_mails)
-            # 根據 config 設定間隔 (秒轉毫秒)
-            interval = getattr(config, 'CHECK_PTT_MAIL_INTERVAL', 10) * 1000
-            self.polling_timer.start(interval)
-            logger.info(f"開始輪詢新信件，間隔: {interval / 1000}s")
+            # 使用 do_login 時載入的間隔（DB 設定 → config 預設），秒已轉毫秒
+            self.polling_timer.start(self._mail_interval_ms)
+            logger.info(f"開始輪詢新信件，間隔: {self._mail_interval_ms / 1000}s")
 
         # 啟動水球輪詢
         if self._waterball_timer is None:
             self._waterball_timer = QTimer(self)
             self._waterball_timer.timeout.connect(self._poll_waterballs)
-            wb_interval = getattr(config, 'CHECK_WATERBALL_INTERVAL', 5) * 1000
-            self._waterball_timer.start(wb_interval)
-            logger.info(f"開始輪詢水球，間隔: {wb_interval / 1000}s")
+            self._waterball_timer.start(self._wb_interval_ms)
+            logger.info(f"開始輪詢水球，間隔: {self._wb_interval_ms / 1000}s")
 
     @Slot()
     def stop_polling(self):
@@ -117,6 +128,23 @@ class PTTWorker(QObject):
             self._waterball_timer.stop()
             self._waterball_timer = None
         logger.info("已暫停所有輪詢")
+
+    @Slot()
+    def apply_poll_intervals(self):
+        """重新讀取 DB 設定並套用到執行中的信件／水球計時器（設定頁儲存後由 UI 觸發）。"""
+        self._mail_interval_ms = config.get_setting_interval(
+            self.db, config.SETTING_MAIL_INTERVAL,
+            config.CHECK_PTT_MAIL_INTERVAL, config.MAIL_INTERVAL_MIN) * 1000
+        self._wb_interval_ms = config.get_setting_interval(
+            self.db, config.SETTING_WATERBALL_INTERVAL,
+            config.CHECK_WATERBALL_INTERVAL, config.WATERBALL_INTERVAL_MIN) * 1000
+        if self.polling_timer:
+            self.polling_timer.setInterval(self._mail_interval_ms)
+        if self._waterball_timer:
+            self._waterball_timer.setInterval(self._wb_interval_ms)
+        logger.info(
+            f"已套用輪詢間隔：信件 {self._mail_interval_ms / 1000}s、水球 {self._wb_interval_ms / 1000}s"
+        )
 
     @Slot()
     def do_skip_scan(self):
@@ -812,10 +840,22 @@ class QueryWorker(QObject):
         if self._online_check_timer is None:
             self._online_check_timer = QTimer(self)
             self._online_check_timer.timeout.connect(self._check_all_online_status)
-            interval = getattr(config, 'CHECK_ONLINE_STATUS_INTERVAL', 60) * 1000
+            interval = config.get_setting_interval(
+                self.db, config.SETTING_ONLINE_INTERVAL,
+                config.CHECK_ONLINE_STATUS_INTERVAL, config.ONLINE_INTERVAL_MIN) * 1000
             self._online_check_timer.start(interval)
             logger.info(f"[Query] 開始輪詢在線狀態,間隔: {interval / 1000}s")
             self._check_all_online_status()
+
+    @Slot()
+    def apply_poll_intervals(self):
+        """重新讀取 DB 設定並套用到執行中的在線輪詢計時器（設定頁儲存後由 UI 觸發）。"""
+        if self._online_check_timer:
+            interval = config.get_setting_interval(
+                self.db, config.SETTING_ONLINE_INTERVAL,
+                config.CHECK_ONLINE_STATUS_INTERVAL, config.ONLINE_INTERVAL_MIN) * 1000
+            self._online_check_timer.setInterval(interval)
+            logger.info(f"[Query] 已套用在線輪詢間隔: {interval / 1000}s")
 
     def _emit_user_info(self, info: dict):
         """將 get_user_info 回傳的 dict 發射為 user_info_result 訊號。"""

@@ -7,15 +7,16 @@ from typing import Dict, List, Optional
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QStackedWidget, QListWidget, QListWidgetItem, QSplitter,
-    QScrollArea, QTextEdit, QSystemTrayIcon, QMenu, QMessageBox, QInputDialog
+    QScrollArea, QTextEdit, QSystemTrayIcon, QMenu, QMessageBox, QInputDialog,
+    QDialog, QCheckBox, QSpinBox, QDialogButtonBox, QFormLayout
 )
-from PySide6.QtCore import Qt, Signal, Slot, QThread, QSize, QEvent, QUrl, QTimer
+from PySide6.QtCore import Qt, Signal, Slot, QThread, QSize, QUrl, QTimer, QMetaObject
 from PySide6.QtGui import QIcon, QAction, QShortcut, QKeySequence, QPixmap, QPainter, QFontMetrics, QDesktopServices, QIntValidator
 from PySide6.QtSvg import QSvgRenderer
 
-from uPtt import __version__, contant
+from uPtt import __version__, contant, config
 from uPtt.ui.styles import MAIN_STYLE
-from uPtt.ui.widgets import ChatBubble, WaterballBubble, MailCard, ContactItem, ContactListWidget
+from uPtt.ui.widgets import ChatBubble, WaterballBubble, MailCard, ContactItem, ContactListWidget, MessageInput
 from uPtt.utils import encode_reply, decode_reply, VersionCheckWorker
 from uPtt.worker import PTTWorker, QueryWorker
 from uPtt.ptt import UPttService
@@ -418,6 +419,124 @@ class ScanSetupScreen(QWidget):
         self.progress_title.setText("")
 
 
+class MessageSearchDialog(QDialog):
+    """全域訊息搜尋：跨當前帳號所有對話搜尋訊息內容，點選結果跳轉到該則訊息。"""
+    result_activated = Signal(str, int)  # (session_id, msg_id)
+
+    def __init__(self, db, account_id: str, parent=None):
+        super().__init__(parent)
+        self.db = db
+        self.account_id = account_id
+        self.setWindowTitle("搜尋訊息")
+        self.setMinimumSize(460, 420)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("輸入關鍵字後按 Enter 搜尋...")
+        self.search_input.returnPressed.connect(self._do_search)
+        layout.addWidget(self.search_input)
+
+        self.result_list = QListWidget()
+        self.result_list.itemClicked.connect(self._on_item_activated)
+        layout.addWidget(self.result_list, 1)
+
+        self.status_label = QLabel("")
+        self.status_label.setStyleSheet("color: #8B949E; font-size: 12px;")
+        layout.addWidget(self.status_label)
+
+    def _do_search(self):
+        query = self.search_input.text().strip()
+        self.result_list.clear()
+        if not query:
+            self.status_label.setText("")
+            return
+        results = self.db.search_messages(self.account_id, query)
+        if not results:
+            self.status_label.setText("找不到符合的訊息")
+            return
+        self.status_label.setText(f"找到 {len(results)} 則訊息")
+        for r in results:
+            _, text = decode_reply(r.get('content', ''))
+            snippet = text.replace('\n', ' ').strip()
+            if len(snippet) > 50:
+                snippet = snippet[:50] + "…"
+            ts = r.get('timestamp', '')
+            ts_disp = _format_contact_time(ts) if isinstance(ts, str) else ""
+            session_id = r.get('session_id', '')
+            item = QListWidgetItem(f"{session_id}  ·  {snippet}    {ts_disp}")
+            item.setData(Qt.UserRole, (session_id, r.get('id', -1)))
+            self.result_list.addItem(item)
+
+    def _on_item_activated(self, item):
+        data = item.data(Qt.UserRole)
+        if not data:
+            return
+        session_id, msg_id = data
+        self.result_activated.emit(session_id, msg_id)
+        self.accept()
+
+
+class SettingsDialog(QDialog):
+    """設定對話框：桌面通知開關 + 信件／水球／在線三個輪詢間隔。"""
+
+    def __init__(self, db, parent=None):
+        super().__init__(parent)
+        self.db = db
+        self.setWindowTitle("設定")
+        self.setMinimumWidth(360)
+
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        form.setSpacing(10)
+
+        self.notify_checkbox = QCheckBox("啟用桌面通知")
+        self.notify_checkbox.setChecked(bool(db.get_config(config.SETTING_NOTIFY_ENABLED, True)))
+        form.addRow("桌面通知", self.notify_checkbox)
+
+        self.mail_spin = self._make_spin(
+            config.SETTING_MAIL_INTERVAL, config.CHECK_PTT_MAIL_INTERVAL, config.MAIL_INTERVAL_MIN)
+        form.addRow("信件輪詢間隔 (秒)", self.mail_spin)
+
+        self.waterball_spin = self._make_spin(
+            config.SETTING_WATERBALL_INTERVAL, config.CHECK_WATERBALL_INTERVAL, config.WATERBALL_INTERVAL_MIN)
+        form.addRow("水球輪詢間隔 (秒)", self.waterball_spin)
+
+        self.online_spin = self._make_spin(
+            config.SETTING_ONLINE_INTERVAL, config.CHECK_ONLINE_STATUS_INTERVAL, config.ONLINE_INTERVAL_MIN)
+        form.addRow("在線狀態輪詢間隔 (秒)", self.online_spin)
+
+        layout.addLayout(form)
+
+        note = QLabel("輪詢間隔越短越即時，但過於頻繁可能被 PTT 限流。變更儲存後立即套用。")
+        note.setWordWrap(True)
+        note.setStyleSheet("color: #8B949E; font-size: 11px;")
+        layout.addWidget(note)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self._save)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _make_spin(self, key, default, minimum):
+        spin = QSpinBox()
+        spin.setRange(minimum, 3600)  # 下限即為避免限流的最小間隔
+        spin.setValue(config.get_setting_interval(self.db, key, default, minimum))
+        return spin
+
+    def _save(self):
+        self.db.set_config(config.SETTING_NOTIFY_ENABLED, self.notify_checkbox.isChecked())
+        self.db.set_config(config.SETTING_MAIL_INTERVAL,
+                           config.clamp_interval(self.mail_spin.value(), config.MAIL_INTERVAL_MIN))
+        self.db.set_config(config.SETTING_WATERBALL_INTERVAL,
+                           config.clamp_interval(self.waterball_spin.value(), config.WATERBALL_INTERVAL_MIN))
+        self.db.set_config(config.SETTING_ONLINE_INTERVAL,
+                           config.clamp_interval(self.online_spin.value(), config.ONLINE_INTERVAL_MIN))
+        self.accept()
+
+
 class MainWindow(QMainWindow):
     """主聊天畫面"""
     send_requested = Signal(str, str, object, int)  # (receiver_id, text, timestamp, db_msg_id)
@@ -451,6 +570,7 @@ class MainWindow(QMainWindow):
         self._user_info_cache: Dict[str, Dict] = {}  # ptt_id_lower -> user info dict
         self.session_drafts: Dict[str, str] = {}  # ptt_id_lower -> draft text
         self._quitting = False  # 退出程序旗標，防止遞迴
+        self._pending_highlight_msg_id: Optional[int] = None  # 搜尋跳轉時要高亮的訊息 row id
 
         # 初始化 UI 與背景執行緒
         self.init_ui()
@@ -758,11 +878,9 @@ class MainWindow(QMainWindow):
         reply_bar_layout.addWidget(self.reply_bar_label, 1)
         reply_bar_layout.addWidget(cancel_reply_btn)
 
-        self.message_edit = QLineEdit() # 改用 QLineEdit 實現真正單行
-        self.message_edit.setObjectName("message-edit")
-        self.message_edit.setFixedHeight(36) # 標準單行高度
-        self.message_edit.setPlaceholderText("輸入訊息並按下 Enter 發送...")
-        self.message_edit.returnPressed.connect(self.handle_send)
+        self.message_edit = MessageInput()  # Enter 送出、Shift+Enter 換行，自動長高
+        self.message_edit.setPlaceholderText("輸入訊息，Enter 發送，Shift+Enter 換行...")
+        self.message_edit.send_requested.connect(self.handle_send)
 
         input_vbox.addWidget(self.reply_bar)
         input_vbox.addWidget(self.message_edit)
@@ -864,12 +982,20 @@ class MainWindow(QMainWindow):
         logout_action.triggered.connect(self.handle_logout)
         quit_action = QAction("關閉", self)
         quit_action.triggered.connect(self.fully_quit)
-        
+
         rescan_action = QAction("重新掃描信箱", self)
         rescan_action.triggered.connect(self._start_rescan)
 
+        search_action = QAction("搜尋訊息", self)
+        search_action.triggered.connect(self.open_search)
+
+        settings_action = QAction("設定", self)
+        settings_action.triggered.connect(self.open_settings)
+
         tray_menu.addAction(show_action)
+        tray_menu.addAction(search_action)
         tray_menu.addAction(rescan_action)
+        tray_menu.addAction(settings_action)
         tray_menu.addAction(logout_action)
         tray_menu.addSeparator()
         tray_menu.addAction(quit_action)
@@ -883,19 +1009,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+N"), self, self.new_chat_input.setFocus)
         QShortcut(QKeySequence("Ctrl+Q"), self, self.fully_quit)
         QShortcut(QKeySequence("Ctrl+W"), self, self.close_current_chat)
-
-    def eventFilter(self, obj, event):
-        """過濾 QTextEdit 的按鍵事件，處理發送邏輯"""
-        if obj is self.message_edit and event.type() == QEvent.KeyPress:
-            if event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
-                if event.modifiers() & Qt.ShiftModifier:
-                    # Shift+Enter -> 正常換行
-                    return False
-                else:
-                    # Enter -> 發送
-                    self.handle_send()
-                    return True
-        return super().eventFilter(obj, event)
+        QShortcut(QKeySequence("Ctrl+F"), self, self.open_search)
 
     def mousePressEvent(self, event):
         """當使用者點擊視窗區域時，自動將焦點移回訊息輸入框"""
@@ -1243,7 +1357,7 @@ class MainWindow(QMainWindow):
 
         # 儲存當前對話的草稿
         if self.current_chat_id:
-            self.session_drafts[self.current_chat_id] = self.message_edit.text()
+            self.session_drafts[self.current_chat_id] = self.message_edit.toPlainText()
 
         self.current_chat_id = widget.ptt_id
         current_acc = self.ptt_service.ptt_id
@@ -1256,8 +1370,9 @@ class MainWindow(QMainWindow):
         self.unread_counts[self.current_chat_id] = 0
         widget.set_unread(0)
         
-        # 從資料庫載入歷史訊息
-        messages = self.db.get_messages(current_acc, self.current_chat_id)
+        # 從資料庫載入歷史訊息。搜尋跳轉時載入更大視窗，確保目標訊息在畫面上可被高亮
+        load_limit = 1000 if self._pending_highlight_msg_id is not None else 50
+        messages = self.db.get_messages(current_acc, self.current_chat_id, load_limit)
         parsed = []
         for m in messages:
             ts = datetime.fromisoformat(m['timestamp']) if isinstance(m['timestamp'], str) else m['timestamp']
@@ -1279,7 +1394,7 @@ class MainWindow(QMainWindow):
 
         # 切換聯絡人時清除回覆狀態並還原草稿
         self.cancel_reply()
-        self.message_edit.setText(self.session_drafts.get(self.current_chat_id, ""))
+        self.message_edit.setPlainText(self.session_drafts.get(self.current_chat_id, ""))
         self.refresh_chat_display()
 
         # 檢查是否為封存會話
@@ -1381,7 +1496,11 @@ class MainWindow(QMainWindow):
         
         # 底部對齊：先加一個彈性空間，將訊息推向下方
         self.messages_layout.addStretch(1)
-        
+
+        # 取出並消費本次跳轉高亮目標（單次消費，避免殘留影響後續 refresh）
+        target_msg_id = self._pending_highlight_msg_id
+        self._pending_highlight_msg_id = None
+        highlight_widget = None
         for msg in history:
             if msg.get('mail_type') == 'waterball':
                 widget = WaterballBubble(msg['text'], msg['time'], msg.get('is_me', False))
@@ -1392,10 +1511,17 @@ class MainWindow(QMainWindow):
                                     reply_info=msg.get('reply_info'),
                                     send_status=msg.get('send_status'))
                 widget.reply_requested.connect(self.set_reply_to)
+            if target_msg_id is not None and msg.get('msg_id') == target_msg_id:
+                highlight_widget = widget
             self.messages_layout.addWidget(widget)
-        
-        # 標記強制捲到底部，待 rangeChanged 信號觸發時執行
-        self._force_scroll_to_bottom = True
+
+        if highlight_widget is not None:
+            # 搜尋跳轉：捲到目標並短暫高亮，取代預設的捲到底部
+            self._force_scroll_to_bottom = False
+            QTimer.singleShot(0, lambda w=highlight_widget: self._highlight_widget(w))
+        else:
+            # 標記強制捲到底部，待 rangeChanged 信號觸發時執行
+            self._force_scroll_to_bottom = True
 
     def set_reply_to(self, text: str, is_me: bool):
         """設定目前要回覆的訊息，顯示回覆預覽條。"""
@@ -1426,8 +1552,51 @@ class MainWindow(QMainWindow):
                 return w.ptt_id_display
         return ptt_id_lower
 
+    def open_search(self):
+        """開啟全域訊息搜尋對話框（跨當前帳號所有對話）。"""
+        if not self.ptt_service.ptt_id:
+            return
+        dlg = MessageSearchDialog(self.db, self.ptt_service.ptt_id, self)
+        dlg.result_activated.connect(self._jump_to_message)
+        dlg.exec()
+
+    def _jump_to_message(self, session_id: str, msg_id: int):
+        """由搜尋結果跳轉：開啟該對話並高亮目標訊息。"""
+        self._pending_highlight_msg_id = msg_id if msg_id and msg_id > 0 else None
+        display = self._get_contact_display_id(session_id.lower())
+        self.add_or_select_contact(display)
+
+    def _highlight_widget(self, widget):
+        """捲動到指定訊息氣泡並短暫高亮（搜尋跳轉用）。"""
+        try:
+            self.scroll_area.ensureWidgetVisible(widget, 0, 60)
+        except RuntimeError:
+            return  # widget 已被回收
+        widget.setAttribute(Qt.WA_StyledBackground, True)
+        widget.setStyleSheet("background-color: rgba(240, 198, 116, 0.18); border-radius: 6px;")
+        QTimer.singleShot(1600, lambda w=widget: self._clear_highlight(w))
+
+    def _clear_highlight(self, widget):
+        try:
+            widget.setStyleSheet("")
+        except RuntimeError:
+            pass  # widget 已被回收
+
+    def open_settings(self):
+        """開啟設定對話框；儲存後立即套用輪詢間隔。"""
+        dlg = SettingsDialog(self.db, self)
+        if dlg.exec():
+            self._apply_settings()
+
+    def _apply_settings(self):
+        """將最新的輪詢間隔設定套用到執行中的 worker 計時器（跨執行緒安全）。"""
+        if getattr(self, 'worker', None) is not None:
+            QMetaObject.invokeMethod(self.worker, "apply_poll_intervals", Qt.QueuedConnection)
+        if getattr(self, 'query_worker', None) is not None:
+            QMetaObject.invokeMethod(self.query_worker, "apply_poll_intervals", Qt.QueuedConnection)
+
     def handle_send(self):
-        text = self.message_edit.text().strip()
+        text = self.message_edit.toPlainText().strip()
         if not text or not self.current_chat_id:
             return
 
@@ -1576,8 +1745,9 @@ class MainWindow(QMainWindow):
 
         self._move_contact_to_top(sender)
 
-        # 桌面通知 (僅限收到的訊息，排除自己發出的)
-        if not self.isActiveWindow() and not data.get('is_me', False):
+        # 桌面通知 (僅限收到的訊息，排除自己發出的；可於設定頁關閉)
+        if (not self.isActiveWindow() and not data.get('is_me', False)
+                and self.db.get_config(config.SETTING_NOTIFY_ENABLED, True)):
             _, notify_text = decode_reply(data['text'])
             self.tray_icon.showMessage(
                 f"新訊息: {sender_id_display}",

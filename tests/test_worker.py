@@ -1191,3 +1191,24 @@ def test_mailbox_full_state_inconsistency():
     # RequireLogin 也不觸發重連（非 ConnectionClosed），只呼叫一次
     # call_count = 2（del_mail 一次 + get_newest_index 一次）
     assert service.service.call.call_count == 2
+
+
+# ── 輪詢間隔設定即時套用 ─────────────────────────────────────────
+
+def test_apply_poll_intervals_updates_running_timers(worker, db_mock):
+    """設定頁儲存後，apply_poll_intervals 應立即改變執行中的信件／水球計時器間隔。"""
+    worker.start_polling()
+    assert worker.polling_timer.isActive()
+    db_mock.get_config.return_value = 20  # 使用者將間隔設為 20 秒
+    worker.apply_poll_intervals()
+    assert worker.polling_timer.interval() == 20000
+    assert worker._waterball_timer.interval() == 20000
+
+
+def test_query_apply_poll_intervals_updates_timer(query_worker, db_mock):
+    """apply_poll_intervals 應改變執行中的在線輪詢計時器間隔。"""
+    query_worker._start_online_polling()
+    assert query_worker._online_check_timer.isActive()
+    db_mock.get_config.return_value = 90
+    query_worker.apply_poll_intervals()
+    assert query_worker._online_check_timer.interval() == 90000

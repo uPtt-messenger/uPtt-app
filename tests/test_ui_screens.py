@@ -210,7 +210,7 @@ def test_handle_send(mock_qthread, mock_worker, mock_query_worker, mock_ver_work
         window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
         qtbot.addWidget(window)
         window.add_or_select_contact("target")
-        window.message_edit.setText("Hello")
+        window.message_edit.setPlainText("Hello")
         with patch.object(window, 'send_requested') as mock_signal:
             window.handle_send()
             mock_signal.emit.assert_called_once()
@@ -286,13 +286,13 @@ def test_send_result_matches_correct_message_by_id(mock_qthread, mock_worker, mo
         qtbot.addWidget(window)
 
         window.add_or_select_contact("ContactA")
-        window.message_edit.setText("MsgA")
+        window.message_edit.setPlainText("MsgA")
         with patch.object(window, 'send_requested'):
             window.handle_send()
         msg_id_a = window.chat_histories['contacta'][-1]['msg_id']
 
         window.add_or_select_contact("ContactB")
-        window.message_edit.setText("MsgB")
+        window.message_edit.setPlainText("MsgB")
         with patch.object(window, 'send_requested'):
             window.handle_send()
         msg_id_b = window.chat_histories['contactb'][-1]['msg_id']
@@ -317,12 +317,12 @@ def test_send_result_two_pending_same_contact(mock_qthread, mock_worker, mock_qu
         qtbot.addWidget(window)
 
         window.add_or_select_contact("Target")
-        window.message_edit.setText("First")
+        window.message_edit.setPlainText("First")
         with patch.object(window, 'send_requested'):
             window.handle_send()
         first_id = window.chat_histories['target'][0]['msg_id']
 
-        window.message_edit.setText("Second")
+        window.message_edit.setPlainText("Second")
         with patch.object(window, 'send_requested'):
             window.handle_send()
         second_id = window.chat_histories['target'][1]['msg_id']
@@ -352,7 +352,7 @@ def test_send_result_updates_status_when_user_switched_chat(mock_qthread, mock_w
         qtbot.addWidget(window)
 
         window.add_or_select_contact("ContactA")
-        window.message_edit.setText("hi")
+        window.message_edit.setPlainText("hi")
         with patch.object(window, 'send_requested'):
             window.handle_send()
         msg_id = window.chat_histories['contacta'][-1]['msg_id']
@@ -432,7 +432,7 @@ def test_handle_send_suppresses_duplicate(mock_qthread, mock_worker, mock_query_
         window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
         qtbot.addWidget(window)
         window.add_or_select_contact("dup")
-        window.message_edit.setText("same content")
+        window.message_edit.setPlainText("same content")
 
         with patch.object(window, 'send_requested') as mock_signal:
             window.handle_send()
@@ -542,7 +542,7 @@ def test_handle_send_dup_preserves_reply_context(mock_qthread, mock_worker, mock
         assert window.reply_to is not None
         assert not window.reply_bar.isHidden()
 
-        window.message_edit.setText("my reply")
+        window.message_edit.setPlainText("my reply")
         with patch.object(window, 'send_requested') as mock_signal:
             window.handle_send()
             mock_signal.emit.assert_not_called()
@@ -550,7 +550,7 @@ def test_handle_send_dup_preserves_reply_context(mock_qthread, mock_worker, mock
         # Reply state restored after duplicate-send was suppressed
         assert window.reply_to is not None
         assert not window.reply_bar.isHidden()
-        assert window.message_edit.text() == "my reply"
+        assert window.message_edit.toPlainText() == "my reply"
 
 
 @patch('src.uPtt.ui.screens.VersionCheckWorker')
@@ -573,7 +573,7 @@ def test_send_status_survives_chat_switch_round_trip(mock_qthread, mock_worker, 
 
         # Send to A
         window.add_or_select_contact("ContactA")
-        window.message_edit.setText("hello A")
+        window.message_edit.setPlainText("hello A")
         with patch.object(window, 'send_requested'):
             window.handle_send()
         msg_id = window.chat_histories['contacta'][-1]['msg_id']
@@ -659,3 +659,131 @@ def test_draft_cleared_on_close(mock_qthread, mock_worker, mock_query_worker, mo
 
         window.handle_contact_action("CloseUser", "CLOSE")
         assert 'closeuser' not in window.session_drafts
+
+
+# ── 功能 2：Shift+Enter 多行輸入 ─────────────────────────────────
+
+def test_eventfilter_deadcode_removed():
+    """死碼 eventFilter 已從 MainWindow 移除。"""
+    assert 'eventFilter' not in MainWindow.__dict__
+
+
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.QueryWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_message_edit_enter_sends(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
+    """Enter 觸發送出：window.send_requested 帶正確 receiver/text。"""
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        window.add_or_select_contact("target")
+        window.message_edit.setPlainText("Hello there")
+        with patch.object(window, 'send_requested') as mock_signal:
+            qtbot.keyClick(window.message_edit, Qt.Key_Return)
+            mock_signal.emit.assert_called_once()
+            args = mock_signal.emit.call_args[0]
+            assert args[0] == "target"
+            assert args[1] == "Hello there"
+        # 送出後輸入框清空、無殘留換行
+        assert window.message_edit.toPlainText() == ""
+
+
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.QueryWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_message_edit_shift_enter_newline(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
+    """Shift+Enter 不送出、插入換行。"""
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        window.add_or_select_contact("target")
+        window.message_edit.setPlainText("line1")
+        with patch.object(window, 'send_requested') as mock_signal:
+            qtbot.keyClick(window.message_edit, Qt.Key_Return, Qt.ShiftModifier)
+            mock_signal.emit.assert_not_called()
+        assert "\n" in window.message_edit.toPlainText()
+
+
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.QueryWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_message_edit_blank_not_sent(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
+    """純換行/空白訊息 strip 後為空不送出。"""
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        window.add_or_select_contact("target")
+        window.message_edit.setPlainText("  \n  ")
+        with patch.object(window, 'send_requested') as mock_signal:
+            window.handle_send()
+            mock_signal.emit.assert_not_called()
+
+
+# ── 功能 3：設定頁 ───────────────────────────────────────────────
+
+def test_clamp_interval():
+    """輪詢間隔低於下限被夾到下限；非數值 fallback 下限。"""
+    from src.uPtt import config
+    assert config.clamp_interval(1, 3) == 3
+    assert config.clamp_interval(10, 3) == 10
+    assert config.clamp_interval("abc", 30) == 30
+    assert config.clamp_interval(None, 30) == 30
+
+
+def test_get_setting_interval_fallback_and_clamp():
+    """查無設定 fallback 到 default；儲存值低於下限被夾到下限。"""
+    from src.uPtt import config
+    db = MagicMock()
+    db.get_config.return_value = None
+    assert config.get_setting_interval(
+        db, config.SETTING_ONLINE_INTERVAL, 120, config.ONLINE_INTERVAL_MIN) == 120
+    db.get_config.return_value = 1
+    assert config.get_setting_interval(
+        db, config.SETTING_MAIL_INTERVAL, 5, config.MAIL_INTERVAL_MIN) == config.MAIL_INTERVAL_MIN
+
+
+def test_settings_dialog_roundtrip(qtbot, tmp_path):
+    """設定值 set 後 get 讀回一致；查無設定 fallback 到 config 預設。"""
+    from src.uPtt.ui.screens import SettingsDialog
+    from src.uPtt.db import DatabaseManager
+    from src.uPtt import config
+    db = DatabaseManager(str(tmp_path / "settings.db"))
+    dlg = SettingsDialog(db)
+    qtbot.addWidget(dlg)
+    # 查無設定 → fallback 到 config 預設
+    assert dlg.mail_spin.value() == config.CHECK_PTT_MAIL_INTERVAL
+    assert dlg.waterball_spin.value() == config.CHECK_WATERBALL_INTERVAL
+    assert dlg.online_spin.value() == config.CHECK_ONLINE_STATUS_INTERVAL
+    assert dlg.notify_checkbox.isChecked() is True
+
+    dlg.mail_spin.setValue(15)
+    dlg.online_spin.setValue(45)
+    dlg.notify_checkbox.setChecked(False)
+    dlg._save()
+
+    assert db.get_config(config.SETTING_MAIL_INTERVAL) == 15
+    assert db.get_config(config.SETTING_ONLINE_INTERVAL) == 45
+    assert db.get_config(config.SETTING_NOTIFY_ENABLED) is False
+
+    # 重開對話框，值持久
+    dlg2 = SettingsDialog(db)
+    qtbot.addWidget(dlg2)
+    assert dlg2.mail_spin.value() == 15
+    assert dlg2.notify_checkbox.isChecked() is False
+
+
+def test_settings_dialog_clamps_below_floor(qtbot, tmp_path):
+    """設定低於下限的間隔，儲存後被夾到下限。"""
+    from src.uPtt.ui.screens import SettingsDialog
+    from src.uPtt.db import DatabaseManager
+    from src.uPtt import config
+    db = DatabaseManager(str(tmp_path / "s.db"))
+    dlg = SettingsDialog(db)
+    qtbot.addWidget(dlg)
+    dlg.mail_spin.setValue(1)  # 低於下限 3
+    assert dlg.mail_spin.value() == config.MAIL_INTERVAL_MIN  # QSpinBox 夾住
+    dlg._save()
+    assert db.get_config(config.SETTING_MAIL_INTERVAL) == config.MAIL_INTERVAL_MIN

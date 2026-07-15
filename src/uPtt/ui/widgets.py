@@ -4,7 +4,7 @@ from typing import Optional
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QFrame, QSizePolicy, QStyle, QListWidgetItem, QListWidget, QAbstractItemView,
-    QPushButton, QDialog, QTextEdit, QMenu
+    QPushButton, QDialog, QTextEdit, QPlainTextEdit, QMenu
 )
 from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtGui import QAction, QDrag
@@ -35,6 +35,42 @@ def _apply_bubble_resize(message_label, bubble_container, owner_widget, new_size
     owner_widget.updateGeometry()
 
 logger = logging.getLogger("uPtt.ui.widgets")
+
+
+class MessageInput(QPlainTextEdit):
+    """訊息輸入框：Enter 送出、Shift+Enter 換行；隨內容自動長高（上限約 4 行後內部捲動）。"""
+    send_requested = Signal()
+
+    _MAX_LINES = 4
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("message-edit")
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setTabChangesFocus(True)
+        # 內容變動時重算高度
+        self.document().documentLayout().documentSizeChanged.connect(self._adjust_height)
+        self._adjust_height()
+
+    def keyPressEvent(self, event):
+        # Enter 送出；Shift+Enter 交給父類插入換行
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter) and not (event.modifiers() & Qt.ShiftModifier):
+            self.send_requested.emit()
+            return
+        super().keyPressEvent(event)
+
+    def _adjust_height(self, *_):
+        fm = self.fontMetrics()
+        line_h = fm.lineSpacing()
+        doc = self.document()
+        # QPlainTextEdit 的 documentSize().height() 以「行數」為單位
+        line_count = int(doc.size().height()) or 1
+        lines = max(1, min(self._MAX_LINES, line_count))
+        # 上下 padding（QSS）+ document margin + 邊框
+        extra = int(doc.documentMargin() * 2) + self.frameWidth() * 2 + 12
+        self.setFixedHeight(line_h * lines + extra)
+
 
 class ChatBubble(QWidget):
     """
