@@ -4,6 +4,8 @@ import time
 import PyPtt
 from typing import Any, Dict, Optional
 
+from . import utils
+
 logger = logging.getLogger("uPtt.ptt")
 
 class UPttService:
@@ -59,7 +61,9 @@ class UPttService:
 
             return True
         except Exception as e:
-            logger.error(f"登入失敗: {e}")
+            # 防禦性遮罩：上面呼叫把明文密碼傳給 PyPtt，若例外的 str() 意外帶出該
+            # 引數，避免明文密碼落地到 uptt_error.log。不影響 raise e 的重拋行為。
+            logger.error(f"登入失敗: {utils.redact_secret(str(e), ptt_pw)}")
             raise e
 
     def reconnect(self) -> bool:
@@ -131,7 +135,8 @@ class UPttService:
                 self._close_service_quietly(new_service)
                 time.sleep(3)
             except Exception as e:
-                logger.error(f"重連失敗 ({retry_time + 1}/{max_retry}): {e}")
+                # 防禦性遮罩：同上，new_service.call('login', ...) 帶有明文密碼。
+                logger.error(f"重連失敗 ({retry_time + 1}/{max_retry}): {utils.redact_secret(str(e), self.ptt_pw)}")
                 self._close_service_quietly(new_service)
                 time.sleep(self.retry_delay)
 

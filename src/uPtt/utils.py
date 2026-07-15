@@ -42,6 +42,16 @@ def get_app_data_dir():
     return path
 
 
+def redact_secret(text: str, secret) -> str:
+    """把 text 中出現的 secret 全部替換為 '***'，用於防止密碼經例外訊息落地到 log。
+
+    secret 為空字串/None 時視為無事可遮，原樣回傳 text（不可炸）。
+    """
+    if not secret:
+        return text
+    return text.replace(secret, "***")
+
+
 def gen_random_string(length=10):
     """Generate a random string of fixed length."""
     import random

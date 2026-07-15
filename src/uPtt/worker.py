@@ -99,7 +99,9 @@ class PTTWorker(QObject):
         except PyPtt.LoginTooOften:
             self.login_result.emit(False, "登入太頻繁，請稍後再試")
         except Exception as e:
-            logger.error(f"登入失敗: {e}")
+            # 防禦性遮罩：此例外來自 self.ptt.login()，其呼叫鏈把明文密碼傳給 PyPtt，
+            # 若例外的 str() 意外帶出該引數，避免明文密碼落地到 uptt_error.log。
+            logger.error(f"登入失敗: {utils.redact_secret(str(e), password)}")
             self.login_result.emit(False, "連線失敗，請檢查網路連線")
 
     def start_polling(self):
@@ -823,8 +825,10 @@ class QueryWorker(QObject):
             if self._replay_queue:
                 QTimer.singleShot(500, self._replay_next_pending)
         except Exception as e:
-            logger.warning(f"[Query] 副 session 登入失敗,使用者狀態功能將無法使用: {e}")
-            self._mark_degraded(f"登入失敗: {e}")
+            # 防禦性遮罩：同 PTTWorker.do_login，self.ptt.login() 把明文密碼傳給 PyPtt。
+            msg = utils.redact_secret(str(e), ptt_pw)
+            logger.warning(f"[Query] 副 session 登入失敗,使用者狀態功能將無法使用: {msg}")
+            self._mark_degraded(f"登入失敗: {msg}")
 
     def _replay_next_pending(self):
         """逐筆重放登入前暫存的 user_info 查詢，每筆間隔 2 秒避免阻塞。"""

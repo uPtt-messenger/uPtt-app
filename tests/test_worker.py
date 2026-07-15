@@ -6,7 +6,8 @@ from datetime import datetime, timedelta
 
 from src.uPtt.worker import PTTWorker, QueryWorker
 from src.uPtt.ptt import UPttService
-from src.uPtt import contant
+from src.uPtt import contant, utils
+from security_utils import TEST_PASSWORD_CANARY
 
 # uPtt 訊息只要標題命中且內文有成對分隔線即視為合法並自動刪除；
 # 嵌入時間戳缺失時時間戳走 fallback chain(mail date → now)，不影響刪除。
@@ -169,6 +170,34 @@ def test_do_login_exception(qtbot, worker, ptt_service_mock):
     
     # 登入失敗時應回傳固定的使用者友善訊息，而非原始 exception 內容
     assert blocker.args == [False, "連線失敗，請檢查網路連線"]
+
+def test_do_login_exception_redacts_password_from_log(qtbot, worker, ptt_service_mock, caplog):
+    """威脅模型：PyPtt 例外的 str() 意外帶出呼叫參數（含明文密碼），
+    do_login 的 catch-all log 不得讓密碼明文落地到 uptt_error.log。"""
+    ptt_service_mock.login.side_effect = Exception(
+        f"boom {{'ptt_pw': '{TEST_PASSWORD_CANARY}'}}")
+
+    with qtbot.waitSignal(worker.login_result) as blocker:
+        worker.do_login("user", TEST_PASSWORD_CANARY)
+
+    assert blocker.args == [False, "連線失敗，請檢查網路連線"]
+    assert TEST_PASSWORD_CANARY not in caplog.text
+
+
+# ── utils.redact_secret 單元測試（放在此檔而非 test_utils.py：任務範圍限定） ──
+
+def test_redact_secret_masks_all_occurrences():
+    text = "err: pw=hunter2 detail: {'ptt_pw': 'hunter2'} again hunter2"
+    assert utils.redact_secret(text, "hunter2") == \
+        "err: pw=*** detail: {'ptt_pw': '***'} again ***"
+
+def test_redact_secret_empty_secret_is_noop():
+    text = "no secret here"
+    assert utils.redact_secret(text, "") == text
+
+def test_redact_secret_none_secret_does_not_raise():
+    text = "no secret here"
+    assert utils.redact_secret(text, None) == text
 
 def test_poll_new_mails_basic(qtbot, worker, ptt_service_mock, db_mock):
     # Mock newest index in search
@@ -856,6 +885,20 @@ def test_query_worker_do_login_failure_marks_degraded(qtbot, query_worker, ptt_s
 
     assert query_worker._degraded is True
     assert query_worker._online_check_timer is None
+
+
+def test_query_worker_do_login_exception_redacts_password_from_log(qtbot, query_worker, ptt_service_mock, caplog):
+    """同 PTTWorker.do_login 的威脅模型：QueryWorker.do_login 直接呼叫
+    self.ptt.login(ptt_id, ptt_pw, ...)，例外訊息若意外帶出密碼字面，
+    warning log／_mark_degraded 訊息都不得讓密碼明文落地。"""
+    ptt_service_mock.login.side_effect = Exception(
+        f"boom {{'ptt_pw': '{TEST_PASSWORD_CANARY}'}}")
+
+    with qtbot.waitSignal(query_worker.query_session_degraded):
+        query_worker.do_login("testuser", TEST_PASSWORD_CANARY)
+
+    assert query_worker._degraded is True
+    assert TEST_PASSWORD_CANARY not in caplog.text
 
 
 def test_query_worker_connection_closed_marks_degraded(qtbot, query_worker, ptt_service_mock):

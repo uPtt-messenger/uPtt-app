@@ -3,6 +3,7 @@ import time
 from unittest.mock import MagicMock, patch
 from src.uPtt.ptt import UPttService
 import PyPtt
+from security_utils import TEST_PASSWORD_CANARY
 
 class MockNoSuchUser(Exception):
     pass
@@ -84,6 +85,19 @@ def test_login_failure():
     with patch.object(service.service, 'call', side_effect=Exception("Login failed")):
         with pytest.raises(Exception, match="Login failed"):
             service.login("user", "pass")
+
+def test_login_failure_redacts_password_from_log(caplog):
+    """威脅模型：PyPtt 例外的 str() 意外帶出呼叫參數（含明文密碼），
+    login() 的 catch-all log 不得讓密碼明文落地，但 raise e 的重拋行為不變。"""
+    boom = Exception(f"boom {{'ptt_pw': '{TEST_PASSWORD_CANARY}'}}")
+    service = UPttService()
+    with patch.object(service.service, 'call', side_effect=boom):
+        with pytest.raises(Exception, match="boom"):
+            service.login("user", TEST_PASSWORD_CANARY)
+
+    assert TEST_PASSWORD_CANARY not in caplog.text
+
+    assert TEST_PASSWORD_CANARY not in caplog.text
 
 def test_login_get_info_failure():
     service = UPttService()
@@ -300,3 +314,22 @@ def test_reconnect_wrong_credentials_gives_up_immediately(monkeypatch):
     assert result is False
     assert len(login_calls) == 1   # 立即放棄，只嘗試一次
     assert sleeps == []            # 完全不 sleep
+
+
+def test_reconnect_generic_failure_redacts_password_from_log(monkeypatch, caplog):
+    """威脅模型：同 test_login_failure_redacts_password_from_log，但走 reconnect()
+    的 generic Exception 分支（ptt.py 的重連失敗 log）。"""
+    service = UPttService()
+    service.ptt_id = "user"
+    service.ptt_pw = TEST_PASSWORD_CANARY
+    service.service = MagicMock()
+    UPttService._last_reconnect_ts = 0.0
+
+    monkeypatch.setattr("src.uPtt.ptt.time.sleep", lambda s: None)
+    boom = Exception(f"boom {{'ptt_pw': '{TEST_PASSWORD_CANARY}'}}")
+    monkeypatch.setattr("src.uPtt.ptt.PyPtt.Service", _login_raiser(lambda: boom))
+
+    result = service.reconnect()
+
+    assert result is False
+    assert TEST_PASSWORD_CANARY not in caplog.text
