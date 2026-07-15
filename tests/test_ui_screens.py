@@ -143,6 +143,63 @@ def test_main_window_close_chat(mock_qthread, mock_worker, mock_query_worker, mo
         window.close_current_chat()
         assert window.contact_list.count() == 0
 
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.QueryWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_connection_lost_then_query_degraded_keeps_lost_tooltip(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
+    """主 session 斷線期間副 session 又降級，tooltip 應仍顯示連線中斷，不被蓋成訊息收發正常。"""
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        window.on_connection_lost()
+        window.on_query_session_degraded()
+        assert window._status_dot.toolTip() == "連線中斷，正在重新連線..."
+
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.QueryWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_main_restored_while_query_still_degraded(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
+    """主 session 恢復但副 session 仍降級，tooltip 應顯示降級提示，不被無條件清空。"""
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        window.on_connection_lost()
+        window.on_query_session_degraded()
+        window.on_connection_restored()
+        assert window._status_dot.toolTip() == "使用者狀態暫時無法更新(訊息收發正常)"
+
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.QueryWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_query_restored_while_main_still_lost(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
+    """副 session 恢復但主 session 仍斷線，tooltip 應仍顯示連線中斷。"""
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        window.on_connection_lost()
+        window.on_query_session_degraded()
+        window.on_query_session_restored()
+        assert window._status_dot.toolTip() == "連線中斷，正在重新連線..."
+
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.QueryWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_both_sessions_healthy_clears_tooltip(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
+    """主副 session 都恢復健康，tooltip 應清空且狀態點為綠色。"""
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        window.on_connection_lost()
+        window.on_query_session_degraded()
+        window.on_connection_restored()
+        window.on_query_session_restored()
+        assert window._status_dot.toolTip() == ""
+        assert "#56D364" in window._status_dot.styleSheet()
+
 @patch('src.uPtt.ui.screens.QMessageBox')
 @patch('src.uPtt.ui.screens.VersionCheckWorker')
 @patch('src.uPtt.ui.screens.QueryWorker')

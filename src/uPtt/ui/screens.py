@@ -573,6 +573,10 @@ class MainWindow(QMainWindow):
         self.session_drafts: Dict[str, str] = {}  # ptt_id_lower -> draft text
         self._quitting = False  # 退出程序旗標，防止遞迴
         self._pending_highlight_msg_id: Optional[int] = None  # 搜尋跳轉時要高亮的訊息 row id
+        # 主/副 session 連線狀態旗標：取代舊版用 tooltip 字串互相比對推斷狀態的作法，
+        # 避免兩個 session 各自更新時互相覆寫、顯示矛盾。
+        self._main_connected = True
+        self._query_degraded = False
 
         # 初始化 UI 與背景執行緒
         self.init_ui()
@@ -1172,16 +1176,16 @@ class MainWindow(QMainWindow):
     def on_connection_lost(self):
         """連線中斷時更新 UI 狀態"""
         logger.warning("UI: 偵測到連線中斷")
-        self._status_dot.setStyleSheet("color: #D29922; font-size: 9px; background: transparent;")
-        self._status_dot.setToolTip("連線中斷，正在重新連線...")
+        self._main_connected = False
+        self._refresh_connection_status()
         self.setWindowTitle(f"uPtt - {self.ptt_service.ptt_id} (重新連線中...)")
 
     @Slot()
     def on_connection_restored(self):
         """連線恢復時更新 UI 狀態"""
         logger.info("UI: 連線已恢復")
-        self._status_dot.setStyleSheet("color: #56D364; font-size: 9px; background: transparent;")
-        self._status_dot.setToolTip("")
+        self._main_connected = True
+        self._refresh_connection_status()
         self.setWindowTitle(f"uPtt - {self.ptt_service.ptt_id}")
 
     @Slot()
@@ -1194,15 +1198,30 @@ class MainWindow(QMainWindow):
             widget = self.contact_list.itemWidget(item)
             if widget:
                 widget.set_online_unknown()
-        current_tooltip = self._status_dot.toolTip()
-        if "訊息收發正常" not in current_tooltip:
-            self._status_dot.setToolTip("使用者狀態暫時無法更新(訊息收發正常)")
+        self._query_degraded = True
+        self._refresh_connection_status()
 
     @Slot()
     def on_query_session_restored(self):
         """副 session 恢復,使用者狀態功能重新可用。"""
         logger.info("UI: 副 session 已恢復")
-        if self._status_dot.toolTip() == "使用者狀態暫時無法更新(訊息收發正常)":
+        self._query_degraded = False
+        self._refresh_connection_status()
+
+    def _refresh_connection_status(self):
+        """依 _main_connected / _query_degraded 兩個旗標集中決定狀態點顏色與 tooltip。
+
+        優先序：主 session 斷線 > 副 session 降級 > 全部正常，因此兩者同時發生時
+        會自然顯示較嚴重的「連線中斷」，不會被後到的事件覆寫掉。
+        """
+        if not self._main_connected:
+            self._status_dot.setStyleSheet("color: #D29922; font-size: 9px; background: transparent;")
+            self._status_dot.setToolTip("連線中斷，正在重新連線...")
+        elif self._query_degraded:
+            self._status_dot.setStyleSheet("color: #56D364; font-size: 9px; background: transparent;")
+            self._status_dot.setToolTip("使用者狀態暫時無法更新(訊息收發正常)")
+        else:
+            self._status_dot.setStyleSheet("color: #56D364; font-size: 9px; background: transparent;")
             self._status_dot.setToolTip("")
 
     @Slot(str, bool)
