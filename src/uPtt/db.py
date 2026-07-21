@@ -411,6 +411,33 @@ class DatabaseManager:
             logger.error(f"查詢訊息失敗：{e}")
             return []
 
+    def search_messages(self, account_id: str, query: str, limit: int = 100) -> List[Dict[str, Any]]:
+        """跨當前帳號的所有會話搜尋訊息內容，依時間新→舊回傳。
+
+        英文大小寫不敏感（SQLite LIKE 對 ASCII 預設即為 case-insensitive，COLLATE NOCASE
+        僅為強調意圖）；中文為精確比對。查詢字串以參數化傳入並跳脫 LIKE 萬用字元
+        （% _ \\），避免使用者輸入被當作萬用字元或造成注入。
+        """
+        if not query:
+            return []
+        # 反斜線須先跳脫，再跳脫 % 與 _
+        escaped = query.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+        pattern = f'%{escaped}%'
+        try:
+            with self._get_connection() as conn:
+                rows = conn.execute("""
+                    SELECT id, session_id, sender_id, content, timestamp, mail_type
+                    FROM messages
+                    WHERE account_id = ?
+                      AND content COLLATE NOCASE LIKE ? ESCAPE '\\'
+                    ORDER BY timestamp DESC, id DESC
+                    LIMIT ?
+                """, (account_id.lower(), pattern, limit)).fetchall()
+                return [dict(row) for row in rows]
+        except sqlite3.Error as e:
+            logger.error(f"搜尋訊息失敗：{e}")
+            return []
+
     def mark_as_read(self, account_id: str, session_id: str):
         acc_id_lower = account_id.lower()
         session_id_lower = session_id.lower()

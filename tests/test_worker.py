@@ -4,9 +4,23 @@ from unittest.mock import MagicMock, patch
 import PyPtt
 from datetime import datetime, timedelta
 
-from src.uPtt.worker import PTTWorker, QueryWorker
-from src.uPtt.ptt import UPttService
-from src.uPtt import contant
+from uPtt.worker import PTTWorker, QueryWorker
+from uPtt.ptt import UPttService
+from uPtt import contant, utils
+from security_utils import TEST_PASSWORD_CANARY
+
+# uPtt 訊息只要標題命中且內文有成對分隔線即視為合法並自動刪除；
+# 嵌入時間戳缺失時時間戳走 fallback chain(mail date → now)，不影響刪除。
+_UPTT_TS = "2026-03-15T10:00:00"
+
+
+def _uptt_content(msg="Msg", ts=_UPTT_TS):
+    """組出 uPtt 信件內文（含成對分隔線）。ts=None 模擬嵌入時間戳缺失（仍屬合法 uPtt）。"""
+    div = contant.PTT_MSG_DIVISION_LINE
+    body = f"Header\n{div}\n{msg}\n{div}\nFooter"
+    if ts:
+        body += f"\n{contant.PTT_MSG_TS_PREFIX}{ts}{contant.PTT_MSG_TS_SUFFIX}"
+    return body
 
 @pytest.fixture(autouse=True)
 def patch_pyptt_i18n():
@@ -17,6 +31,7 @@ def patch_pyptt_i18n():
         'wrong_id_pw': '帳號或密碼錯誤',
         'login_too_often': '登入太頻繁',
         'require_login': '請先登入',
+        'connect_fail': '連線失敗',
     }
     with patch.multiple(PyPtt.i18n, create=True, **attributes):
         yield
@@ -80,7 +95,7 @@ def test_do_login_success(qtbot, worker, ptt_service_mock, db_mock):
     with qtbot.waitSignal(worker.login_result) as blocker:
         worker.do_login("testuser", "testpass")
 
-    assert blocker.args == [True, "登入成功"]
+    assert blocker.args == [True, "登入成功", ""]
     ptt_service_mock.login.assert_called_once_with("testuser", "testpass")
     db_mock.upsert_account.assert_called_once()
     assert worker.polling_timer is not None
@@ -101,7 +116,7 @@ def test_do_login_first_time_no_polling(qtbot, ptt_service_mock, db_mock):
     with qtbot.waitSignal(w.login_result) as blocker:
         w.do_login("newuser", "newpass")
 
-    assert blocker.args == [True, "登入成功"]
+    assert blocker.args == [True, "登入成功", ""]
     assert len(first_time_received) == 1
     assert w.polling_timer is None
 
@@ -142,20 +157,48 @@ def test_do_initial_scan_emits_progress(qtbot, ptt_service_mock, db_mock):
 
 def test_do_login_failure(qtbot, worker, ptt_service_mock):
     ptt_service_mock.login.return_value = False
-    
+
     with qtbot.waitSignal(worker.login_result) as blocker:
         worker.do_login("wronguser", "wrongpass")
-    
-    assert blocker.args == [False, "登入失敗"]
+
+    assert blocker.args == [False, "登入失敗", "unknown"]
 
 def test_do_login_exception(qtbot, worker, ptt_service_mock):
     ptt_service_mock.login.side_effect = Exception("Fatal Error")
-    
+
     with qtbot.waitSignal(worker.login_result) as blocker:
         worker.do_login("user", "pass")
-    
+
     # 登入失敗時應回傳固定的使用者友善訊息，而非原始 exception 內容
-    assert blocker.args == [False, "連線失敗，請檢查網路連線"]
+    assert blocker.args == [False, "登入失敗，請稍後再試", "unknown"]
+
+def test_do_login_exception_redacts_password_from_log(qtbot, worker, ptt_service_mock, caplog):
+    """威脅模型：PyPtt 例外的 str() 意外帶出呼叫參數（含明文密碼），
+    do_login 的 catch-all log 不得讓密碼明文落地到 uptt_error.log。"""
+    ptt_service_mock.login.side_effect = Exception(
+        f"boom {{'ptt_pw': '{TEST_PASSWORD_CANARY}'}}")
+
+    with qtbot.waitSignal(worker.login_result) as blocker:
+        worker.do_login("user", TEST_PASSWORD_CANARY)
+
+    assert blocker.args == [False, "登入失敗，請稍後再試", "unknown"]
+    assert TEST_PASSWORD_CANARY not in caplog.text
+
+
+# ── utils.redact_secret 單元測試（放在此檔而非 test_utils.py：任務範圍限定） ──
+
+def test_redact_secret_masks_all_occurrences():
+    text = "err: pw=hunter2 detail: {'ptt_pw': 'hunter2'} again hunter2"
+    assert utils.redact_secret(text, "hunter2") == \
+        "err: pw=*** detail: {'ptt_pw': '***'} again ***"
+
+def test_redact_secret_empty_secret_is_noop():
+    text = "no secret here"
+    assert utils.redact_secret(text, "") == text
+
+def test_redact_secret_none_secret_does_not_raise():
+    text = "no secret here"
+    assert utils.redact_secret(text, None) == text
 
 def test_poll_new_mails_basic(qtbot, worker, ptt_service_mock, db_mock):
     # Mock newest index in search
@@ -167,7 +210,7 @@ def test_poll_new_mails_basic(qtbot, worker, ptt_service_mock, db_mock):
                 PyPtt.MailField.title: contant.PTT_MSG_TITLE,
                 PyPtt.MailField.author: "SenderID (Nick)",
                 PyPtt.MailField.date: "Wed Mar 15 10:00:00 2026",
-                PyPtt.MailField.content: f"Header\n{contant.PTT_MSG_DIVISION_LINE}\nTest Message Content\n{contant.PTT_MSG_DIVISION_LINE}\nFooter"
+                PyPtt.MailField.content: _uptt_content("Test Message Content")
             }
         return None
 
@@ -298,7 +341,7 @@ def test_poll_extends_2_days_when_uptt_found(worker, ptt_service_mock, db_mock):
                     PyPtt.MailField.date: t.strftime('%a %b %d %H:%M:%S %Y'),
                     PyPtt.MailField.title: contant.PTT_MSG_TITLE,
                     PyPtt.MailField.author: "SenderID (Nick)",
-                    PyPtt.MailField.content: f"H\n{contant.PTT_MSG_DIVISION_LINE}\nMsg\n{contant.PTT_MSG_DIVISION_LINE}\nF"
+                    PyPtt.MailField.content: _uptt_content("Msg")
                 }
             else:
                 return {
@@ -356,7 +399,7 @@ def test_poll_extends_multiple_times(worker, ptt_service_mock, db_mock):
                     PyPtt.MailField.date: t.strftime('%a %b %d %H:%M:%S %Y'),
                     PyPtt.MailField.title: contant.PTT_MSG_TITLE,
                     PyPtt.MailField.author: "SenderID (Nick)",
-                    PyPtt.MailField.content: f"H\n{contant.PTT_MSG_DIVISION_LINE}\nMsg\n{contant.PTT_MSG_DIVISION_LINE}\nF"
+                    PyPtt.MailField.content: _uptt_content("Msg")
                 }
             return {
                 PyPtt.MailField.date: t.strftime('%a %b %d %H:%M:%S %Y'),
@@ -488,10 +531,7 @@ def test_poll_save_failure_skips_deletion(worker, ptt_service_mock, db_mock):
                 PyPtt.MailField.title: contant.PTT_MSG_TITLE,
                 PyPtt.MailField.author: "SenderID (Nick)",
                 PyPtt.MailField.date: "Wed Mar 15 10:00:00 2026",
-                PyPtt.MailField.content: (
-                    f"Header\n{contant.PTT_MSG_DIVISION_LINE}\n"
-                    f"Test Message\n{contant.PTT_MSG_DIVISION_LINE}\nFooter"
-                ),
+                PyPtt.MailField.content: _uptt_content("Test Message"),
             }
         return None
 
@@ -519,10 +559,7 @@ def test_poll_index_decrease_still_scans(worker, ptt_service_mock, db_mock):
                 PyPtt.MailField.title: contant.PTT_MSG_TITLE,
                 PyPtt.MailField.author: "SenderID (Nick)",
                 PyPtt.MailField.date: datetime.now().strftime('%a %b %d %H:%M:%S %Y'),
-                PyPtt.MailField.content: (
-                    f"Header\n{contant.PTT_MSG_DIVISION_LINE}\n"
-                    f"New Message\n{contant.PTT_MSG_DIVISION_LINE}\nFooter"
-                ),
+                PyPtt.MailField.content: _uptt_content("New Message"),
             }
         if api == 'del_mail':
             return None
@@ -598,6 +635,132 @@ def test_poll_malformed_uptt_content_falls_back_to_mail(qtbot, worker, ptt_servi
     assert blocker.args[0]['sender'] == 'SenderID'
 
 
+def test_forged_uptt_title_without_valid_structure_not_deleted(qtbot, worker, ptt_service_mock, db_mock):
+    """Issue #3: 標題偽造為 uPtt 但內容無成對分隔線 → 不呼叫 del_mail，
+    改以一般 mail 路徑處理，避免任意 PTT 使用者害受害者信件被自動刪除。"""
+    call_log = []
+
+    def call_side_effect(api, args=None):
+        call_log.append(api)
+        if api == 'get_newest_index':
+            return 1
+        if api == 'get_mail':
+            return {
+                PyPtt.MailField.title: contant.PTT_MSG_TITLE,  # 偽造標題
+                PyPtt.MailField.author: "Attacker (evil)",
+                PyPtt.MailField.date: datetime.now().strftime('%a %b %d %H:%M:%S %Y'),
+                PyPtt.MailField.content: "惡意內容，沒有成對分隔線",  # 無成對分隔線
+            }
+        return None
+
+    ptt_service_mock.call.side_effect = call_side_effect
+    db_mock.save_message.return_value = True
+    worker.is_first_polling = False
+
+    with qtbot.waitSignal(worker.new_message_received) as blocker:
+        worker._poll_new_mails()
+
+    assert 'del_mail' not in call_log
+    saved_kwargs = db_mock.save_message.call_args.kwargs
+    assert saved_kwargs['mail_type'] == 'mail'
+    assert blocker.args[0]['mail_type'] == 'mail'
+    assert blocker.args[0]['sender'] == 'Attacker'
+
+
+def test_poll_uptt_missing_embedded_ts_still_deleted(qtbot, worker, ptt_service_mock, db_mock):
+    """F2: 標題命中 + 成對分隔線但嵌入時間戳缺失（被 PTT 折行/ANSI 汙損）→
+    仍視為合法 uPtt：存為 uptt 類型、del_mail、時間戳 fallback 至 PTT 信件日期。"""
+    call_log = []
+
+    def call_side_effect(api, args=None):
+        call_log.append(api)
+        if api == 'get_newest_index':
+            return 1
+        if api == 'get_mail':
+            return {
+                PyPtt.MailField.title: contant.PTT_MSG_TITLE,
+                PyPtt.MailField.author: "SenderID (Nick)",
+                PyPtt.MailField.date: "Wed Mar 15 10:00:00 2026",
+                PyPtt.MailField.content: _uptt_content("Hello", ts=None),  # 成對分隔線,無嵌入時間戳
+            }
+        if api == 'del_mail':
+            return None
+        return None
+
+    ptt_service_mock.call.side_effect = call_side_effect
+    db_mock.save_message.return_value = True
+    worker.is_first_polling = False
+
+    with qtbot.waitSignal(worker.new_message_received) as blocker:
+        worker._poll_new_mails()
+
+    assert 'del_mail' in call_log
+    saved_kwargs = db_mock.save_message.call_args.kwargs
+    assert saved_kwargs['mail_type'] == 'uptt'
+    # 嵌入時間戳缺失 → 時間戳走 fallback，使用 PTT 信件日期
+    assert saved_kwargs['timestamp'] == datetime(2026, 3, 15, 10, 0, 0)
+    assert blocker.args[0]['mail_type'] == 'uptt'
+    assert blocker.args[0]['text'] == 'Hello'
+
+
+def test_poll_flushes_emit_when_later_mail_raises(qtbot, worker, ptt_service_mock, db_mock):
+    """Issue #1: 迴圈處理多封信、第 2 封處理時拋例外 → 第 1 封（已入庫）的
+    new_message_received 仍應被 emit，避免通知永久遺失。"""
+    worker.is_first_polling = False
+    worker.last_poll_time = datetime.now()
+    now_str = datetime.now().strftime('%a %b %d %H:%M:%S %Y')
+
+    def call_side_effect(api, args=None):
+        if api == 'get_newest_index':
+            return 2
+        if api == 'get_mail':
+            # 迴圈由新到舊：先處理 index 2（成功入庫），再處理 index 1（拋例外）
+            if args['index'] == 2:
+                return {
+                    PyPtt.MailField.title: contant.PTT_MSG_TITLE,
+                    PyPtt.MailField.author: "SenderID (Nick)",
+                    PyPtt.MailField.date: now_str,
+                    PyPtt.MailField.content: _uptt_content("First"),
+                }
+            raise Exception("boom on second mail")
+        if api == 'del_mail':
+            return None
+        return None
+
+    ptt_service_mock.call.side_effect = call_side_effect
+    db_mock.save_message.return_value = True
+
+    received = []
+    worker.new_message_received.connect(lambda d: received.append(d))
+
+    worker._poll_new_mails()
+
+    assert len(received) == 1
+    assert received[0]['sender'] == "SenderID"
+    assert received[0]['text'] == "First"
+
+
+def test_connection_lost_stops_polling_and_restores(qtbot, worker, ptt_service_mock, db_mock):
+    """Issue #2: 斷線時應暫停輪詢 timer（isActive()==False），避免重連風暴；
+    重連成功後應恢復輪詢。"""
+    ptt_service_mock.ptt_id = "TestUser"
+    worker.last_poll_time = datetime.now()
+    worker.start_polling()
+    assert worker.polling_timer.isActive()
+
+    ptt_service_mock.call.side_effect = PyPtt.ConnectionClosed()
+    with qtbot.waitSignal(worker.connection_lost):
+        worker._poll_new_mails()
+    assert worker.polling_timer.isActive() is False
+
+    ptt_service_mock.reconnect.return_value = True
+    with qtbot.waitSignal(worker.connection_restored):
+        worker._deferred_reconnect()
+    assert worker.polling_timer.isActive() is True
+
+    worker.stop_polling()
+
+
 def test_initial_scan_save_failure_skips_deletion(ptt_service_mock, db_mock):
     """do_initial_scan 中 save_message 失敗時不應刪除 PTT 信件"""
     import sqlite3
@@ -614,10 +777,7 @@ def test_initial_scan_save_failure_skips_deletion(ptt_service_mock, db_mock):
                 PyPtt.MailField.title: contant.PTT_MSG_TITLE,
                 PyPtt.MailField.author: "SenderID (Nick)",
                 PyPtt.MailField.date: datetime.now().strftime('%a %b %d %H:%M:%S %Y'),
-                PyPtt.MailField.content: (
-                    f"Header\n{contant.PTT_MSG_DIVISION_LINE}\n"
-                    f"Test Message\n{contant.PTT_MSG_DIVISION_LINE}\nFooter"
-                ),
+                PyPtt.MailField.content: _uptt_content("Test Message"),
             }
         return None
 
@@ -728,6 +888,20 @@ def test_query_worker_do_login_failure_marks_degraded(qtbot, query_worker, ptt_s
     assert query_worker._online_check_timer is None
 
 
+def test_query_worker_do_login_exception_redacts_password_from_log(qtbot, query_worker, ptt_service_mock, caplog):
+    """同 PTTWorker.do_login 的威脅模型：QueryWorker.do_login 直接呼叫
+    self.ptt.login(ptt_id, ptt_pw, ...)，例外訊息若意外帶出密碼字面，
+    warning log／_mark_degraded 訊息都不得讓密碼明文落地。"""
+    ptt_service_mock.login.side_effect = Exception(
+        f"boom {{'ptt_pw': '{TEST_PASSWORD_CANARY}'}}")
+
+    with qtbot.waitSignal(query_worker.query_session_degraded):
+        query_worker.do_login("testuser", TEST_PASSWORD_CANARY)
+
+    assert query_worker._degraded is True
+    assert TEST_PASSWORD_CANARY not in caplog.text
+
+
 def test_query_worker_connection_closed_marks_degraded(qtbot, query_worker, ptt_service_mock):
     """查詢時遇到 ConnectionClosed 應進入降級狀態。"""
     # bypass __init__ — i18n strings aren't loaded until PyPtt.Service() runs
@@ -776,8 +950,8 @@ def test_query_worker_stop_closes_session(query_worker, ptt_service_mock):
 
 def test_ptt_service_kick_on_reconnect_flag():
     """UPttService 預設允許重連 kick;副 session 應能關閉此行為。"""
-    from src.uPtt.ptt import UPttService
-    with patch('src.uPtt.ptt.PyPtt.Service') as mock_svc:
+    from uPtt.ptt import UPttService
+    with patch('uPtt.ptt.PyPtt.Service') as mock_svc:
         main = UPttService()
         assert main.kick_on_reconnect is True
 
@@ -848,23 +1022,34 @@ def test_query_worker_replays_after_login(qtbot, query_worker, ptt_service_mock,
 
 
 def test_do_login_wrong_password(qtbot, worker, ptt_service_mock):
-    """帳號密碼錯誤應回傳固定訊息。"""
+    """帳號密碼錯誤應回傳固定訊息，kind='auth'。"""
     ptt_service_mock.login.side_effect = PyPtt.WrongIDorPassword()
 
     with qtbot.waitSignal(worker.login_result) as blocker:
         worker.do_login("user", "wrong")
 
-    assert blocker.args == [False, "帳號或密碼錯誤"]
+    assert blocker.args == [False, "帳號或密碼錯誤，請重試", "auth"]
+
+
+@pytest.mark.parametrize("exc_factory", [lambda: PyPtt.ConnectError(None), PyPtt.ConnectionClosed])
+def test_do_login_network_error(qtbot, worker, ptt_service_mock, exc_factory):
+    """連線失敗/中斷應回傳網路類訊息，kind='network'。"""
+    ptt_service_mock.login.side_effect = exc_factory()
+
+    with qtbot.waitSignal(worker.login_result) as blocker:
+        worker.do_login("user", "pass")
+
+    assert blocker.args == [False, "無法連線至 PTT，請檢查網路", "network"]
 
 
 def test_do_login_too_often(qtbot, worker, ptt_service_mock):
-    """登入太頻繁應回傳固定訊息。"""
+    """PyPtt 2.1.4 從不實際 raise LoginTooOften，等同其他未分類例外，kind='unknown'。"""
     ptt_service_mock.login.side_effect = PyPtt.LoginTooOften()
 
     with qtbot.waitSignal(worker.login_result) as blocker:
         worker.do_login("user", "pass")
 
-    assert blocker.args == [False, "登入太頻繁，請稍後再試"]
+    assert blocker.args == [False, "登入失敗，請稍後再試", "unknown"]
 
 
 # --- Issue #11: 使用者信箱已滿 (MailboxFull) 處理 ---
@@ -902,10 +1087,7 @@ def _make_uptt_mail_call_side_effect(mail_idx_to_fail_on=None):
                 PyPtt.MailField.title: contant.PTT_MSG_TITLE,
                 PyPtt.MailField.author: "SenderUser (Nick)",
                 PyPtt.MailField.date: "Wed Apr  1 10:00:00 2026",
-                PyPtt.MailField.content: (
-                    f"Header\n{contant.PTT_MSG_DIVISION_LINE}\n"
-                    f"Hello\n{contant.PTT_MSG_DIVISION_LINE}\nFooter"
-                ),
+                PyPtt.MailField.content: _uptt_content("Hello"),
             }
         if api == 'del_mail':
             idx = (args or {}).get('index')
@@ -946,13 +1128,11 @@ def test_poll_mailbox_full_stops_polling_timer(worker, ptt_service_mock, qtbot):
     worker.polling_timer.stop.assert_called_once()
 
 
-def test_poll_mailbox_full_no_new_message_signal(worker, ptt_service_mock, db_mock, qtbot):
+def test_poll_mailbox_full_still_emits_saved_message(worker, ptt_service_mock, db_mock, qtbot):
     """
-    當 MailboxFull 在 del_mail 中斷輪詢迴圈時（訊息處理完畢後才拋出），
-    new_message_received 訊號不應被發射，
-    因為例外在 emit 區塊之前就中止了迴圈。
-
-    此測試記錄現有行為：緩衝在 mails_to_emit 中的訊息會因此遺失。
+    Issue #1 修復：即使 MailboxFull 在 del_mail 中斷輪詢迴圈，
+    已成功入庫的訊息通知仍應透過 finally flush 被 emit，避免資料遺失級 bug
+    （訊息已存進 DB，若不 emit 則未讀通知永久遺失）。
     """
     worker.is_first_polling = False
     ptt_service_mock.call.side_effect = _make_uptt_mail_call_side_effect(mail_idx_to_fail_on=1)
@@ -962,8 +1142,7 @@ def test_poll_mailbox_full_no_new_message_signal(worker, ptt_service_mock, db_mo
 
     worker._poll_new_mails()
 
-    # MailboxFull 在 emit 區塊前中止，不應發射任何訊號
-    assert signals_received == []
+    assert len(signals_received) == 1
 
 
 def test_poll_mailbox_full_does_not_emit_status_updated(worker, ptt_service_mock, qtbot):
@@ -1067,3 +1246,24 @@ def test_mailbox_full_state_inconsistency():
     # RequireLogin 也不觸發重連（非 ConnectionClosed），只呼叫一次
     # call_count = 2（del_mail 一次 + get_newest_index 一次）
     assert service.service.call.call_count == 2
+
+
+# ── 輪詢間隔設定即時套用 ─────────────────────────────────────────
+
+def test_apply_poll_intervals_updates_running_timers(worker, db_mock):
+    """設定頁儲存後，apply_poll_intervals 應立即改變執行中的信件／水球計時器間隔。"""
+    worker.start_polling()
+    assert worker.polling_timer.isActive()
+    db_mock.get_config.return_value = 20  # 使用者將間隔設為 20 秒
+    worker.apply_poll_intervals()
+    assert worker.polling_timer.interval() == 20000
+    assert worker._waterball_timer.interval() == 20000
+
+
+def test_query_apply_poll_intervals_updates_timer(query_worker, db_mock):
+    """apply_poll_intervals 應改變執行中的在線輪詢計時器間隔。"""
+    query_worker._start_online_polling()
+    assert query_worker._online_check_timer.isActive()
+    db_mock.get_config.return_value = 90
+    query_worker.apply_poll_intervals()
+    assert query_worker._online_check_timer.interval() == 90000
