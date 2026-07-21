@@ -14,15 +14,16 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import shiboken6
 import pytest
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 from PySide6.QtCore import Qt, QSize, QPointF, QEvent
 from PySide6.QtGui import QDropEvent
 from PySide6.QtCore import QMimeData
 from PySide6.QtWidgets import QListWidgetItem, QApplication
 
-from src.uPtt.ui.widgets import ContactListWidget, ContactItem
-from src.uPtt.ui.screens import MainWindow
-from src.uPtt.ptt import UPttService
+from uPtt.ui.widgets import ContactListWidget, ContactItem
+from uPtt.ui.screens import MainWindow
+from uPtt.ptt import UPttService
 
 
 def _flush_deferred_deletes():
@@ -88,11 +89,11 @@ def test_drop_event_deletes_replaced_widgets(qtbot):
     assert [lw.itemWidget(lw.item(i)).ptt_id for i in range(3)] == ["user1", "user2", "user0"]
 
 
-@patch('src.uPtt.ui.screens.QMessageBox')
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.QMessageBox')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_logout_deletes_contact_list_widgets(mock_qthread, mock_worker, mock_query_worker,
                                               mock_ver_worker, mock_msgbox, qtbot,
                                               ptt_service_mock, ptt_query_service_mock, db_mock):
@@ -122,3 +123,41 @@ def test_logout_deletes_contact_list_widgets(mock_qthread, mock_worker, mock_que
         assert window.contact_list.count() == 0
         for w in old_widgets:
             assert not shiboken6.isValid(w), "登出後 ContactItem widget 應已被銷毀"
+
+
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
+def test_apply_theme_twice_leaves_no_ghost_message_widgets(mock_qthread, mock_worker, mock_query_worker,
+                                                             mock_ver_worker, qtbot, ptt_service_mock,
+                                                             ptt_query_service_mock, db_mock):
+    """apply_theme() 對已經渲染出對話內容的視窗連續呼叫兩次時，refresh_chat_display()
+    若只用 deleteLater()（非同步）清除舊 bubble，在同一個事件迴圈迭代內立刻重建
+    就會讓舊 widget 疊在新 widget 上（畫面殘影、文字重複）。
+    用「訊息區子 widget 數量」驗證第二次套用主題後沒有殘留幽靈 widget。"""
+    db_mock.get_messages.return_value = [
+        {'id': 1, 'content': 'hello there', 'timestamp': datetime(2026, 7, 20, 9, 0, 0),
+         'is_me': 0, 'mail_type': 'uptt', 'subject': '', 'send_status': None},
+        {'id': 2, 'content': 'hi back', 'timestamp': datetime(2026, 7, 20, 9, 1, 0),
+         'is_me': 1, 'mail_type': 'uptt', 'subject': '', 'send_status': 'sent'},
+    ]
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        window.on_login_result(True, "Login Success")
+        window.add_or_select_contact("Alice")
+
+        count_after_first_render = len(window.messages_widget.children())
+        assert count_after_first_render > 0
+
+        # 刻意不呼叫 processEvents()：重現「使用中切換主題」時，deleteLater()
+        # 尚未有機會被事件迴圈處理就馬上重繪的情境。
+        window.apply_theme('bone')
+        count_after_second_apply = len(window.messages_widget.children())
+
+        assert count_after_second_apply == count_after_first_render, (
+            f"apply_theme() 連續呼叫兩次後，訊息區子 widget 數量從 "
+            f"{count_after_first_render} 增為 {count_after_second_apply}，"
+            f"代表舊 bubble 未即時脫離、殘留成疊圖幽靈 widget"
+        )

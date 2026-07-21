@@ -2,7 +2,7 @@ import pytest
 import os
 import sqlite3
 from datetime import datetime, timedelta
-from src.uPtt.db import DatabaseManager
+from uPtt.db import DatabaseManager
 
 @pytest.fixture
 def db_manager(tmp_path):

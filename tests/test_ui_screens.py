@@ -7,10 +7,11 @@ import os
 # Set offscreen platform for CI/CLI environments
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
-from src.uPtt.ui.screens import LoginWindow, MainWindow
-from src.uPtt.ptt import UPttService
-from src.uPtt.worker import PTTWorker, QueryWorker
-from src.uPtt.ui.widgets import ContactItem
+from uPtt.ui.screens import LoginWindow, MainWindow
+from uPtt.ui import styles
+from uPtt.ptt import UPttService
+from uPtt.worker import PTTWorker, QueryWorker
+from uPtt.ui.widgets import ContactItem, EmptyChatPlaceholder, EmptySidebarPlaceholder
 
 @pytest.fixture
 def ptt_service_mock():
@@ -66,16 +67,63 @@ def test_login_window_empty_input(qtbot):
     
     assert window.error_label.text() == "請輸入完整帳號密碼"
 
+def test_login_window_show_error_auth_reddens_password(qtbot):
+    """kind='auth' 應讓密碼框套上含 danger 色的樣式，且錯誤行帶 ✕ 前綴。"""
+    window = LoginWindow()
+    qtbot.addWidget(window)
+
+    window.show_error("帳號或密碼錯誤，請重試", "auth")
+
+    danger = styles.theme()["danger"]
+    assert danger in window.password_input.styleSheet()
+    assert window.error_label.text() == "✕ 帳號或密碼錯誤，請重試"
+    assert not window.error_label.isHidden()
+
+def test_login_window_show_error_network(qtbot):
+    """kind='network' 顯示帶提示圖示的錯誤行，密碼框不套紅框。"""
+    window = LoginWindow()
+    qtbot.addWidget(window)
+
+    window.show_error("無法連線至 PTT，請檢查網路", "network")
+
+    assert window.error_label.text() == "⚠ 無法連線至 PTT，請檢查網路"
+    assert window.password_input.styleSheet() == ""
+
+def test_login_window_show_error_unknown(qtbot):
+    """kind='unknown' 顯示一般 danger 錯誤行，無圖示前綴。"""
+    window = LoginWindow()
+    qtbot.addWidget(window)
+
+    window.show_error("登入失敗，請稍後再試", "unknown")
+
+    assert window.error_label.text() == "登入失敗，請稍後再試"
+    assert window.password_input.styleSheet() == ""
+
+def test_login_window_clear_error_on_retype(qtbot):
+    """使用者重新輸入時應清除紅框與錯誤行。"""
+    window = LoginWindow()
+    qtbot.addWidget(window)
+
+    window.show_error("帳號或密碼錯誤，請重試", "auth")
+    assert not window.error_label.isHidden()
+    assert window.password_input.styleSheet() != ""
+
+    window.password_input.setText("x")
+
+    assert window.error_label.isHidden()
+    assert window.error_label.text() == ""
+    assert window.password_input.styleSheet() == ""
+
 def test_login_window_version_label(qtbot):
     from uPtt import __version__
     window = LoginWindow()
     qtbot.addWidget(window)
     assert window.version_label.text() == f"v{__version__}"
 
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_main_window_init(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
@@ -83,10 +131,10 @@ def test_main_window_init(mock_qthread, mock_worker, mock_query_worker, mock_ver
         assert window.windowTitle() == "uPtt"
         assert window.central_stack.currentIndex() == 0
 
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_on_login_result_success(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
@@ -94,10 +142,10 @@ def test_on_login_result_success(mock_qthread, mock_worker, mock_query_worker, m
         window.on_login_result(True, "Login Success")
         assert window.central_stack.currentIndex() == 1
 
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_on_login_result_failure(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
@@ -105,10 +153,10 @@ def test_on_login_result_failure(mock_qthread, mock_worker, mock_query_worker, m
         window.on_login_result(False, "Failed")
         assert window.central_stack.currentIndex() == 0
 
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_first_time_login_shows_scan_screen(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
@@ -118,10 +166,10 @@ def test_first_time_login_shows_scan_screen(mock_qthread, mock_worker, mock_quer
         assert window.central_stack.currentIndex() == 2
 
 
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_scan_complete_transitions_to_chat(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
@@ -131,10 +179,10 @@ def test_scan_complete_transitions_to_chat(mock_qthread, mock_worker, mock_query
         assert window.central_stack.currentIndex() == 1
 
 
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_main_window_close_chat(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
@@ -143,10 +191,10 @@ def test_main_window_close_chat(mock_qthread, mock_worker, mock_query_worker, mo
         window.close_current_chat()
         assert window.contact_list.count() == 0
 
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_connection_lost_then_query_degraded_keeps_lost_tooltip(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     """主 session 斷線期間副 session 又降級，tooltip 應仍顯示連線中斷，不被蓋成訊息收發正常。"""
     with patch('os.path.exists', return_value=True):
@@ -155,11 +203,14 @@ def test_connection_lost_then_query_degraded_keeps_lost_tooltip(mock_qthread, mo
         window.on_connection_lost()
         window.on_query_session_degraded()
         assert window._status_dot.toolTip() == "連線中斷，正在重新連線..."
+        # 重連中必須用 warn token，且與 online 不同色，使用者才能靠顏色分辨狀態
+        assert styles.theme()['warn'] in window._status_dot.styleSheet()
+        assert styles.theme()['online'] not in window._status_dot.styleSheet()
 
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_main_restored_while_query_still_degraded(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     """主 session 恢復但副 session 仍降級，tooltip 應顯示降級提示，不被無條件清空。"""
     with patch('os.path.exists', return_value=True):
@@ -170,10 +221,10 @@ def test_main_restored_while_query_still_degraded(mock_qthread, mock_worker, moc
         window.on_connection_restored()
         assert window._status_dot.toolTip() == "使用者狀態暫時無法更新(訊息收發正常)"
 
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_query_restored_while_main_still_lost(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     """副 session 恢復但主 session 仍斷線，tooltip 應仍顯示連線中斷。"""
     with patch('os.path.exists', return_value=True):
@@ -184,10 +235,10 @@ def test_query_restored_while_main_still_lost(mock_qthread, mock_worker, mock_qu
         window.on_query_session_restored()
         assert window._status_dot.toolTip() == "連線中斷，正在重新連線..."
 
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_both_sessions_healthy_clears_tooltip(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     """主副 session 都恢復健康，tooltip 應清空且狀態點為綠色。"""
     with patch('os.path.exists', return_value=True):
@@ -198,13 +249,13 @@ def test_both_sessions_healthy_clears_tooltip(mock_qthread, mock_worker, mock_qu
         window.on_connection_restored()
         window.on_query_session_restored()
         assert window._status_dot.toolTip() == ""
-        assert "#56D364" in window._status_dot.styleSheet()
+        assert styles.theme()['online'] in window._status_dot.styleSheet()
 
-@patch('src.uPtt.ui.screens.QMessageBox')
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.QMessageBox')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_main_window_block_user(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, mock_msg, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
@@ -213,10 +264,10 @@ def test_main_window_block_user(mock_qthread, mock_worker, mock_query_worker, mo
         window.handle_contact_action("BadUser", "BLOCK")
         assert "baduser" in window.blocked_users
 
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_on_new_message_blocked(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
@@ -226,10 +277,10 @@ def test_on_new_message_blocked(mock_qthread, mock_worker, mock_query_worker, mo
         window.on_new_message(msg_data)
         assert "baduser" not in window.chat_histories
 
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_on_user_info_result(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
@@ -246,10 +297,10 @@ def test_on_user_info_result(mock_qthread, mock_worker, mock_query_worker, mock_
         assert widget.id_label.text() == "TestUser"
         assert "(CoolNick)" in widget.nickname_label.text()
 
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_load_sessions_from_db(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         db_mock.get_all_sessions.return_value = [{'id': 'u1', 'display_id': 'U1', 'nickname': 'N1', 'unread_count': 0}]
@@ -258,10 +309,10 @@ def test_load_sessions_from_db(mock_qthread, mock_worker, mock_query_worker, moc
         window.load_sessions_from_db()
         assert window.contact_list.count() == 1
 
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_handle_send(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
@@ -278,11 +329,11 @@ def test_handle_send(mock_qthread, mock_worker, mock_query_worker, mock_ver_work
             assert isinstance(args[3], int) and args[3] > 0  # msg_id from save_pending_message
         db_mock.save_pending_message.assert_called_once()
 
-@patch('src.uPtt.ui.screens.QMessageBox')
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.QMessageBox')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_handle_logout(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, mock_msg, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         mock_msg.question.return_value = mock_msg.Yes
@@ -292,10 +343,10 @@ def test_handle_logout(mock_qthread, mock_worker, mock_query_worker, mock_ver_wo
         assert window.central_stack.currentIndex() == 0
 
 @patch('PySide6.QtCore.QMetaObject.invokeMethod')
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_fully_quit(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, mock_invoke, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
@@ -305,10 +356,10 @@ def test_fully_quit(mock_qthread, mock_worker, mock_query_worker, mock_ver_worke
         mock_invoke.assert_called()
 
 @patch('PySide6.QtCore.QMetaObject.invokeMethod')
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_fully_quit_is_reentrant_safe(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, mock_invoke, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     # Regression: closeEvent can re-fire during QApplication.quit tear-down,
     # so fully_quit must short-circuit on re-entry (see PRs #15 / #17).
@@ -321,7 +372,7 @@ def test_fully_quit_is_reentrant_safe(mock_qthread, mock_worker, mock_query_work
         assert window._stop_all_threads.call_count == 1
 
 def test_render_svg_exists():
-    from src.uPtt.ui.screens import render_svg
+    from uPtt.ui.screens import render_svg
     with open("test_pixmap.svg", "w") as f:
         f.write('<svg width="10" height="10"><rect width="10" height="10" /></svg>')
     try:
@@ -331,10 +382,78 @@ def test_render_svg_exists():
         if os.path.exists("test_pixmap.svg"): os.remove("test_pixmap.svg")
 
 
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+def test_render_svg_theme_placeholder_coloring():
+    """render_svg 依 active theme 替換 `{token}` 佔位符：不同主題應產生不同、非全透明的著色結果。"""
+    from uPtt.ui.screens import render_svg, ASSETS_DIR
+
+    icon_path = os.path.join(ASSETS_DIR, "logo_icon.svg")
+    assert os.path.exists(icon_path)
+
+    original = styles.theme().get('id')
+    try:
+        styles.set_theme('graphite')
+        graphite_pixmap = render_svg(icon_path, 64, 64)
+        styles.set_theme('bone')
+        bone_pixmap = render_svg(icon_path, 64, 64)
+    finally:
+        styles.set_theme(original)
+
+    assert not graphite_pixmap.isNull()
+    assert not bone_pixmap.isNull()
+
+    graphite_img = graphite_pixmap.toImage()
+    bone_img = bone_pixmap.toImage()
+
+    # 不是全透明：至少存在一個 alpha > 0 的像素
+    assert any(
+        graphite_img.pixelColor(x, y).alpha() > 0
+        for x in range(graphite_img.width())
+        for y in range(graphite_img.height())
+    )
+
+    # 兩個主題的著色結果應不同（bytes 層級比對）
+    assert bytes(graphite_img.bits()) != bytes(bone_img.bits())
+
+
+def test_render_svg_all_themes_no_exception():
+    """三套主題各渲染一次兩個 SVG 圖示，皆不得丟例外。"""
+    from uPtt.ui.screens import render_svg, render_themed_icon, ASSETS_DIR
+
+    original = styles.theme().get('id')
+    try:
+        for name in styles.THEMES:
+            styles.set_theme(name)
+            for filename in ("logo_icon.svg", "logo_horizontal.svg"):
+                pixmap = render_svg(os.path.join(ASSETS_DIR, filename), 40, 40)
+                assert not pixmap.isNull()
+            icon = render_themed_icon("logo_icon.svg")
+            assert not icon.isNull()
+    finally:
+        styles.set_theme(original)
+
+
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
+def test_apply_theme_all_three_themes_no_exception(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
+    """MainWindow.apply_theme() 對三套主題各切換一次都不得丟例外，且視窗圖示會重新產生。"""
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        try:
+            for name in styles.THEMES:
+                window.apply_theme(name)
+                assert styles.theme()['id'] == name
+                assert not window.windowIcon().isNull()
+        finally:
+            styles.set_theme(styles.DEFAULT_THEME)
+
+
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_send_result_matches_correct_message_by_id(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     """on_send_result must locate the pending bubble by msg_id, even when results
     arrive out of order or the user switches chats first (Issue #13)."""
@@ -363,10 +482,10 @@ def test_send_result_matches_correct_message_by_id(mock_qthread, mock_worker, mo
         assert window.chat_histories['contacta'][-1]['send_status'] == 'sent'
 
 
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_send_result_two_pending_same_contact(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     """Two rapid sends to same contact — each result should match its own bubble by msg_id."""
     with patch('os.path.exists', return_value=True):
@@ -396,11 +515,11 @@ def test_send_result_two_pending_same_contact(mock_qthread, mock_worker, mock_qu
         assert msgs[1]['send_status'] == 'sent'
 
 
-@patch('src.uPtt.ui.screens.QMessageBox')
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.QMessageBox')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_send_result_updates_status_when_user_switched_chat(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, mock_msgbox, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     """Issue #13: status update must persist on the original chat even if the user
     switched away before the result arrived."""
@@ -426,10 +545,10 @@ def test_send_result_updates_status_when_user_switched_chat(mock_qthread, mock_w
         mock_msgbox.warning.assert_called_once()
 
 
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_history_loaded_from_db_carries_send_status(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     """Self-sent rows loaded from DB must carry their send_status so old messages
     show ✓/✗/⏳ instead of nothing (Issue #13 follow-up)."""
@@ -457,10 +576,10 @@ def test_history_loaded_from_db_carries_send_status(mock_qthread, mock_worker, m
         assert 'send_status' not in history[2]
 
 
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_history_default_send_status_when_db_missing_column(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     """Pre-migration rows have NULL send_status — UI should default to 'sent' so
     historical messages still show the ✓ marker."""
@@ -476,10 +595,10 @@ def test_history_default_send_status_when_db_missing_column(mock_qthread, mock_w
         assert window.chat_histories['old'][0]['send_status'] == 'sent'
 
 
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_handle_send_suppresses_duplicate(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     """save_pending_message returning None (UNIQUE conflict) must NOT enqueue or
     leave a stuck-pending bubble in the UI."""
@@ -499,10 +618,10 @@ def test_handle_send_suppresses_duplicate(mock_qthread, mock_worker, mock_query_
         assert window.chat_histories.get('dup', []) == []
 
 
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_login_reaps_dangling_pending(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     """on_login_result must call db.fail_dangling_pending so a crash mid-send
     can't leave permanent ⏳ bubbles after restart."""
@@ -514,11 +633,11 @@ def test_login_reaps_dangling_pending(mock_qthread, mock_worker, mock_query_work
         db_mock.fail_dangling_pending.assert_called_once_with("MyID")
 
 
-@patch('src.uPtt.ui.screens.QMessageBox')
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.QMessageBox')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_logout_reaps_dangling_pending(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, mock_msg, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     """Logout terminates the worker; any in-flight send leaves a pending row.
     handle_logout must sweep them so the next login (same or different account)
@@ -534,11 +653,11 @@ def test_logout_reaps_dangling_pending(mock_qthread, mock_worker, mock_query_wor
         db_mock.fail_dangling_pending.assert_called_once_with("MyID")
 
 
-@patch('src.uPtt.ui.screens.QMessageBox')
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.QMessageBox')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_logout_reaps_pending_even_if_stop_threads_raises(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, mock_msg, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     """The reap is in a finally block, so a raising _stop_all_threads must NOT
     skip cleanup. Locks in the contract that justifies the nested try/finally."""
@@ -553,10 +672,10 @@ def test_logout_reaps_pending_even_if_stop_threads_raises(mock_qthread, mock_wor
         db_mock.fail_dangling_pending.assert_called_once_with("MyID")
 
 
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_on_new_message_self_echo_marks_sent(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     """When PTT echoes our own outbound mail back via the polling path, the
     rendered bubble must still show ✓ — not blank — so the marker is consistent
@@ -582,10 +701,10 @@ def test_on_new_message_self_echo_marks_sent(mock_qthread, mock_worker, mock_que
         assert history[0]['send_status'] == 'sent'
 
 
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_handle_send_dup_preserves_reply_context(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     """If a send is suppressed due to UNIQUE conflict while a reply is staged,
     the reply preview must remain so the user doesn't silently lose context."""
@@ -610,14 +729,14 @@ def test_handle_send_dup_preserves_reply_context(mock_qthread, mock_worker, mock
         assert window.message_edit.toPlainText() == "my reply"
 
 
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_send_status_survives_chat_switch_round_trip(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, tmp_path):
     """Issue #13 end-to-end: real DatabaseManager. Send → switch chat → simulate
     worker result → switch back → bubble's send_status reflects the result."""
-    from src.uPtt.db import DatabaseManager
+    from uPtt.db import DatabaseManager
 
     db = DatabaseManager(str(tmp_path / "e2e.db"))
     db.upsert_account("MyID", "MyID")
@@ -642,7 +761,7 @@ def test_send_status_survives_chat_switch_round_trip(mock_qthread, mock_worker, 
         # Worker eventually reports failure — DB row updated, then signal fires.
         # QMessageBox.warning is modal and would hang the test, so stub it.
         db.update_message_status(msg_id, 'failed')
-        with patch('src.uPtt.ui.screens.QMessageBox'):
+        with patch('uPtt.ui.main_window.QMessageBox'):
             window.on_send_result(msg_id, False, "boom")
 
         # Switch back to A — chat_histories[A] is REBUILT from DB
@@ -655,10 +774,10 @@ def test_send_status_survives_chat_switch_round_trip(mock_qthread, mock_worker, 
         assert my_msgs[0]['msg_id'] == msg_id
 
 
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_duplicate_message_does_not_inflate_unread(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     """Fix #1: Duplicate messages should not increment unread count."""
     with patch('os.path.exists', return_value=True):
@@ -682,11 +801,11 @@ def test_duplicate_message_does_not_inflate_unread(mock_qthread, mock_worker, mo
         assert window.unread_counts.get('sendera', 0) == 1  # should NOT be 2
 
 
-@patch('src.uPtt.ui.screens.QMessageBox')
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.QMessageBox')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_draft_cleared_on_delete(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, mock_msg, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     """Fix #5: session_drafts should be cleared when a session is deleted."""
     with patch('os.path.exists', return_value=True):
@@ -701,10 +820,10 @@ def test_draft_cleared_on_delete(mock_qthread, mock_worker, mock_query_worker, m
         assert 'draftuser' not in window.session_drafts
 
 
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_draft_cleared_on_close(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     """Fix #5: session_drafts should be cleared when a session is closed."""
     with patch('os.path.exists', return_value=True):
@@ -725,10 +844,10 @@ def test_eventfilter_deadcode_removed():
     assert 'eventFilter' not in MainWindow.__dict__
 
 
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_message_edit_enter_sends(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     """Enter 觸發送出：window.send_requested 帶正確 receiver/text。"""
     with patch('os.path.exists', return_value=True):
@@ -746,10 +865,10 @@ def test_message_edit_enter_sends(mock_qthread, mock_worker, mock_query_worker, 
         assert window.message_edit.toPlainText() == ""
 
 
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_message_edit_shift_enter_newline(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     """Shift+Enter 不送出、插入換行。"""
     with patch('os.path.exists', return_value=True):
@@ -763,10 +882,10 @@ def test_message_edit_shift_enter_newline(mock_qthread, mock_worker, mock_query_
         assert "\n" in window.message_edit.toPlainText()
 
 
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_message_edit_blank_not_sent(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     """純換行/空白訊息 strip 後為空不送出。"""
     with patch('os.path.exists', return_value=True):
@@ -783,7 +902,7 @@ def test_message_edit_blank_not_sent(mock_qthread, mock_worker, mock_query_worke
 
 def test_clamp_interval():
     """輪詢間隔低於下限被夾到下限；非數值 fallback 下限。"""
-    from src.uPtt import config
+    from uPtt import config
     assert config.clamp_interval(1, 3) == 3
     assert config.clamp_interval(10, 3) == 10
     assert config.clamp_interval("abc", 30) == 30
@@ -792,7 +911,7 @@ def test_clamp_interval():
 
 def test_get_setting_interval_fallback_and_clamp():
     """查無設定 fallback 到 default；儲存值低於下限被夾到下限。"""
-    from src.uPtt import config
+    from uPtt import config
     db = MagicMock()
     db.get_config.return_value = None
     assert config.get_setting_interval(
@@ -804,9 +923,9 @@ def test_get_setting_interval_fallback_and_clamp():
 
 def test_settings_dialog_roundtrip(qtbot, tmp_path):
     """設定值 set 後 get 讀回一致；查無設定 fallback 到 config 預設。"""
-    from src.uPtt.ui.screens import SettingsDialog
-    from src.uPtt.db import DatabaseManager
-    from src.uPtt import config
+    from uPtt.ui.screens import SettingsDialog
+    from uPtt.db import DatabaseManager
+    from uPtt import config
     db = DatabaseManager(str(tmp_path / "settings.db"))
     dlg = SettingsDialog(db)
     qtbot.addWidget(dlg)
@@ -834,9 +953,9 @@ def test_settings_dialog_roundtrip(qtbot, tmp_path):
 
 def test_settings_dialog_clamps_below_floor(qtbot, tmp_path):
     """設定低於下限的間隔，儲存後被夾到下限。"""
-    from src.uPtt.ui.screens import SettingsDialog
-    from src.uPtt.db import DatabaseManager
-    from src.uPtt import config
+    from uPtt.ui.screens import SettingsDialog
+    from uPtt.db import DatabaseManager
+    from uPtt import config
     db = DatabaseManager(str(tmp_path / "s.db"))
     dlg = SettingsDialog(db)
     qtbot.addWidget(dlg)
@@ -846,15 +965,64 @@ def test_settings_dialog_clamps_below_floor(qtbot, tmp_path):
     assert db.get_config(config.SETTING_MAIL_INTERVAL) == config.MAIL_INTERVAL_MIN
 
 
+def test_settings_dialog_theme_card_selects_and_saves(qtbot, tmp_path):
+    """點選非目前使用中的主題卡應更新選中狀態，儲存後寫入正確 theme id。"""
+    from uPtt.ui.screens import SettingsDialog
+    from uPtt.db import DatabaseManager
+    from uPtt import config
+    from uPtt.ui import styles as ui_styles
+
+    db = DatabaseManager(str(tmp_path / "theme.db"))
+    dlg = SettingsDialog(db)
+    qtbot.addWidget(dlg)
+
+    theme_ids = list(ui_styles.THEMES.keys())
+    target = theme_ids[-1]
+    assert target != dlg._selected_theme  # 預設為 DEFAULT_THEME，非清單最後一個
+
+    qtbot.mouseClick(dlg._theme_cards[target], Qt.LeftButton)
+
+    assert dlg._selected_theme == target
+    assert dlg._theme_cards[target]._selected is True
+    assert all(not card._selected for key, card in dlg._theme_cards.items() if key != target)
+
+    dlg._save()
+    assert db.get_config(config.SETTING_THEME) == target
+
+
+def test_settings_dialog_toggle_switch_roundtrip(qtbot, tmp_path):
+    """ToggleSwitch 維持 QCheckBox 相容 API：isChecked 反映初始值，切換後存讀一致。"""
+    from uPtt.ui.screens import SettingsDialog
+    from uPtt.ui.widgets import ToggleSwitch
+    from uPtt.db import DatabaseManager
+    from uPtt import config
+
+    db = DatabaseManager(str(tmp_path / "toggle.db"))
+    dlg = SettingsDialog(db)
+    qtbot.addWidget(dlg)
+
+    assert isinstance(dlg.notify_checkbox, ToggleSwitch)
+    assert dlg.notify_checkbox.isChecked() is True  # 預設啟用
+
+    dlg.notify_checkbox.setChecked(False)
+    assert dlg.notify_checkbox.isChecked() is False
+    dlg._save()
+    assert db.get_config(config.SETTING_NOTIFY_ENABLED) is False
+
+    dlg2 = SettingsDialog(db)
+    qtbot.addWidget(dlg2)
+    assert dlg2.notify_checkbox.isChecked() is False
+
+
 # M-3：reply_bar_label（回覆列：對方 ID＋訊息預覽）與 progress_title（掃描信件主旨）
 # 皆為 PTT 來源的不受信任內容，須強制 PlainText 算繪，禁止 HTML 注入。
 HTML_PAYLOAD = '<img src=x onerror=alert(1)>'
 
 
-@patch('src.uPtt.ui.screens.VersionCheckWorker')
-@patch('src.uPtt.ui.screens.QueryWorker')
-@patch('src.uPtt.ui.screens.PTTWorker')
-@patch('src.uPtt.ui.screens.QThread')
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
 def test_reply_bar_label_html_not_rendered_as_richtext(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
@@ -867,7 +1035,7 @@ def test_reply_bar_label_html_not_rendered_as_richtext(mock_qthread, mock_worker
 
 
 def test_scan_setup_progress_title_html_not_rendered_as_richtext(qtbot):
-    from src.uPtt.ui.screens import ScanSetupScreen
+    from uPtt.ui.screens import ScanSetupScreen
     screen = ScanSetupScreen()
     qtbot.addWidget(screen)
 
@@ -875,3 +1043,137 @@ def test_scan_setup_progress_title_html_not_rendered_as_richtext(qtbot):
 
     assert screen.progress_title.textFormat() == Qt.TextFormat.PlainText
     assert screen.progress_title.text() == HTML_PAYLOAD
+
+
+def test_scan_setup_screen_stylesheet_parses_cleanly_in_every_theme(qtbot, capfd):
+    """refresh_theme() 組出的 QSS 若把「裸屬性宣告」與 QPushButton:hover{...} 選擇器
+    區塊接在同一次 setStyleSheet() 裡，是無效 QSS，Qt 會在 stderr 印
+    "Could not parse stylesheet" 且該規則整段失效（4 個掃描時長按鈕的 hover
+    顏色不會生效）。三個主題各建一次、強制 grab() 觸發樣式解析，驗證 stderr
+    乾淨。"""
+    from uPtt.ui.screens import ScanSetupScreen
+    from uPtt.ui import styles
+
+    original = styles.theme().get('id')
+    try:
+        for name in styles.THEMES:
+            styles.set_theme(name)
+            screen = ScanSetupScreen()
+            qtbot.addWidget(screen)
+            screen.refresh_theme()
+            screen.resize(400, 600)
+            screen.grab()  # 強制觸發樣式解析（setStyleSheet 本身是延遲解析的）
+    finally:
+        styles.set_theme(original)
+
+    _out, err = capfd.readouterr()
+    assert "Could not parse stylesheet" not in err, err
+
+
+def test_scan_setup_screen_progress_view_stylesheet_parses_cleanly_in_every_theme(qtbot, capfd):
+    """同上一個測試，但額外切到 show_progress() 狀態，確認 progress_bar/spinner
+    的 QSS（含 QProgressBar::chunk 子控制項）在三套主題下都能正確解析。"""
+    from uPtt.ui.screens import ScanSetupScreen
+    from uPtt.ui import styles
+
+    original = styles.theme().get('id')
+    try:
+        for name in styles.THEMES:
+            styles.set_theme(name)
+            screen = ScanSetupScreen()
+            qtbot.addWidget(screen)
+            screen.refresh_theme()
+            screen.show_progress()
+            screen.resize(400, 600)
+            screen.grab()
+            screen.reset()
+    finally:
+        styles.set_theme(original)
+
+    _out, err = capfd.readouterr()
+    assert "Could not parse stylesheet" not in err, err
+
+
+def test_scan_setup_screen_progress_bar_reflects_scan_progress(qtbot):
+    """scan_progress(50, 200, 'x') 應同步更新 QProgressBar 的 value/range 與兩端文字。"""
+    from uPtt.ui.screens import ScanSetupScreen
+    screen = ScanSetupScreen()
+    qtbot.addWidget(screen)
+
+    screen.show_progress()
+    screen.update_progress(50, 200, 'x')
+
+    assert screen.progress_bar.minimum() == 0
+    assert screen.progress_bar.maximum() == 200
+    assert screen.progress_bar.value() == 50
+    assert screen.progress_scanned_label.text() == "已整理 50/200 封"
+    assert screen.progress_percent_label.text() == "25%"
+
+
+def test_scan_setup_screen_reset_after_complete_clears_progress_and_spinner(qtbot):
+    """掃描完成後切換離開（reset）：進度條歸零、spinner 停止、恢復到選項畫面。"""
+    from uPtt.ui.screens import ScanSetupScreen
+    screen = ScanSetupScreen()
+    qtbot.addWidget(screen)
+
+    screen.show_progress()
+    screen.update_progress(200, 200, 'done')
+    assert screen.progress_bar.value() == 200
+
+    screen.reset()
+
+    assert screen.progress_widget.isHidden()
+    assert not screen.options_widget.isHidden()
+    assert screen.progress_bar.value() == 0
+    assert not screen.progress_spinner._timer.isActive()
+
+
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
+def test_refresh_chat_display_shows_empty_state_when_no_chat_selected(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
+    """未選任何對話時，中央訊息區要顯示含「選一個對話」字樣的空狀態，而非空白。"""
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        window.current_chat_id = None
+        window.refresh_chat_display()
+
+        placeholders = [
+            window.messages_layout.itemAt(i).widget()
+            for i in range(window.messages_layout.count())
+        ]
+        placeholders = [w for w in placeholders if isinstance(w, EmptyChatPlaceholder)]
+        assert len(placeholders) == 1
+        placeholder = placeholders[0]
+        assert not placeholder.isHidden()
+        assert "選一個對話" in placeholder.title_label.text()
+
+
+@patch('uPtt.ui.main_window.VersionCheckWorker')
+@patch('uPtt.ui.main_window.QueryWorker')
+@patch('uPtt.ui.main_window.PTTWorker')
+@patch('uPtt.ui.main_window.QThread')
+def test_sidebar_empty_state_toggles_with_contact_list(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
+    """聯絡人清單為空時顯示提示；有資料時提示消失，清單重新顯示。"""
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+
+        assert window.contact_list.count() == 0
+        assert not window.sidebar_empty_state.isHidden()
+        assert window.contact_list.isHidden()
+        assert "還沒有對話" in window.sidebar_empty_state.title_label.text()
+
+        window.add_or_select_contact("TestUser")
+
+        assert window.contact_list.count() == 1
+        assert window.sidebar_empty_state.isHidden()
+        assert not window.contact_list.isHidden()
+
+        window.close_current_chat()
+
+        assert window.contact_list.count() == 0
+        assert not window.sidebar_empty_state.isHidden()
+        assert window.contact_list.isHidden()

@@ -521,13 +521,8 @@ jobs:
             Write-Host "Smoke test passed (binary was still running after 10s)"
           }
 
-      - name: Download Inno Setup Chinese Traditional language file
-        shell: pwsh
-        run: |
-          $langDir = "C:\Program Files (x86)\Inno Setup 6\Languages"
-          $url = "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/ChineseTraditional.isl"
-          Invoke-WebRequest -Uri $url -OutFile "$langDir\ChineseTraditional.isl"
-
+      # ChineseTraditional.isl ships with Inno Setup as an official language since 6.5.0
+      # (runner has 6.7.1), so no download needed. The old Unofficial/ URL now 404s.
       - name: Build installer with Inno Setup
         shell: pwsh
         run: |

@@ -4,9 +4,9 @@ from unittest.mock import MagicMock, patch
 import PyPtt
 from datetime import datetime, timedelta
 
-from src.uPtt.worker import PTTWorker, QueryWorker
-from src.uPtt.ptt import UPttService
-from src.uPtt import contant, utils
+from uPtt.worker import PTTWorker, QueryWorker
+from uPtt.ptt import UPttService
+from uPtt import contant, utils
 from security_utils import TEST_PASSWORD_CANARY
 
 # uPtt 訊息只要標題命中且內文有成對分隔線即視為合法並自動刪除；
@@ -31,6 +31,7 @@ def patch_pyptt_i18n():
         'wrong_id_pw': '帳號或密碼錯誤',
         'login_too_often': '登入太頻繁',
         'require_login': '請先登入',
+        'connect_fail': '連線失敗',
     }
     with patch.multiple(PyPtt.i18n, create=True, **attributes):
         yield
@@ -94,7 +95,7 @@ def test_do_login_success(qtbot, worker, ptt_service_mock, db_mock):
     with qtbot.waitSignal(worker.login_result) as blocker:
         worker.do_login("testuser", "testpass")
 
-    assert blocker.args == [True, "登入成功"]
+    assert blocker.args == [True, "登入成功", ""]
     ptt_service_mock.login.assert_called_once_with("testuser", "testpass")
     db_mock.upsert_account.assert_called_once()
     assert worker.polling_timer is not None
@@ -115,7 +116,7 @@ def test_do_login_first_time_no_polling(qtbot, ptt_service_mock, db_mock):
     with qtbot.waitSignal(w.login_result) as blocker:
         w.do_login("newuser", "newpass")
 
-    assert blocker.args == [True, "登入成功"]
+    assert blocker.args == [True, "登入成功", ""]
     assert len(first_time_received) == 1
     assert w.polling_timer is None
 
@@ -156,20 +157,20 @@ def test_do_initial_scan_emits_progress(qtbot, ptt_service_mock, db_mock):
 
 def test_do_login_failure(qtbot, worker, ptt_service_mock):
     ptt_service_mock.login.return_value = False
-    
+
     with qtbot.waitSignal(worker.login_result) as blocker:
         worker.do_login("wronguser", "wrongpass")
-    
-    assert blocker.args == [False, "登入失敗"]
+
+    assert blocker.args == [False, "登入失敗", "unknown"]
 
 def test_do_login_exception(qtbot, worker, ptt_service_mock):
     ptt_service_mock.login.side_effect = Exception("Fatal Error")
-    
+
     with qtbot.waitSignal(worker.login_result) as blocker:
         worker.do_login("user", "pass")
-    
+
     # 登入失敗時應回傳固定的使用者友善訊息，而非原始 exception 內容
-    assert blocker.args == [False, "連線失敗，請檢查網路連線"]
+    assert blocker.args == [False, "登入失敗，請稍後再試", "unknown"]
 
 def test_do_login_exception_redacts_password_from_log(qtbot, worker, ptt_service_mock, caplog):
     """威脅模型：PyPtt 例外的 str() 意外帶出呼叫參數（含明文密碼），
@@ -180,7 +181,7 @@ def test_do_login_exception_redacts_password_from_log(qtbot, worker, ptt_service
     with qtbot.waitSignal(worker.login_result) as blocker:
         worker.do_login("user", TEST_PASSWORD_CANARY)
 
-    assert blocker.args == [False, "連線失敗，請檢查網路連線"]
+    assert blocker.args == [False, "登入失敗，請稍後再試", "unknown"]
     assert TEST_PASSWORD_CANARY not in caplog.text
 
 
@@ -949,8 +950,8 @@ def test_query_worker_stop_closes_session(query_worker, ptt_service_mock):
 
 def test_ptt_service_kick_on_reconnect_flag():
     """UPttService 預設允許重連 kick;副 session 應能關閉此行為。"""
-    from src.uPtt.ptt import UPttService
-    with patch('src.uPtt.ptt.PyPtt.Service') as mock_svc:
+    from uPtt.ptt import UPttService
+    with patch('uPtt.ptt.PyPtt.Service') as mock_svc:
         main = UPttService()
         assert main.kick_on_reconnect is True
 
@@ -1021,23 +1022,34 @@ def test_query_worker_replays_after_login(qtbot, query_worker, ptt_service_mock,
 
 
 def test_do_login_wrong_password(qtbot, worker, ptt_service_mock):
-    """帳號密碼錯誤應回傳固定訊息。"""
+    """帳號密碼錯誤應回傳固定訊息，kind='auth'。"""
     ptt_service_mock.login.side_effect = PyPtt.WrongIDorPassword()
 
     with qtbot.waitSignal(worker.login_result) as blocker:
         worker.do_login("user", "wrong")
 
-    assert blocker.args == [False, "帳號或密碼錯誤"]
+    assert blocker.args == [False, "帳號或密碼錯誤，請重試", "auth"]
+
+
+@pytest.mark.parametrize("exc_factory", [lambda: PyPtt.ConnectError(None), PyPtt.ConnectionClosed])
+def test_do_login_network_error(qtbot, worker, ptt_service_mock, exc_factory):
+    """連線失敗/中斷應回傳網路類訊息，kind='network'。"""
+    ptt_service_mock.login.side_effect = exc_factory()
+
+    with qtbot.waitSignal(worker.login_result) as blocker:
+        worker.do_login("user", "pass")
+
+    assert blocker.args == [False, "無法連線至 PTT，請檢查網路", "network"]
 
 
 def test_do_login_too_often(qtbot, worker, ptt_service_mock):
-    """登入太頻繁應回傳固定訊息。"""
+    """PyPtt 2.1.4 從不實際 raise LoginTooOften，等同其他未分類例外，kind='unknown'。"""
     ptt_service_mock.login.side_effect = PyPtt.LoginTooOften()
 
     with qtbot.waitSignal(worker.login_result) as blocker:
         worker.do_login("user", "pass")
 
-    assert blocker.args == [False, "登入太頻繁，請稍後再試"]
+    assert blocker.args == [False, "登入失敗，請稍後再試", "unknown"]
 
 
 # --- Issue #11: 使用者信箱已滿 (MailboxFull) 處理 ---

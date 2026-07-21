@@ -21,7 +21,7 @@ class PTTWorker(QObject):
     PTT 背景工作者，負責所有非同步的 PTT I/O 操作。
     """
     # 訊號定義
-    login_result = Signal(bool, str)  # (成功與否, 訊息)
+    login_result = Signal(bool, str, str)  # (成功與否, 訊息, kind: ''|'auth'|'network'|'unknown')
     new_message_received = Signal(dict)  # {'sender': str, 'text': str, 'time': str, 'full_author': str}
     send_result = Signal(int, bool, str)  # (DB row id, 成功與否, 錯誤訊息)；msg_id=-1 代表無對應 DB row
     status_updated = Signal(str)
@@ -89,20 +89,20 @@ class PTTWorker(QObject):
                 is_first_time = self.last_poll_time is None
                 if is_first_time:
                     self.first_time_detected.emit()
-                self.login_result.emit(True, "登入成功")
+                self.login_result.emit(True, "登入成功", "")
                 if not is_first_time:
                     self.start_polling()
             else:
-                self.login_result.emit(False, "登入失敗")
+                self.login_result.emit(False, "登入失敗", "unknown")
         except PyPtt.WrongIDorPassword:
-            self.login_result.emit(False, "帳號或密碼錯誤")
-        except PyPtt.LoginTooOften:
-            self.login_result.emit(False, "登入太頻繁，請稍後再試")
+            self.login_result.emit(False, "帳號或密碼錯誤，請重試", "auth")
+        except (PyPtt.ConnectError, PyPtt.ConnectionClosed):
+            self.login_result.emit(False, "無法連線至 PTT，請檢查網路", "network")
         except Exception as e:
             # 防禦性遮罩：此例外來自 self.ptt.login()，其呼叫鏈把明文密碼傳給 PyPtt，
             # 若例外的 str() 意外帶出該引數，避免明文密碼落地到 uptt_error.log。
             logger.error(f"登入失敗: {utils.redact_secret(str(e), password)}")
-            self.login_result.emit(False, "連線失敗，請檢查網路連線")
+            self.login_result.emit(False, "登入失敗，請稍後再試", "unknown")
 
     def start_polling(self):
         """開始背景輪詢新信件"""
