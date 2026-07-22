@@ -142,7 +142,7 @@ class LoginWindow(QWidget):
         bottom_bar.setStyleSheet(f"background: transparent; border-top: 1px solid {c['border']};")
         bottom_layout = QHBoxLayout(bottom_bar)
         bottom_layout.setContentsMargins(26, 12, 26, 14)
-        footer = QLabel("本地加密 · SQLite · GPL-3.0")
+        footer = QLabel("SQLite · GPL-3.0")
         footer.setStyleSheet(f"color: {c['text_faint']}; {mono} font-size: 11px; background: transparent;")
 
         # 更新提示 (初始隱藏，可點擊開啟下載頁)
@@ -1070,7 +1070,7 @@ class MainWindow(QMainWindow):
         self._status_left.setStyleSheet(
             f"color: {GRAPHITE['text_muted']}; font-size: 11px; background: transparent;"
         )
-        self._status_right = QLabel("uPtt 格式 · 已加密 · 將自動清理 PTT 信箱")
+        self._status_right = QLabel(f"uPtt v{__version__}")
         self._status_right.setStyleSheet(
             f"color: {GRAPHITE['text_faint']}; font-size: 11px; background: transparent;"
         )
@@ -1513,6 +1513,9 @@ class MainWindow(QMainWindow):
     def _ensure_contact_in_list(self, ptt_id: str, nickname: str = "") -> bool:
         """確保聯絡人已在側邊欄清單中，但不選取。回傳 True 表示新增。"""
         ptt_id_lower = ptt_id.lower()
+        # 禁止與自己聊天 (self-chat forbidden)
+        if ptt_id_lower == (self.ptt_service.ptt_id or "").lower():
+            return False
         for i in range(self.contact_list.count()):
             widget = self.contact_list.itemWidget(self.contact_list.item(i))
             if widget and widget.ptt_id == ptt_id_lower:
@@ -1531,6 +1534,11 @@ class MainWindow(QMainWindow):
 
     def add_or_select_contact(self, ptt_id, nickname=""):
         ptt_id_lower = ptt_id.lower()
+
+        # 禁止與自己聊天 (self-chat forbidden)
+        if ptt_id_lower == (self.ptt_service.ptt_id or "").lower():
+            logger.info(f"略過與自己聊天：{ptt_id}")
+            return
 
         # 檢查是否已在清單中 (不分大小寫邏輯比較)
         found_item = None
@@ -1824,6 +1832,9 @@ class MainWindow(QMainWindow):
             if w and w.ptt_id == receiver_id:
                 w.set_last_msg_time(now_str)
                 break
+
+        # 送出後將此聯絡人拉到非釘選區頂端(次高)，與收訊息路徑一致
+        self._move_contact_to_top(receiver_id)
 
         # 2. 將發送請求放入 thread-safe 佇列（繞過 Qt 事件佇列，避免被阻塞操作卡住）
         #    同時 emit signal 作為後備喚醒（worker 閒置時由 slot 觸發 drain）

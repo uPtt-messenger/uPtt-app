@@ -214,7 +214,7 @@ class DatabaseManager:
             with self._get_connection() as conn:
                 rows = conn.execute("""
                     SELECT * FROM sessions
-                    WHERE account_id = ? AND is_visible = 1
+                    WHERE account_id = ? AND is_visible = 1 AND id != account_id
                     ORDER BY is_pinned DESC,
                              CASE WHEN is_pinned=1 THEN pin_order ELSE 9999999 END ASC,
                              last_message_time DESC,
