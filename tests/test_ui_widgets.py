@@ -2,13 +2,17 @@ import pytest
 from PySide6.QtCore import Qt
 from src.uPtt.ui.widgets import ChatBubble, ContactItem
 from src.uPtt.ui.styles import get_bubble_style
+from src.uPtt.ui.theme import GRAPHITE
 
 def test_get_bubble_style():
+    # 自己的訊息泡泡：實心 accent 綠底 + 深色文字，靠右，需與對方泡泡視覺可區分。
     style_me = get_bubble_style(True)
-    assert "background-color: #1C3A2E;" in style_me
+    assert f"background-color: {GRAPHITE['accent']};" in style_me
+    assert f"color: {GRAPHITE['bg']};" in style_me
 
     style_other = get_bubble_style(False)
-    assert "background-color: #21262D;" in style_other
+    assert f"background-color: {GRAPHITE['surface_2']};" in style_other
+    assert style_me != style_other
 
 def test_chat_bubble_me(qtbot):
     bubble = ChatBubble("Hello Me", "10:00", is_me=True)
