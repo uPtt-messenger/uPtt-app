@@ -27,6 +27,12 @@ logger = logging.getLogger("uPtt.ui.screens")
 # config 目前無「訊息字數上限」常數（MAX_MESSAGES 是記憶體訊息筆數），沿用設計稿的顯示上限
 INPUT_CHAR_LIMIT = 2000
 
+# 聯絡人清單 item 的一般 sizeHint 高度，需與 widgets.py 建立 item 時的 QSize(0, 70) 一致
+CONTACT_ROW_HEIGHT = 70
+# 釘選區「最後一項」在此基礎上加高的量，讓中段「最近·RECENT」標頭有專屬空間，
+# 落於此加高範圍內，絕不覆蓋任何聯絡人（釘選或未釘選）的頭像/ID
+MID_HEADER_ROW_GAP = 22
+
 
 def _format_contact_time(time_str: str) -> str:
     """將 DATETIME 字串格式化為聯絡人列表用的簡短時間（今天顯示 HH:MM，其他顯示 M/D）。"""
@@ -855,6 +861,8 @@ class MainWindow(QMainWindow):
         self._group_header_mid.setStyleSheet(_grp_style)
         self._group_header_mid.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self._group_header_mid.hide()
+        # 追蹤目前被加高（為中段標頭預留空間）的釘選區最後一項之 row index，None 表示無
+        self._mid_header_gap_row = None
         self.contact_list.model().rowsInserted.connect(self._on_contact_rows_changed)
         self.contact_list.model().rowsRemoved.connect(self._on_contact_rows_changed)
         self.contact_list.verticalScrollBar().valueChanged.connect(
@@ -938,13 +946,11 @@ class MainWindow(QMainWindow):
         self.message_edit.setPlaceholderText("輸入訊息並按下 Enter 發送...")
         self.message_edit.returnPressed.connect(self.handle_send)
 
-        input_vbox.addWidget(self.reply_bar)
-        input_vbox.addWidget(self.message_edit)
+        # 輸入列：輸入框（伸展佔滿）+ 字數計數 + 送出鈕同列排列，精簡版面高度
+        input_row = QHBoxLayout()
+        input_row.setContentsMargins(0, 6, 0, 0)
+        input_row.setSpacing(8)
 
-        # 底部控制列：字數計數 + 送出鈕（沿用既有送出流程，保留 Enter 送出）
-        controls_row = QHBoxLayout()
-        controls_row.setContentsMargins(2, 6, 2, 0)
-        controls_row.setSpacing(8)
         self.char_count_label = QLabel(f"0 / {INPUT_CHAR_LIMIT}")
         self.char_count_label.setStyleSheet(
             f"color: {GRAPHITE['text_faint']}; font-size: 11px; background: transparent;"
@@ -966,10 +972,13 @@ class MainWindow(QMainWindow):
         """)
         self.send_button.clicked.connect(self.handle_send)
         self.message_edit.textChanged.connect(self._update_char_count)
-        controls_row.addStretch()
-        controls_row.addWidget(self.char_count_label)
-        controls_row.addWidget(self.send_button)
-        input_vbox.addLayout(controls_row)
+
+        input_row.addWidget(self.message_edit, 1, Qt.AlignVCenter)
+        input_row.addWidget(self.char_count_label, 0, Qt.AlignVCenter)
+        input_row.addWidget(self.send_button, 0, Qt.AlignVCenter)
+
+        input_vbox.addWidget(self.reply_bar)
+        input_vbox.addLayout(input_row)
 
         # 聊天標題列 (選擇聯絡人後顯示)
         self.chat_header = QWidget()
@@ -1450,6 +1459,7 @@ class MainWindow(QMainWindow):
         if total == 0:
             self._group_header_top.hide()
             self._group_header_mid.hide()
+            self._set_mid_header_gap_row(None)
             return
         pinned_count = lw._pinned_count()
         vw = lw.viewport().width()
@@ -1458,16 +1468,43 @@ class MainWindow(QMainWindow):
         self._group_header_top.setGeometry(14, 4, max(0, vw - 20), 16)
         self._group_header_top.show()
         self._group_header_top.raise_()
-        # 中段標頭：僅在同時有釘選與未釘選項時，於分界處顯示「最近」
+        # 中段標頭：僅在同時有釘選與未釘選項時，於分界處顯示「最近」。
+        # 做法：把釘選區「最後一項」的 sizeHint 加高 MID_HEADER_ROW_GAP，讓標頭落在
+        # 該項下方新增的專屬空間內（該項本身內容仍是原本 62px 高、置頂對齊，不受影響），
+        # 因此絕不會覆蓋任何聯絡人（釘選或未釘選）的頭像/ID。
         if pinned_count > 0 and total > pinned_count:
-            rect = lw.visualItemRect(lw.item(pinned_count))
-            y = lw.viewport().y() + rect.top() - 1
+            gap_row = pinned_count - 1
+            self._set_mid_header_gap_row(gap_row)
+            rect = lw.visualItemRect(lw.item(gap_row))
+            y = lw.viewport().y() + rect.top() + CONTACT_ROW_HEIGHT + 3
             self._group_header_mid.setText("最近 · RECENT")
             self._group_header_mid.setGeometry(14, y, max(0, vw - 20), 16)
             self._group_header_mid.show()
             self._group_header_mid.raise_()
         else:
+            self._set_mid_header_gap_row(None)
             self._group_header_mid.hide()
+
+    def _set_mid_header_gap_row(self, row: Optional[int]):
+        """調整釘選區最後一項的 sizeHint，為中段標頭預留/收回空間。
+
+        只動「最後一個釘選項目」這一列的高度（加高 MID_HEADER_ROW_GAP），
+        絕不觸碰任何未釘選項目，因此不會影響 _pinned_count() 判斷或
+        dropEvent 的索引/拖放釘選邏輯。
+        """
+        if row == self._mid_header_gap_row:
+            return
+        lw = self.contact_list
+        old_row = self._mid_header_gap_row
+        if old_row is not None and 0 <= old_row < lw.count():
+            old_item = lw.item(old_row)
+            if old_item is not None:
+                old_item.setSizeHint(QSize(0, CONTACT_ROW_HEIGHT))
+        if row is not None and 0 <= row < lw.count():
+            new_item = lw.item(row)
+            if new_item is not None:
+                new_item.setSizeHint(QSize(0, CONTACT_ROW_HEIGHT + MID_HEADER_ROW_GAP))
+        self._mid_header_gap_row = row
 
     def _reposition_search_hint(self):
         """將 ⌘K 徽章對齊搜尋框右緣。"""
@@ -2084,6 +2121,11 @@ class MainWindow(QMainWindow):
             self.db.set_pin_session(current_acc, ptt_id_lower, True, pin_order)
             self._move_to_pinned_area(ptt_id_lower)
             logger.info(f"釘選: {ptt_id_lower} (order={pin_order})")
+
+        # _move_to_pinned_area/_move_pinned_to_unpinned_area 若項目本就在邊界位置，
+        # 只會翻轉 is_pinned 旗標而不觸發 rowsInserted/Removed，標頭不會自動重整，
+        # 故顯式呼叫一次確保釘選/取消釘選後標頭文字與中段留白位置都正確。
+        self._refresh_group_headers()
 
     def _move_to_pinned_area(self, ptt_id_lower: str):
         """將項目移至釘選區末尾並標記為釘選。"""
