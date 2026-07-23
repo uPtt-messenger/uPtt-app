@@ -14,9 +14,11 @@ from PySide6.QtCore import Qt, Signal, Slot, QThread, QSize, QEvent, QUrl, QTime
 from PySide6.QtGui import QIcon, QAction, QShortcut, QKeySequence, QPixmap, QPainter, QFontMetrics, QDesktopServices, QIntValidator
 from PySide6.QtSvg import QSvgRenderer
 
-from uPtt import __version__, contant
-from uPtt.ui.styles import MAIN_STYLE
-from uPtt.ui.theme import GRAPHITE, FONT_STACK
+from uPtt import __version__, config, contant
+from uPtt.ui import theme
+from uPtt.ui.settings import SettingsWindow
+from uPtt.ui.styles import build_main_style
+from uPtt.ui.theme import FONT_STACK
 from uPtt.ui.widgets import ChatBubble, WaterballBubble, MailCard, ContactItem, ContactListWidget
 from uPtt.utils import encode_reply, decode_reply, VersionCheckWorker
 from uPtt.worker import PTTWorker, QueryWorker
@@ -94,23 +96,12 @@ class LoginWindow(QWidget):
         self.setWindowTitle("uPtt — 連線 ptt.cc")
         self.setMinimumSize(720, 440)
         self._settings = QSettings("uPtt", "uPtt")
+        self._mono = f"font-family: {FONT_STACK};"
         self.init_ui()
         self._load_remembered()
+        theme.register_restyle(self, lambda w: w._apply_theme())
 
     def init_ui(self):
-        c = GRAPHITE
-        self.setStyleSheet(f"QWidget#login-window {{ background-color: {c['bg']}; }}")
-
-        # 共用 inline 樣式（同時服務 App 內與獨立截圖，不依賴 MAIN_STYLE 串接）
-        mono = f"font-family: {FONT_STACK};"
-        label_style = f"color: {c['text_muted']}; {mono} font-size: 11px; letter-spacing: 1px; background: transparent;"
-        input_style = (
-            f"QLineEdit {{ background-color: {c['bg']}; border: 1px solid {c['border']};"
-            f" border-radius: 7px; padding: 0 12px; color: {c['text']}; {mono} font-size: 14px; }}"
-            f"QLineEdit:focus {{ border: 1px solid {c['accent']}; }}"
-        )
-        note_style = f"color: {c['text_faint']}; {mono} font-size: 11px; background: transparent;"
-
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
@@ -120,12 +111,10 @@ class LoginWindow(QWidget):
         top_bar.setStyleSheet("background: transparent;")
         top_layout = QHBoxLayout(top_bar)
         top_layout.setContentsMargins(26, 18, 26, 0)
-        term_label = QLabel("$ uptt --connect ptt.cc")
-        term_label.setStyleSheet(f"color: {c['text_faint']}; {mono} font-size: 12px; background: transparent;")
+        self.term_label = QLabel("$ uptt --connect ptt.cc")
         self.version_label = QLabel(f"v{__version__}")
         self.version_label.setObjectName("version-label")
-        self.version_label.setStyleSheet(f"color: {c['text_faint']}; {mono} font-size: 12px; background: transparent;")
-        top_layout.addWidget(term_label)
+        top_layout.addWidget(self.term_label)
         top_layout.addStretch()
         top_layout.addWidget(self.version_label)
 
@@ -136,46 +125,40 @@ class LoginWindow(QWidget):
         content_layout.setContentsMargins(26, 8, 26, 8)
         content_layout.setSpacing(30)
 
-        content_layout.addWidget(self._build_brand(c, mono), 1)
+        content_layout.addWidget(self._build_brand(), 1)
         right_col = QVBoxLayout()
         right_col.addStretch()
-        right_col.addWidget(self._build_card(c, mono, label_style, input_style, note_style))
+        right_col.addWidget(self._build_card())
         right_col.addStretch()
         content_layout.addLayout(right_col, 0)
 
         # ── 底部狀態列 ──
-        bottom_bar = QWidget()
-        bottom_bar.setStyleSheet(f"background: transparent; border-top: 1px solid {c['border']};")
-        bottom_layout = QHBoxLayout(bottom_bar)
+        self.bottom_bar = QWidget()
+        bottom_layout = QHBoxLayout(self.bottom_bar)
         bottom_layout.setContentsMargins(26, 12, 26, 14)
-        footer = QLabel("SQLite · GPL-3.0")
-        footer.setStyleSheet(f"color: {c['text_faint']}; {mono} font-size: 11px; background: transparent;")
+        self.footer_label = QLabel("SQLite · GPL-3.0")
 
         # 更新提示 (初始隱藏，可點擊開啟下載頁)
         self.update_label = QLabel()
-        self.update_label.setStyleSheet(
-            f"color: {c['accent']}; {mono} font-size: 12px;"
-            " text-decoration: underline; background: transparent;"
-        )
         self.update_label.setCursor(Qt.PointingHandCursor)
         self.update_label.hide()
         self.update_label.mousePressEvent = lambda _: QDesktopServices.openUrl(
             QUrl(contant.DOWNLOAD_URL)
         )
-        bottom_layout.addWidget(footer)
+        bottom_layout.addWidget(self.footer_label)
         bottom_layout.addStretch()
         bottom_layout.addWidget(self.update_label)
 
         root.addWidget(top_bar)
         root.addWidget(content, 1)
-        root.addWidget(bottom_bar)
+        root.addWidget(self.bottom_bar)
 
         # 綁定 Enter 鍵
         self.username_input.returnPressed.connect(self.password_input.setFocus)
         self.password_input.returnPressed.connect(self.handle_login)
         self.username_input.setFocus()
 
-    def _build_brand(self, c, mono) -> QWidget:
+    def _build_brand(self) -> QWidget:
         """左側品牌牆：終端字標 uPtt▪、標語、連線狀態。"""
         brand = QWidget()
         brand.setStyleSheet("background: transparent;")
@@ -193,31 +176,22 @@ class LoginWindow(QWidget):
         self.logo_label = QLabel()
         self.logo_label.setObjectName("logo-label")
         self.logo_label.setTextFormat(Qt.RichText)
-        self.logo_label.setText(
-            f'<span style="color:{c["text_muted"]};">u</span>'
-            f'<span style="color:{c["text"]};">Ptt</span>'
-        )
-        self.logo_label.setStyleSheet(f"{mono} font-size: 66px; font-weight: 700; background: transparent;")
         # 終端游標：直立長方 caret（設計稿 38×66 @84px 字標，按 66px 等比 → 30×52），直角、深綠
-        accent_square = QLabel()
-        accent_square.setFixedSize(30, 52)
-        _on = f"background-color: {c['accent_hover']}; border-radius: 0px; margin-bottom: 10px;"
-        _off = "background-color: transparent; border-radius: 0px; margin-bottom: 10px;"
-        accent_square.setStyleSheet(_on)
+        self.accent_square = QLabel()
+        self.accent_square.setFixedSize(30, 52)
         # 閃爍：550ms 硬切換（設計稿 1.1s steps(2)），固定尺寸不影響排版
         self._cursor_timer = QTimer(self)
         self._cursor_on = True
         def _blink():
             self._cursor_on = not self._cursor_on
-            accent_square.setStyleSheet(_on if self._cursor_on else _off)
+            self._apply_cursor_style()
         self._cursor_timer.timeout.connect(_blink)
         self._cursor_timer.start(550)
         wm_layout.addWidget(self.logo_label)
-        wm_layout.addWidget(accent_square, 0, Qt.AlignBottom)
+        wm_layout.addWidget(self.accent_square, 0, Qt.AlignBottom)
         wm_layout.addStretch()
 
-        tagline = QLabel("讓 PTT 的溫柔，\n在現代桌面重新綻放。")
-        tagline.setStyleSheet(f"color: {c['text_muted']}; {mono} font-size: 15px; line-height: 1.6; background: transparent;")
+        self.tagline_label = QLabel("讓 PTT 的溫柔，\n在現代桌面重新綻放。")
 
         # 連線狀態（登入前為中性「尚未連線」，不謊稱已連線）
         status_row = QWidget()
@@ -226,96 +200,66 @@ class LoginWindow(QWidget):
         status_layout.setContentsMargins(0, 0, 0, 0)
         status_layout.setSpacing(6)
         self.status_dot = QLabel("●")
-        self.status_dot.setStyleSheet(f"color: {c['text_faint']}; font-size: 9px; background: transparent;")
         self.status_hint = QLabel("尚未連線 · 準備連線至 ptt.cc")
-        self.status_hint.setStyleSheet(f"color: {c['text_faint']}; {mono} font-size: 12px; background: transparent;")
         status_layout.addWidget(self.status_dot)
         status_layout.addWidget(self.status_hint)
         status_layout.addStretch()
 
         layout.addWidget(wordmark_row)
         layout.addSpacing(22)
-        layout.addWidget(tagline)
+        layout.addWidget(self.tagline_label)
         layout.addSpacing(26)
         layout.addWidget(status_row)
         layout.addStretch()
         return brand
 
-    def _build_card(self, c, mono, label_style, input_style, note_style) -> QFrame:
+    def _build_card(self) -> QFrame:
         """右側登入卡：標題 / 帳號 / 密碼 / 記住帳號 / 連線鈕 / 註記。"""
         card = QFrame()
         card.setObjectName("login-card")
         card.setFixedWidth(320)
-        card.setStyleSheet(
-            f"QFrame#login-card {{ background-color: {c['surface']};"
-            f" border: 1px solid {c['border']}; border-radius: 10px; }}"
-        )
+        self.login_card = card
         layout = QVBoxLayout(card)
         layout.setContentsMargins(24, 22, 24, 20)
         layout.setSpacing(0)
 
-        title = QLabel("登入 · LOGIN")
-        title.setStyleSheet(
-            f"color: {c['text']}; {mono} font-size: 15px; font-weight: 700;"
-            " letter-spacing: 1px; background: transparent;"
-        )
+        self.card_title = QLabel("登入 · LOGIN")
 
-        id_label = QLabel("PTT 帳號")
-        id_label.setStyleSheet(label_style)
+        self.id_label = QLabel("PTT 帳號")
         self.username_input = QLineEdit()
         self.username_input.setPlaceholderText("輸入您的 PTT ID")
         self.username_input.setFixedHeight(40)
-        self.username_input.setStyleSheet(input_style)
 
-        pw_label = QLabel("密碼")
-        pw_label.setStyleSheet(label_style)
+        self.pw_label = QLabel("密碼")
         self.password_input = QLineEdit()
         self.password_input.setPlaceholderText("••••••••")
         self.password_input.setEchoMode(QLineEdit.Password)
         self.password_input.setFixedHeight(40)
-        self.password_input.setStyleSheet(input_style)
 
         self.remember_check = QCheckBox("記住帳號")
         self.remember_check.setCursor(Qt.PointingHandCursor)
-        self.remember_check.setStyleSheet(
-            f"QCheckBox {{ color: {c['text_muted']}; {mono} font-size: 13px;"
-            " spacing: 8px; background: transparent; }"
-            f"QCheckBox::indicator {{ width: 16px; height: 16px; border-radius: 4px;"
-            f" border: 1px solid {c['border_strong']}; background: {c['bg']}; }}"
-            f"QCheckBox::indicator:checked {{ background: {c['accent']}; border-color: {c['accent']}; }}"
-        )
 
         self.error_label = QLabel("")
         self.error_label.setObjectName("error-label")
         self.error_label.setWordWrap(True)
-        self.error_label.setStyleSheet(f"color: {c['danger']}; {mono} font-size: 12px; background: transparent;")
         self.error_label.hide()
 
         self.login_btn = QPushButton(self._BTN_TEXT)
         self.login_btn.setObjectName("login-btn")
         self.login_btn.setFixedHeight(42)
         self.login_btn.setCursor(Qt.PointingHandCursor)
-        self.login_btn.setStyleSheet(
-            f"QPushButton#login-btn {{ background-color: {c['accent']}; color: {c['bg']};"
-            f" border: none; border-radius: 8px; {mono} font-size: 14px; font-weight: 700;"
-            " letter-spacing: 1px; }"
-            f"QPushButton#login-btn:hover {{ background-color: {c['accent_hover']}; color: {c['text']}; }}"
-            f"QPushButton#login-btn:disabled {{ background-color: {c['accent_bg']}; color: {c['text_muted']}; }}"
-        )
         self.login_btn.clicked.connect(self.handle_login)
 
-        note1 = QLabel("僅連線 ptt.cc · 不經第三方")
-        note1.setStyleSheet(note_style)
-        note2 = QLabel("記住帳號只保存 PTT 代號，不儲存密碼")
-        note2.setStyleSheet(note_style)
+        self.note1_label = QLabel("僅連線 ptt.cc · 不經第三方")
+        self.note2_label = QLabel("記住帳號只保存 PTT 代號，不儲存密碼")
 
-        layout.addWidget(title)
+        layout.addWidget(self.card_title)
         layout.addSpacing(18)
-        layout.addWidget(id_label)
+        layout.addWidget(self.id_label)
         layout.addSpacing(6)
         layout.addWidget(self.username_input)
         layout.addSpacing(14)
-        layout.addWidget(pw_label)
+        layout.addWidget(self.pw_label)
         layout.addSpacing(6)
         layout.addWidget(self.password_input)
         layout.addSpacing(14)
@@ -325,10 +269,83 @@ class LoginWindow(QWidget):
         layout.addSpacing(10)
         layout.addWidget(self.login_btn)
         layout.addSpacing(14)
-        layout.addWidget(note1)
+        layout.addWidget(self.note1_label)
         layout.addSpacing(2)
-        layout.addWidget(note2)
+        layout.addWidget(self.note2_label)
         return card
+
+    def _apply_cursor_style(self):
+        """套用終端游標方塊的目前明/滅狀態顏色（依 self._cursor_on）。"""
+        c = theme.active()
+        on = f"background-color: {c['accent_hover']}; border-radius: 0px; margin-bottom: 10px;"
+        off = "background-color: transparent; border-radius: 0px; margin-bottom: 10px;"
+        self.accent_square.setStyleSheet(on if self._cursor_on else off)
+
+    def _apply_theme(self):
+        """重新套用當前主題色票到本畫面所有元件（供 theme.register_restyle 即時切換用）。"""
+        c = theme.active()
+        mono = self._mono
+        label_style = f"color: {c['text_muted']}; {mono} font-size: 11px; letter-spacing: 1px; background: transparent;"
+        input_style = (
+            f"QLineEdit {{ background-color: {c['bg']}; border: 1px solid {c['border']};"
+            f" border-radius: 7px; padding: 0 12px; color: {c['text']}; {mono} font-size: 14px; }}"
+            f"QLineEdit:focus {{ border: 1px solid {c['accent']}; }}"
+        )
+        note_style = f"color: {c['text_faint']}; {mono} font-size: 11px; background: transparent;"
+
+        self.setStyleSheet(f"QWidget#login-window {{ background-color: {c['bg']}; }}")
+
+        self.term_label.setStyleSheet(f"color: {c['text_faint']}; {mono} font-size: 12px; background: transparent;")
+        self.version_label.setStyleSheet(f"color: {c['text_faint']}; {mono} font-size: 12px; background: transparent;")
+
+        self.logo_label.setText(
+            f'<span style="color:{c["text_muted"]};">u</span>'
+            f'<span style="color:{c["text"]};">Ptt</span>'
+        )
+        self.logo_label.setStyleSheet(f"{mono} font-size: 66px; font-weight: 700; background: transparent;")
+        self._apply_cursor_style()
+
+        self.tagline_label.setStyleSheet(f"color: {c['text_muted']}; {mono} font-size: 15px; line-height: 1.6; background: transparent;")
+
+        self.status_dot.setStyleSheet(f"color: {c['text_faint']}; font-size: 9px; background: transparent;")
+        self.status_hint.setStyleSheet(f"color: {c['text_faint']}; {mono} font-size: 12px; background: transparent;")
+
+        self.bottom_bar.setStyleSheet(f"background: transparent; border-top: 1px solid {c['border']};")
+        self.footer_label.setStyleSheet(f"color: {c['text_faint']}; {mono} font-size: 11px; background: transparent;")
+        self.update_label.setStyleSheet(
+            f"color: {c['accent']}; {mono} font-size: 12px;"
+            " text-decoration: underline; background: transparent;"
+        )
+
+        self.login_card.setStyleSheet(
+            f"QFrame#login-card {{ background-color: {c['surface']};"
+            f" border: 1px solid {c['border']}; border-radius: 10px; }}"
+        )
+        self.card_title.setStyleSheet(
+            f"color: {c['text']}; {mono} font-size: 15px; font-weight: 700;"
+            " letter-spacing: 1px; background: transparent;"
+        )
+        self.id_label.setStyleSheet(label_style)
+        self.username_input.setStyleSheet(input_style)
+        self.pw_label.setStyleSheet(label_style)
+        self.password_input.setStyleSheet(input_style)
+        self.remember_check.setStyleSheet(
+            f"QCheckBox {{ color: {c['text_muted']}; {mono} font-size: 13px;"
+            " spacing: 8px; background: transparent; }"
+            f"QCheckBox::indicator {{ width: 16px; height: 16px; border-radius: 4px;"
+            f" border: 1px solid {c['border_strong']}; background: {c['bg']}; }}"
+            f"QCheckBox::indicator:checked {{ background: {c['accent']}; border-color: {c['accent']}; }}"
+        )
+        self.error_label.setStyleSheet(f"color: {c['danger']}; {mono} font-size: 12px; background: transparent;")
+        self.login_btn.setStyleSheet(
+            f"QPushButton#login-btn {{ background-color: {c['accent']}; color: {c['bg']};"
+            f" border: none; border-radius: 8px; {mono} font-size: 14px; font-weight: 700;"
+            " letter-spacing: 1px; }"
+            f"QPushButton#login-btn:hover {{ background-color: {c['accent_hover']}; color: {c['text']}; }}"
+            f"QPushButton#login-btn:disabled {{ background-color: {c['accent_bg']}; color: {c['text_muted']}; }}"
+        )
+        self.note1_label.setStyleSheet(note_style)
+        self.note2_label.setStyleSheet(note_style)
 
     def _load_remembered(self):
         """若上次勾選記住帳號，預填 PTT 代號並勾選（僅代號，永不含密碼）。"""
@@ -376,8 +393,8 @@ class ScanSetupScreen(QWidget):
         super().__init__()
         self.setObjectName("scan-setup-screen")
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setStyleSheet("background-color: #0D1117;")
         self.init_ui()
+        theme.register_restyle(self, lambda w: w._apply_theme())
 
     def init_ui(self):
         main_layout = QVBoxLayout(self)
@@ -391,33 +408,20 @@ class ScanSetupScreen(QWidget):
         layout.setSpacing(0)
 
         # 標題
-        title = QLabel("信箱掃描")
-        title.setAlignment(Qt.AlignCenter)
-        title.setStyleSheet("color: #E6EDF3; font-size: 18px; font-weight: bold; background: transparent;")
+        self.title_label = QLabel("信箱掃描")
+        self.title_label.setAlignment(Qt.AlignCenter)
 
-        desc = QLabel("uPtt 需要掃描您的 PTT 信箱，\n才能載入過去的對話紀錄。")
-        desc.setAlignment(Qt.AlignCenter)
-        desc.setWordWrap(True)
-        desc.setStyleSheet("color: #8B949E; font-size: 13px; background: transparent; line-height: 1.5;")
+        self.desc_label = QLabel("uPtt 需要掃描您的 PTT 信箱，\n才能載入過去的對話紀錄。")
+        self.desc_label.setAlignment(Qt.AlignCenter)
+        self.desc_label.setWordWrap(True)
 
-        subtitle = QLabel("選擇要載入的信件範圍")
-        subtitle.setAlignment(Qt.AlignCenter)
-        subtitle.setStyleSheet("color: #5C6773; font-size: 13px; background: transparent;")
+        self.subtitle_label = QLabel("選擇要載入的信件範圍")
+        self.subtitle_label.setAlignment(Qt.AlignCenter)
 
-        sep = QFrame()
-        sep.setFrameShape(QFrame.HLine)
-        sep.setStyleSheet("background-color: #2D333B; border: none; max-height: 1px;")
+        self.sep_line = QFrame()
+        self.sep_line.setFrameShape(QFrame.HLine)
 
         # 快速選擇按鈕
-        btn_style = """
-            background-color: #2D3B35; color: #8FBFA0;
-            border: 1px solid #3E5149; border-radius: 8px;
-            font-weight: bold; font-size: 14px; padding: 10px 20px;
-        """
-        btn_hover_style = """
-            QPushButton:hover { background-color: #3A4D43; color: #B5D4C6; border-color: #4E6358; }
-        """
-
         btn_row = QWidget()
         btn_row.setStyleSheet("background: transparent;")
         btn_row_layout = QHBoxLayout(btn_row)
@@ -425,17 +429,14 @@ class ScanSetupScreen(QWidget):
         btn_row_layout.setSpacing(12)
 
         self.btn_7d = QPushButton("7 天")
-        self.btn_7d.setStyleSheet(btn_style + btn_hover_style)
         self.btn_7d.setFixedHeight(42)
         self.btn_7d.clicked.connect(lambda: self._start_scan(7))
 
         self.btn_30d = QPushButton("30 天")
-        self.btn_30d.setStyleSheet(btn_style + btn_hover_style)
         self.btn_30d.setFixedHeight(42)
         self.btn_30d.clicked.connect(lambda: self._start_scan(30))
 
         self.btn_all = QPushButton("全部")
-        self.btn_all.setStyleSheet(btn_style + btn_hover_style)
         self.btn_all.setFixedHeight(42)
         self.btn_all.clicked.connect(lambda: self._start_scan(0))
 
@@ -450,31 +451,24 @@ class ScanSetupScreen(QWidget):
         custom_layout.setContentsMargins(0, 0, 0, 0)
         custom_layout.setSpacing(8)
 
-        custom_label = QLabel("自訂：")
-        custom_label.setStyleSheet("color: #8B949E; font-size: 13px; background: transparent;")
+        self.custom_label = QLabel("自訂：")
 
         self.custom_input = QLineEdit()
         self.custom_input.setPlaceholderText("天數")
         self.custom_input.setValidator(QIntValidator(1, 3650))
         self.custom_input.setFixedWidth(80)
         self.custom_input.setFixedHeight(38)
-        self.custom_input.setStyleSheet(
-            "padding: 8px; border: 1px solid #2D333B; border-radius: 7px;"
-            "background-color: #161B22; color: #E6EDF3; font-size: 14px;"
-        )
 
-        day_label = QLabel("天")
-        day_label.setStyleSheet("color: #8B949E; font-size: 13px; background: transparent;")
+        self.day_label = QLabel("天")
 
         self.btn_custom = QPushButton("開始掃描")
-        self.btn_custom.setStyleSheet(btn_style + btn_hover_style)
         self.btn_custom.setFixedHeight(38)
         self.btn_custom.clicked.connect(self._start_custom_scan)
         self.custom_input.returnPressed.connect(self._start_custom_scan)
 
-        custom_layout.addWidget(custom_label)
+        custom_layout.addWidget(self.custom_label)
         custom_layout.addWidget(self.custom_input)
-        custom_layout.addWidget(day_label)
+        custom_layout.addWidget(self.day_label)
         custom_layout.addStretch()
         custom_layout.addWidget(self.btn_custom)
 
@@ -487,15 +481,12 @@ class ScanSetupScreen(QWidget):
 
         self.progress_label = QLabel("正在掃描信件...")
         self.progress_label.setAlignment(Qt.AlignCenter)
-        self.progress_label.setStyleSheet("color: #8FBFA0; font-size: 14px; font-weight: bold; background: transparent;")
 
         self.progress_count = QLabel("0 / 0")
         self.progress_count.setAlignment(Qt.AlignCenter)
-        self.progress_count.setStyleSheet("color: #E6EDF3; font-size: 24px; font-weight: bold; background: transparent;")
 
         self.progress_title = QLabel("")
         self.progress_title.setAlignment(Qt.AlignCenter)
-        self.progress_title.setStyleSheet("color: #5C6773; font-size: 12px; background: transparent;")
         self.progress_title.setWordWrap(True)
         self.progress_title.setMaximumWidth(360)
 
@@ -507,13 +498,6 @@ class ScanSetupScreen(QWidget):
         # 跳過按鈕
         self.skip_btn = QPushButton("跳過，之後再掃描")
         self.skip_btn.setCursor(Qt.PointingHandCursor)
-        self.skip_btn.setStyleSheet("""
-            QPushButton {
-                background: transparent; border: none;
-                color: #484F58; font-size: 12px; padding: 6px 0;
-            }
-            QPushButton:hover { color: #8B949E; }
-        """)
         self.skip_btn.clicked.connect(lambda: self.scan_skipped.emit())
 
         # 選項區塊
@@ -527,18 +511,62 @@ class ScanSetupScreen(QWidget):
         options_layout.addWidget(self.skip_btn, alignment=Qt.AlignCenter)
 
         # 組裝
-        layout.addWidget(title)
+        layout.addWidget(self.title_label)
         layout.addSpacing(8)
-        layout.addWidget(desc)
+        layout.addWidget(self.desc_label)
         layout.addSpacing(12)
-        layout.addWidget(subtitle)
+        layout.addWidget(self.subtitle_label)
         layout.addSpacing(20)
-        layout.addWidget(sep)
+        layout.addWidget(self.sep_line)
         layout.addSpacing(20)
         layout.addWidget(self.options_widget)
         layout.addWidget(self.progress_widget)
 
         main_layout.addWidget(container)
+
+    def _apply_theme(self):
+        """重新套用當前主題色票到本畫面所有元件（供 theme.register_restyle 即時切換用）。"""
+        c = theme.active()
+        self.setStyleSheet(f"background-color: {c['bg']};")
+
+        self.title_label.setStyleSheet(f"color: {c['text']}; font-size: 18px; font-weight: bold; background: transparent;")
+        self.desc_label.setStyleSheet(f"color: {c['text_muted']}; font-size: 13px; background: transparent; line-height: 1.5;")
+        self.subtitle_label.setStyleSheet(f"color: {c['text_faint']}; font-size: 13px; background: transparent;")
+        self.sep_line.setStyleSheet(f"background-color: {c['border']}; border: none; max-height: 1px;")
+
+        # 注意：QSS 不允許「無 selector 的裸宣告」與「有 selector 的規則」混在同一份
+        # stylesheet（會觸發 "Could not parse stylesheet"）。btn_style 也要包 QPushButton{} selector。
+        btn_style = f"""
+            QPushButton {{
+                background-color: {c['accent_bg']}; color: {c['accent']};
+                border: 1px solid {c['accent_hover']}; border-radius: 8px;
+                font-weight: bold; font-size: 14px; padding: 10px 20px;
+            }}
+        """
+        btn_hover_style = f"""
+            QPushButton:hover {{ background-color: {c['accent_bg_hover']}; color: {c['accent_tint_hover']}; border-color: {c['accent']}; }}
+        """
+        for btn in (self.btn_7d, self.btn_30d, self.btn_all, self.btn_custom):
+            btn.setStyleSheet(btn_style + btn_hover_style)
+
+        self.custom_label.setStyleSheet(f"color: {c['text_muted']}; font-size: 13px; background: transparent;")
+        self.custom_input.setStyleSheet(
+            f"padding: 8px; border: 1px solid {c['border']}; border-radius: 7px;"
+            f"background-color: {c['surface']}; color: {c['text']}; font-size: 14px;"
+        )
+        self.day_label.setStyleSheet(f"color: {c['text_muted']}; font-size: 13px; background: transparent;")
+
+        self.progress_label.setStyleSheet(f"color: {c['accent']}; font-size: 14px; font-weight: bold; background: transparent;")
+        self.progress_count.setStyleSheet(f"color: {c['text']}; font-size: 24px; font-weight: bold; background: transparent;")
+        self.progress_title.setStyleSheet(f"color: {c['text_faint']}; font-size: 12px; background: transparent;")
+
+        self.skip_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent; border: none;
+                color: {c['text_faint']}; font-size: 12px; padding: 6px 0;
+            }}
+            QPushButton:hover {{ color: {c['text_muted']}; }}
+        """)
 
     def _start_scan(self, days):
         self.show_progress()
@@ -574,6 +602,39 @@ class ScanSetupScreen(QWidget):
         self.progress_title.setText("")
 
 
+# --- MainWindow 狀態相依的重套色函式 -------------------------------------
+#
+# theme.register_restyle(widget, fn) 要求 fn 只吃參數 w、不得 capture
+# self / 其他 widget（否則 _restyles 會強引用 fn 進而洩漏 self）。以下函式
+# 一律只讀寫傳入的 widget 自身屬性（狀態暫存在 widget 上），供 MainWindow
+# 建構時登記、也供狀態變化時的 slot 直接呼叫以立即套用。
+
+def _restyle_conn_status_dot(w):
+    """主連線狀態指示點：狀態存於 w._conn_state（'connecting' | 'online'）。"""
+    state = getattr(w, "_conn_state", "online")
+    t = theme.active()
+    color = t["status_connecting"] if state == "connecting" else t["status_online"]
+    w.setStyleSheet(f"color: {color}; font-size: 9px; background: transparent;")
+
+
+def _restyle_chat_header_online_text(w):
+    """聊天標題列在線狀態文字：狀態存於 w._online_state（bool 或 None＝尚無狀態，視同離線）。"""
+    state = getattr(w, "_online_state", None)
+    t = theme.active()
+    color = t["status_online"] if state else t["text_faint"]
+    w.setStyleSheet(f"font-size: 10px; color: {color}; background: transparent;")
+
+
+def _restyle_chat_header_online_dot(w):
+    """聊天標題列在線狀態圓點：狀態存於 w._online_state（bool 或 None＝尚無狀態）。"""
+    state = getattr(w, "_online_state", None)
+    t = theme.active()
+    color = t["status_online"] if state else t["text_faint"]
+    w.setStyleSheet(
+        f"background-color: {color}; border-radius: 5px; border: 2px solid {t['surface']};"
+    )
+
+
 class MainWindow(QMainWindow):
     """主聊天畫面"""
     send_requested = Signal(str, str, object, int)  # (receiver_id, text, timestamp, db_msg_id)
@@ -607,6 +668,7 @@ class MainWindow(QMainWindow):
         self._user_info_cache: Dict[str, Dict] = {}  # ptt_id_lower -> user info dict
         self.session_drafts: Dict[str, str] = {}  # ptt_id_lower -> draft text
         self._quitting = False  # 退出程序旗標，防止遞迴
+        self._settings_window: Optional[SettingsWindow] = None  # 單例，重複開就 raise/activate
 
         # 初始化 UI 與背景執行緒
         self.init_ui()
@@ -614,7 +676,7 @@ class MainWindow(QMainWindow):
         self.init_tray()
         self.init_shortcuts()
 
-        self.setStyleSheet(MAIN_STYLE)
+        theme.register_restyle(self, lambda w: w.setStyleSheet(build_main_style()))
 
         # 背景版本檢查
         self._start_version_check()
@@ -753,7 +815,10 @@ class MainWindow(QMainWindow):
         
         self.splitter = QSplitter(Qt.Horizontal)
         self.splitter.setHandleWidth(1)
-        self.splitter.setStyleSheet(f"QSplitter::handle {{ background-color: {GRAPHITE['border']}; }}")
+        theme.register_restyle(
+            self.splitter,
+            lambda w: w.setStyleSheet(f"QSplitter::handle {{ background-color: {theme.active()['border']}; }}"),
+        )
         
         self._build_sidebar()
         self._build_chat_pane()
@@ -784,21 +849,25 @@ class MainWindow(QMainWindow):
         self.user_profile = QWidget()
         self.user_profile.setObjectName("user-profile")
         self.user_profile.setFixedHeight(50)
-        self.user_profile.setStyleSheet(f"""
-            background-color: {GRAPHITE['surface']};
-            border-bottom: 1px solid {GRAPHITE['border']};
-        """)
+        theme.register_restyle(self.user_profile, lambda w: w.setStyleSheet(f"""
+            background-color: {theme.active()['surface']};
+            border-bottom: 1px solid {theme.active()['border']};
+        """))
         user_layout = QHBoxLayout(self.user_profile)
         user_layout.setContentsMargins(15, 0, 15, 0)
-        
-        # 狀態指示點
+
+        # 狀態指示點（連線中/已連線兩態，狀態記錄在 widget 上供切換主題時重繪）
         status_dot = QLabel("●")
-        status_dot.setStyleSheet("color: #56D364; font-size: 9px; background: transparent;")
+        status_dot._conn_state = "online"
+        theme.register_restyle(status_dot, _restyle_conn_status_dot)
         status_dot.hide()
         self._status_dot = status_dot
 
         self.user_id_label = QLabel("uPtt")
-        self.user_id_label.setStyleSheet(f"font-weight: bold; font-size: 13px; color: {GRAPHITE['text']}; background: transparent;")
+        theme.register_restyle(
+            self.user_id_label,
+            lambda w: w.setStyleSheet(f"font-weight: bold; font-size: 13px; color: {theme.active()['text']}; background: transparent;"),
+        )
         user_layout.addWidget(status_dot)
         user_layout.addSpacing(4)
         user_layout.addWidget(self.user_id_label)
@@ -810,18 +879,18 @@ class MainWindow(QMainWindow):
         self.logout_btn.setToolTip("登出")
         self.logout_btn.hide()
         self.logout_btn.clicked.connect(self.handle_logout)
-        self.logout_btn.setStyleSheet(f"""
+        theme.register_restyle(self.logout_btn, lambda w: w.setStyleSheet(f"""
             QPushButton {{
                 background: transparent;
                 border: none;
-                color: {GRAPHITE['text_faint']};
+                color: {theme.active()['text_faint']};
                 font-size: 16px;
                 padding: 0;
             }}
             QPushButton:hover {{
-                color: #C27474;
+                color: {theme.active()['danger']};
             }}
-        """)
+        """))
         user_layout.addWidget(self.logout_btn)
         
         sidebar_vbox.addWidget(self.user_profile)
@@ -835,32 +904,32 @@ class MainWindow(QMainWindow):
         self.new_chat_input.setPlaceholderText("搜尋對話 · 聯絡人")
         self.new_chat_input.setFixedHeight(32)
         self.new_chat_input.setObjectName("new-chat-input")
-        self.new_chat_input.setStyleSheet(f"""
+        theme.register_restyle(self.new_chat_input, lambda w: w.setStyleSheet(f"""
             QLineEdit#new-chat-input {{
-                background-color: {GRAPHITE['bg']};
-                border: 1px solid {GRAPHITE['border']};
+                background-color: {theme.active()['bg']};
+                border: 1px solid {theme.active()['border']};
                 border-radius: 4px;
                 padding: 0 8px;
-                color: {GRAPHITE['text']};
+                color: {theme.active()['text']};
                 font-size: 13px;
             }}
             QLineEdit#new-chat-input:focus {{
-                border-color: {GRAPHITE['accent']};
+                border-color: {theme.active()['accent']};
             }}
-        """)
+        """))
         self.new_chat_input.returnPressed.connect(self.handle_add_chat)
 
         # ⌘K 提示徽章（純外觀，不接搜尋邏輯；於 eventFilter 的 Resize 事件重新定位）
         self._search_hint = QLabel("⌘K", self.new_chat_input)
         self._search_hint.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        self._search_hint.setStyleSheet(f"""
-            color: {GRAPHITE['text_faint']};
-            background-color: {GRAPHITE['surface_2']};
-            border: 1px solid {GRAPHITE['border']};
+        theme.register_restyle(self._search_hint, lambda w: w.setStyleSheet(f"""
+            color: {theme.active()['text_faint']};
+            background-color: {theme.active()['surface_2']};
+            border: 1px solid {theme.active()['border']};
             border-radius: 3px;
             font-size: 10px;
             padding: 1px 4px;
-        """)
+        """))
         self._search_hint.adjustSize()
         self.new_chat_input.installEventFilter(self)
         sidebar_header.addWidget(self.new_chat_input)
@@ -877,16 +946,19 @@ class MainWindow(QMainWindow):
         # 側欄分組標頭（釘選 / 最近）——以覆蓋層實作，不插入清單模型，
         # 避免破壞 ContactListWidget 的 _pinned_count / dropEvent 索引與拖放釘選邏輯。
         self.contact_list.setViewportMargins(0, 22, 0, 0)
-        _grp_style = (
-            f"color: {GRAPHITE['text_muted']}; background-color: {GRAPHITE['surface']};"
-            f" font-size: 10px; font-weight: bold;"
-        )
+
+        def _restyle_group_header(w):
+            w.setStyleSheet(
+                f"color: {theme.active()['text_muted']}; background-color: {theme.active()['surface']};"
+                f" font-size: 10px; font-weight: bold;"
+            )
+
         self._group_header_top = QLabel(self.contact_list)
-        self._group_header_top.setStyleSheet(_grp_style)
+        theme.register_restyle(self._group_header_top, _restyle_group_header)
         self._group_header_top.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self._group_header_top.hide()
         self._group_header_mid = QLabel(self.contact_list)
-        self._group_header_mid.setStyleSheet(_grp_style)
+        theme.register_restyle(self._group_header_mid, _restyle_group_header)
         self._group_header_mid.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self._group_header_mid.hide()
         # 追蹤目前被加高（為中段標頭預留空間）的釘選區最後一項之 row index，None 表示無
@@ -942,27 +1014,30 @@ class MainWindow(QMainWindow):
         self.reply_bar = QWidget()
         self.reply_bar.setObjectName("reply-bar")
         self.reply_bar.hide()
-        self.reply_bar.setStyleSheet(f"""
+        theme.register_restyle(self.reply_bar, lambda w: w.setStyleSheet(f"""
             QWidget#reply-bar {{
-                background-color: {GRAPHITE['surface']};
-                border-top: 1px solid {GRAPHITE['accent']};
-                border-left: 3px solid {GRAPHITE['accent']};
+                background-color: {theme.active()['surface']};
+                border-top: 1px solid {theme.active()['accent']};
+                border-left: 3px solid {theme.active()['accent']};
             }}
-        """)
+        """))
         reply_bar_layout = QHBoxLayout(self.reply_bar)
         reply_bar_layout.setContentsMargins(8, 4, 8, 4)
         reply_bar_layout.setSpacing(8)
 
         self.reply_bar_label = QLabel()
-        self.reply_bar_label.setStyleSheet(f"color: {GRAPHITE['text_muted']}; font-size: 12px;")
+        theme.register_restyle(
+            self.reply_bar_label,
+            lambda w: w.setStyleSheet(f"color: {theme.active()['text_muted']}; font-size: 12px;"),
+        )
         self.reply_bar_label.setWordWrap(False)
 
         cancel_reply_btn = QPushButton("✕")
         cancel_reply_btn.setFixedSize(20, 20)
-        cancel_reply_btn.setStyleSheet(f"""
-            QPushButton {{ color: {GRAPHITE['text_muted']}; background: transparent; border: none; font-size: 14px; }}
-            QPushButton:hover {{ color: {GRAPHITE['text']}; }}
-        """)
+        theme.register_restyle(cancel_reply_btn, lambda w: w.setStyleSheet(f"""
+            QPushButton {{ color: {theme.active()['text_muted']}; background: transparent; border: none; font-size: 14px; }}
+            QPushButton:hover {{ color: {theme.active()['text']}; }}
+        """))
         cancel_reply_btn.setCursor(Qt.PointingHandCursor)
         cancel_reply_btn.clicked.connect(self.cancel_reply)
 
@@ -981,24 +1056,25 @@ class MainWindow(QMainWindow):
         input_row.setSpacing(8)
 
         self.char_count_label = QLabel(f"0 / {INPUT_CHAR_LIMIT}")
-        self.char_count_label.setStyleSheet(
-            f"color: {GRAPHITE['text_faint']}; font-size: 11px; background: transparent;"
+        theme.register_restyle(
+            self.char_count_label,
+            lambda w: w.setStyleSheet(f"color: {theme.active()['text_faint']}; font-size: 11px; background: transparent;"),
         )
         self.send_button = QPushButton("送出")
         self.send_button.setCursor(Qt.PointingHandCursor)
         self.send_button.setFixedHeight(26)
-        self.send_button.setStyleSheet(f"""
+        theme.register_restyle(self.send_button, lambda w: w.setStyleSheet(f"""
             QPushButton {{
-                background-color: {GRAPHITE['accent_bg']};
-                color: {GRAPHITE['accent']};
-                border: 1px solid {GRAPHITE['border']};
+                background-color: {theme.active()['accent_bg']};
+                color: {theme.active()['accent']};
+                border: 1px solid {theme.active()['border']};
                 border-radius: 4px;
                 padding: 0 14px;
                 font-size: 12px;
             }}
-            QPushButton:hover {{ background-color: {GRAPHITE['accent_bg_hover']}; }}
-            QPushButton:disabled {{ color: {GRAPHITE['text_faint']}; background-color: {GRAPHITE['surface_2']}; }}
-        """)
+            QPushButton:hover {{ background-color: {theme.active()['accent_bg_hover']}; }}
+            QPushButton:disabled {{ color: {theme.active()['text_faint']}; background-color: {theme.active()['surface_2']}; }}
+        """))
         self.send_button.clicked.connect(self.handle_send)
         self.message_edit.textChanged.connect(self._update_char_count)
 
@@ -1026,20 +1102,18 @@ class MainWindow(QMainWindow):
         self.chat_header_avatar.setFixedSize(36, 36)
         self.chat_header_avatar.move(0, 2)
         self.chat_header_avatar.setAlignment(Qt.AlignCenter)
-        self.chat_header_avatar.setStyleSheet("""
-            background-color: #2D3B35;
-            color: #8FBFA0;
+        theme.register_restyle(self.chat_header_avatar, lambda w: w.setStyleSheet(f"""
+            background-color: {theme.active()['accent_bg']};
+            color: {theme.active()['accent']};
             border-radius: 18px;
             font-weight: bold;
             font-size: 15px;
-        """)
+        """))
 
         self.chat_header_online_dot = QLabel(chat_header_avatar_container)
         self.chat_header_online_dot.setFixedSize(10, 10)
         self.chat_header_online_dot.move(27, 28)
-        self.chat_header_online_dot.setStyleSheet(
-            f"background-color: {GRAPHITE['text_faint']}; border-radius: 5px; border: 2px solid {GRAPHITE['surface']};"
-        )
+        theme.register_restyle(self.chat_header_online_dot, _restyle_chat_header_online_dot)
         self.chat_header_online_dot.hide()
 
         chat_header_text = QWidget()
@@ -1049,12 +1123,14 @@ class MainWindow(QMainWindow):
         chat_header_text_layout.setSpacing(1)
 
         self.chat_header_id = QLabel()
-        self.chat_header_id.setStyleSheet(
-            f"font-weight: bold; font-size: 14px; color: {GRAPHITE['text']}; background: transparent;"
+        theme.register_restyle(
+            self.chat_header_id,
+            lambda w: w.setStyleSheet(f"font-weight: bold; font-size: 14px; color: {theme.active()['text']}; background: transparent;"),
         )
         self.chat_header_nick = QLabel()
-        self.chat_header_nick.setStyleSheet(
-            f"font-size: 11px; color: {GRAPHITE['text_muted']}; background: transparent;"
+        theme.register_restyle(
+            self.chat_header_nick,
+            lambda w: w.setStyleSheet(f"font-size: 11px; color: {theme.active()['text_muted']}; background: transparent;"),
         )
         self.chat_header_nick.hide()
 
@@ -1063,9 +1139,7 @@ class MainWindow(QMainWindow):
 
         # 聊天標題列在線狀態文字
         self.chat_header_online = QLabel()
-        self.chat_header_online.setStyleSheet(
-            f"font-size: 10px; color: {GRAPHITE['text_faint']}; background: transparent;"
-        )
+        theme.register_restyle(self.chat_header_online, _restyle_chat_header_online_text)
         self.chat_header_online.hide()
         chat_header_text_layout.addWidget(self.chat_header_online)
 
@@ -1078,10 +1152,10 @@ class MainWindow(QMainWindow):
         self.header_search_btn.setFixedSize(30, 30)
         self.header_search_btn.setCursor(Qt.PointingHandCursor)
         self.header_search_btn.setToolTip("搜尋對話 · 聯絡人")
-        self.header_search_btn.setStyleSheet(f"""
-            QPushButton {{ background: transparent; border: none; color: {GRAPHITE['text_muted']}; font-size: 18px; }}
-            QPushButton:hover {{ color: {GRAPHITE['text']}; }}
-        """)
+        theme.register_restyle(self.header_search_btn, lambda w: w.setStyleSheet(f"""
+            QPushButton {{ background: transparent; border: none; color: {theme.active()['text_muted']}; font-size: 18px; }}
+            QPushButton:hover {{ color: {theme.active()['text']}; }}
+        """))
         self.header_search_btn.clicked.connect(self.new_chat_input.setFocus)
         chat_header_layout.addWidget(self.header_search_btn)
 
@@ -1089,24 +1163,27 @@ class MainWindow(QMainWindow):
         chat_vbox.addWidget(self.scroll_area, stretch=1) # 給予最大拉伸權重
         chat_vbox.addWidget(self.input_area, stretch=0) # 輸入區不拉伸
         chat_vbox.setSpacing(0)
-        
+
         # 底部狀態列（全寬）：左為對話/未讀計數，右為靜態資訊
         self.status_bar_widget = QWidget()
         self.status_bar_widget.setObjectName("status-bar")
         self.status_bar_widget.setFixedHeight(24)
-        self.status_bar_widget.setStyleSheet(
-            f"background-color: {GRAPHITE['surface']}; border-top: 1px solid {GRAPHITE['border']};"
+        theme.register_restyle(
+            self.status_bar_widget,
+            lambda w: w.setStyleSheet(f"background-color: {theme.active()['surface']}; border-top: 1px solid {theme.active()['border']};"),
         )
         status_layout = QHBoxLayout(self.status_bar_widget)
         status_layout.setContentsMargins(14, 0, 14, 0)
         status_layout.setSpacing(0)
         self._status_left = QLabel("")
-        self._status_left.setStyleSheet(
-            f"color: {GRAPHITE['text_muted']}; font-size: 11px; background: transparent;"
+        theme.register_restyle(
+            self._status_left,
+            lambda w: w.setStyleSheet(f"color: {theme.active()['text_muted']}; font-size: 11px; background: transparent;"),
         )
         self._status_right = QLabel(f"uPtt v{__version__}")
-        self._status_right.setStyleSheet(
-            f"color: {GRAPHITE['text_faint']}; font-size: 11px; background: transparent;"
+        theme.register_restyle(
+            self._status_right,
+            lambda w: w.setStyleSheet(f"color: {theme.active()['text_faint']}; font-size: 11px; background: transparent;"),
         )
         status_layout.addWidget(self._status_left)
         status_layout.addStretch()
@@ -1126,6 +1203,8 @@ class MainWindow(QMainWindow):
         tray_menu = QMenu()
         show_action = QAction("顯示聊天", self)
         show_action.triggered.connect(self.showNormal)
+        settings_action = QAction("設定…", self)
+        settings_action.triggered.connect(self.open_settings)
         logout_action = QAction("登出", self)
         logout_action.triggered.connect(self.handle_logout)
         quit_action = QAction("關閉", self)
@@ -1135,6 +1214,7 @@ class MainWindow(QMainWindow):
         rescan_action.triggered.connect(self._start_rescan)
 
         tray_menu.addAction(show_action)
+        tray_menu.addAction(settings_action)
         tray_menu.addAction(rescan_action)
         tray_menu.addAction(logout_action)
         tray_menu.addSeparator()
@@ -1149,6 +1229,17 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+N"), self, self.new_chat_input.setFocus)
         QShortcut(QKeySequence("Ctrl+Q"), self, self.fully_quit)
         QShortcut(QKeySequence("Ctrl+W"), self, self.close_current_chat)
+        QShortcut(QKeySequence("Ctrl+,"), self, self.open_settings)
+
+    def open_settings(self):
+        """開啟偏好設定視窗（單例：重複觸發只 raise/activate 既有視窗，不重建）。"""
+        if self._settings_window is None:
+            self._settings_window = SettingsWindow(
+                self.db, worker=getattr(self, 'worker', None), query_worker=getattr(self, 'query_worker', None)
+            )
+        self._settings_window.show()
+        self._settings_window.raise_()
+        self._settings_window.activateWindow()
 
     def eventFilter(self, obj, event):
         """過濾按鍵/尺寸事件：處理發送邏輯，並在尺寸變動時重新定位覆蓋層元件。"""
@@ -1324,7 +1415,8 @@ class MainWindow(QMainWindow):
     def on_connection_lost(self):
         """連線中斷時更新 UI 狀態"""
         logger.warning("UI: 偵測到連線中斷")
-        self._status_dot.setStyleSheet("color: #D29922; font-size: 9px; background: transparent;")
+        self._status_dot._conn_state = "connecting"
+        _restyle_conn_status_dot(self._status_dot)
         self._status_dot.setToolTip("連線中斷，正在重新連線...")
         self.setWindowTitle(f"uPtt - {self.ptt_service.ptt_id} (重新連線中...)")
 
@@ -1332,7 +1424,8 @@ class MainWindow(QMainWindow):
     def on_connection_restored(self):
         """連線恢復時更新 UI 狀態"""
         logger.info("UI: 連線已恢復")
-        self._status_dot.setStyleSheet("color: #56D364; font-size: 9px; background: transparent;")
+        self._status_dot._conn_state = "online"
+        _restyle_conn_status_dot(self._status_dot)
         self._status_dot.setToolTip("")
         self.setWindowTitle(f"uPtt - {self.ptt_service.ptt_id}")
 
@@ -1370,13 +1463,11 @@ class MainWindow(QMainWindow):
         # 若正在檢視此聯絡人的對話，同步更新聊天標題列
         if self.current_chat_id == ptt_id_lower:
             self.chat_header_online.setText("● 在線上" if is_online else "● 離線")
-            self.chat_header_online.setStyleSheet(
-                f"font-size: 10px; color: {'#56D364' if is_online else GRAPHITE['text_faint']}; background: transparent;"
-            )
+            self.chat_header_online._online_state = is_online
+            _restyle_chat_header_online_text(self.chat_header_online)
             self.chat_header_online.show()
-            self.chat_header_online_dot.setStyleSheet(
-                f"background-color: {'#56D364' if is_online else GRAPHITE['text_faint']}; border-radius: 5px; border: 2px solid {GRAPHITE['surface']};"
-            )
+            self.chat_header_online_dot._online_state = is_online
+            _restyle_chat_header_online_dot(self.chat_header_online_dot)
             self.chat_header_online_dot.show()
 
     def load_sessions_from_db(self):
@@ -1558,7 +1649,10 @@ class MainWindow(QMainWindow):
         row_layout.setContentsMargins(0, 8, 0, 8)
         row_layout.setSpacing(0)
         lbl = QLabel(label)
-        lbl.setStyleSheet(f"color: {GRAPHITE['text_faint']}; font-size: 11px; background: transparent;")
+        theme.register_restyle(
+            lbl,
+            lambda w: w.setStyleSheet(f"color: {theme.active()['text_faint']}; font-size: 11px; background: transparent;"),
+        )
         row_layout.addStretch()
         row_layout.addWidget(lbl)
         row_layout.addStretch()
@@ -1698,22 +1792,11 @@ class MainWindow(QMainWindow):
         else:
             self.chat_header_nick.hide()
         if is_online is not None:
-            if is_online:
-                self.chat_header_online.setText("● 在線上")
-                self.chat_header_online.setStyleSheet(
-                    "font-size: 10px; color: #56D364; background: transparent;"
-                )
-                self.chat_header_online_dot.setStyleSheet(
-                    f"background-color: #56D364; border-radius: 5px; border: 2px solid {GRAPHITE['surface']};"
-                )
-            else:
-                self.chat_header_online.setText("● 離線")
-                self.chat_header_online.setStyleSheet(
-                    f"font-size: 10px; color: {GRAPHITE['text_faint']}; background: transparent;"
-                )
-                self.chat_header_online_dot.setStyleSheet(
-                    f"background-color: {GRAPHITE['text_faint']}; border-radius: 5px; border: 2px solid {GRAPHITE['surface']};"
-                )
+            self.chat_header_online.setText("● 在線上" if is_online else "● 離線")
+            self.chat_header_online._online_state = is_online
+            _restyle_chat_header_online_text(self.chat_header_online)
+            self.chat_header_online_dot._online_state = is_online
+            _restyle_chat_header_online_dot(self.chat_header_online_dot)
             self.chat_header_online_dot.show()
             self.chat_header_online.show()
         self.chat_header.show()
@@ -1973,8 +2056,9 @@ class MainWindow(QMainWindow):
 
         self._move_contact_to_top(sender)
 
-        # 桌面通知 (僅限收到的訊息，排除自己發出的)
-        if not self.isActiveWindow() and not data.get('is_me', False):
+        # 桌面通知 (僅限收到的訊息，排除自己發出的，且使用者未關閉桌面通知)
+        if (not self.isActiveWindow() and not data.get('is_me', False)
+                and self.db.get_config(config.SETTING_NOTIFY_ENABLED, True)):
             _, notify_text = decode_reply(data['text'])
             self.tray_icon.showMessage(
                 f"新訊息: {sender_id_display}",

@@ -1,27 +1,30 @@
 # --- uPtt QSS 樣式表 ---
 #
-# 所有顏色 / 字型從 theme 的 Graphite token 組出，不在此硬寫 hex。
+# 所有顏色 / 字型從當前主題 token 組出，不在此硬寫 hex。
 
-from uPtt.ui.theme import GRAPHITE, FONT_STACK
-
-# 取出 token 供 f-string 使用（讓下方 QSS 讀起來乾淨）。
-bg = GRAPHITE["bg"]
-surface = GRAPHITE["surface"]
-surface_hover = GRAPHITE["surface_hover"]
-surface_2 = GRAPHITE["surface_2"]
-border = GRAPHITE["border"]
-border_strong = GRAPHITE["border_strong"]
-text = GRAPHITE["text"]
-text_muted = GRAPHITE["text_muted"]
-text_faint = GRAPHITE["text_faint"]
-accent = GRAPHITE["accent"]
-accent_hover = GRAPHITE["accent_hover"]
-accent_bg = GRAPHITE["accent_bg"]
-accent_bg_hover = GRAPHITE["accent_bg_hover"]
-danger = GRAPHITE["danger"]
+from uPtt.ui import theme
+from uPtt.ui.theme import FONT_STACK
 
 
-MAIN_STYLE = f"""
+def build_main_style() -> str:
+    """組出 MainWindow / LoginWindow 共用的 QSS，讀當前主題（theme.active()）。"""
+    t = theme.active()
+    bg = t["bg"]
+    surface = t["surface"]
+    surface_hover = t["surface_hover"]
+    surface_2 = t["surface_2"]
+    border = t["border"]
+    border_strong = t["border_strong"]
+    text = t["text"]
+    text_muted = t["text_muted"]  # noqa: F841 (保留供未來 QSS 規則使用，與舊常數對齊)
+    text_faint = t["text_faint"]
+    accent = t["accent"]
+    accent_hover = t["accent_hover"]
+    accent_bg = t["accent_bg"]
+    accent_bg_hover = t["accent_bg_hover"]
+    danger = t["danger"]
+
+    return f"""
 /* 全域字體與背景 */
 QWidget {{
     font-family: {FONT_STACK};
@@ -282,9 +285,10 @@ QMenu::separator {{
 # 氣泡，設計稿不分本人/對方一律置中同款，故 is_me 保留參數（呼叫端仍傳入）但
 # 不影響外觀，避免跟主要訊息氣泡的方向語意混淆。
 def get_waterball_bubble_style(is_me: bool) -> str:
+    t = theme.active()
     return f"""
-        background-color: {surface_2};
-        border: 1px solid {border};
+        background-color: {t["surface_2"]};
+        border: 1px solid {t["border"]};
         border-radius: 12px;
     """
 
@@ -292,17 +296,18 @@ def get_waterball_bubble_style(is_me: bool) -> str:
 # 對話氣泡的 inline 樣式（本人＝實心 accent 綠底＋深色文字，靠右；對方＝中性
 # 表層底＋一般文字，靠左。兩者需一眼可辨，對齊設計稿）
 def get_bubble_style(is_me: bool) -> str:
+    t = theme.active()
     if is_me:
         return f"""
-            background-color: {accent};
-            color: {bg};
+            background-color: {t["accent"]};
+            color: {t["bg"]};
             border-radius: 14px;
             border-top-right-radius: 3px;
         """
     else:
         return f"""
-            background-color: {surface_2};
-            color: {text};
+            background-color: {t["surface_2"]};
+            color: {t["text"]};
             border-radius: 14px;
             border-top-left-radius: 3px;
         """

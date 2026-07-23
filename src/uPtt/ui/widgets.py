@@ -9,7 +9,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtGui import QAction, QDrag
 from uPtt.ui.styles import get_bubble_style, get_waterball_bubble_style
-from uPtt.ui.theme import FONT_STACK, GRAPHITE
+from uPtt.ui import theme
+from uPtt.ui.theme import FONT_STACK
 
 
 def _apply_bubble_resize(message_label, bubble_container, owner_widget, new_size):
@@ -48,13 +49,14 @@ class ChatBubble(QWidget):
         super().__init__(parent)
         self.is_me = is_me
         self._text = text
+        self._reply_info = reply_info
+        self._send_status = send_status
 
         self.main_layout = QHBoxLayout(self)
         self.main_layout.setContentsMargins(0, 1, 0, 1)
         self.main_layout.setSpacing(4)
 
         self.bubble_container = QFrame()
-        self.bubble_container.setStyleSheet(get_bubble_style(is_me))
         self.bubble_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
 
         self.content_layout = QVBoxLayout(self.bubble_container)
@@ -64,42 +66,22 @@ class ChatBubble(QWidget):
         # 若有回覆引用資訊，在訊息上方加一個引用區塊
         # 本人氣泡底色現為實心 accent 綠（見 get_bubble_style），引用區塊要跟著換成
         # 深色系，否則綠字疊綠底會看不清楚；對方氣泡維持原本的綠色點綴風格。
+        self.quote_frame = None
+        self.quote_sender_label = None
+        self.quote_preview_label = None
         if reply_info:
-            quote_frame = QFrame()
-            if is_me:
-                quote_frame.setStyleSheet(f"""
-                    QFrame {{
-                        background-color: rgba(14, 17, 20, 0.14);
-                        border-left: 2px solid {GRAPHITE['bg']};
-                        border-radius: 2px;
-                    }}
-                """)
-                quote_sender_color = GRAPHITE['bg']
-                quote_preview_color = "rgba(14, 17, 20, 0.65)"
-            else:
-                quote_frame.setStyleSheet(f"""
-                    QFrame {{
-                        background-color: rgba(143, 191, 160, 0.08);
-                        border-left: 2px solid {GRAPHITE['accent']};
-                        border-radius: 2px;
-                    }}
-                """)
-                quote_sender_color = GRAPHITE['accent']
-                quote_preview_color = GRAPHITE['text_muted']
-            quote_layout = QVBoxLayout(quote_frame)
+            self.quote_frame = QFrame()
+            quote_layout = QVBoxLayout(self.quote_frame)
             quote_layout.setContentsMargins(6, 3, 6, 3)
             quote_layout.setSpacing(1)
 
-            sender_label = QLabel(f"@{reply_info['sender']}")
-            sender_label.setStyleSheet(f"color: {quote_sender_color}; font-size: 11px; font-weight: bold; background: transparent;")
+            self.quote_sender_label = QLabel(f"@{reply_info['sender']}")
+            self.quote_preview_label = QLabel(reply_info['preview'])
+            self.quote_preview_label.setWordWrap(True)
 
-            preview_label = QLabel(reply_info['preview'])
-            preview_label.setStyleSheet(f"color: {quote_preview_color}; font-size: 11px; background: transparent;")
-            preview_label.setWordWrap(True)
-
-            quote_layout.addWidget(sender_label)
-            quote_layout.addWidget(preview_label)
-            self.content_layout.addWidget(quote_frame)
+            quote_layout.addWidget(self.quote_sender_label)
+            quote_layout.addWidget(self.quote_preview_label)
+            self.content_layout.addWidget(self.quote_frame)
 
         self.message_label = QLabel(text)
         self.message_label.setWordWrap(True)
@@ -109,22 +91,18 @@ class ChatBubble(QWidget):
         self.content_layout.addWidget(self.message_label)
 
         self.time_label = QLabel(time_str)
-        self.time_label.setStyleSheet(f"color: {GRAPHITE['text_muted']}; font-size: 10px;")
         self.time_label.setAlignment(Qt.AlignBottom)
 
-        # 送出狀態指示標籤（僅自己的��息）
+        # 送出狀態指示標籤（僅自己的訊息）
         self.status_label = QLabel()
         self.status_label.setAlignment(Qt.AlignBottom)
         if is_me and send_status:
             if send_status == 'sent':
                 self.status_label.setText("✓")
-                self.status_label.setStyleSheet("color: #56D364; font-size: 10px;")
             elif send_status == 'failed':
                 self.status_label.setText("✗")
-                self.status_label.setStyleSheet("color: #C27474; font-size: 10px;")
             elif send_status == 'pending':
                 self.status_label.setText("⏳")
-                self.status_label.setStyleSheet("color: #5C6773; font-size: 10px;")
 
         if is_me:
             self.main_layout.addStretch()
@@ -144,6 +122,50 @@ class ChatBubble(QWidget):
         for widget in (self, self.bubble_container, self.message_label):
             widget.setContextMenuPolicy(Qt.CustomContextMenu)
             widget.customContextMenuRequested.connect(self._show_context_menu_from_child)
+
+        theme.register_restyle(self, lambda w: w._apply_theme())
+
+    def _apply_theme(self):
+        t = theme.active()
+        self.bubble_container.setStyleSheet(get_bubble_style(self.is_me))
+
+        if self.quote_frame is not None:
+            if self.is_me:
+                self.quote_frame.setStyleSheet(f"""
+                    QFrame {{
+                        background-color: rgba(14, 17, 20, 0.14);
+                        border-left: 2px solid {t['bg']};
+                        border-radius: 2px;
+                    }}
+                """)
+                quote_sender_color = t['bg']
+                quote_preview_color = "rgba(14, 17, 20, 0.65)"
+            else:
+                self.quote_frame.setStyleSheet(f"""
+                    QFrame {{
+                        background-color: rgba(143, 191, 160, 0.08);
+                        border-left: 2px solid {t['accent']};
+                        border-radius: 2px;
+                    }}
+                """)
+                quote_sender_color = t['accent']
+                quote_preview_color = t['text_muted']
+            self.quote_sender_label.setStyleSheet(
+                f"color: {quote_sender_color}; font-size: 11px; font-weight: bold; background: transparent;"
+            )
+            self.quote_preview_label.setStyleSheet(
+                f"color: {quote_preview_color}; font-size: 11px; background: transparent;"
+            )
+
+        self.time_label.setStyleSheet(f"color: {t['text_muted']}; font-size: 10px;")
+
+        if self.is_me and self._send_status:
+            if self._send_status == 'sent':
+                self.status_label.setStyleSheet(f"color: {t['status_online']}; font-size: 10px;")
+            elif self._send_status == 'failed':
+                self.status_label.setStyleSheet(f"color: {t['danger']}; font-size: 10px;")
+            elif self._send_status == 'pending':
+                self.status_label.setStyleSheet(f"color: {t['msg_pending']}; font-size: 10px;")
 
     def _show_context_menu_from_child(self, pos):
         # 將子元件座標轉換為全域座標後顯示選單
@@ -189,7 +211,6 @@ class WaterballBubble(QWidget):
         self.main_layout.addStretch(1)
 
         self.bubble_container = QFrame()
-        self.bubble_container.setStyleSheet(get_waterball_bubble_style(is_me))
         self.bubble_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
 
         content_layout = QHBoxLayout(self.bubble_container)
@@ -197,27 +218,39 @@ class WaterballBubble(QWidget):
         content_layout.setSpacing(6)
 
         # 水球標記
-        tag_label = QLabel("💧 水球")
-        tag_label.setStyleSheet(f"color: {GRAPHITE['accent']}; font-size: 10px; font-weight: bold; background: transparent; border: none;")
-        content_layout.addWidget(tag_label)
+        self.tag_label = QLabel("💧 水球")
+        content_layout.addWidget(self.tag_label)
 
         # 訊息內容
         self.message_label = QLabel(text)
         self.message_label.setWordWrap(True)
         self.message_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.message_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
-        self.message_label.setStyleSheet(f"color: {GRAPHITE['text_muted']}; font-size: 12px; background: transparent; border: none;")
         content_layout.addWidget(self.message_label)
 
         # 時間（含分隔點，行內顯示於 pill 尾端）
-        time_label = QLabel(f"·  {time_str}")
-        time_label.setStyleSheet(f"color: {GRAPHITE['text_faint']}; font-size: 10px; background: transparent; border: none;")
-        content_layout.addWidget(time_label)
+        self.time_label = QLabel(f"·  {time_str}")
+        content_layout.addWidget(self.time_label)
 
         self.main_layout.addWidget(self.bubble_container)
         self.main_layout.addStretch(1)
 
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+
+        theme.register_restyle(self, lambda w: w._apply_theme())
+
+    def _apply_theme(self):
+        t = theme.active()
+        self.bubble_container.setStyleSheet(get_waterball_bubble_style(self.is_me))
+        self.tag_label.setStyleSheet(
+            f"color: {t['accent']}; font-size: 10px; font-weight: bold; background: transparent; border: none;"
+        )
+        self.message_label.setStyleSheet(
+            f"color: {t['text_muted']}; font-size: 12px; background: transparent; border: none;"
+        )
+        self.time_label.setStyleSheet(
+            f"color: {t['text_faint']}; font-size: 10px; background: transparent; border: none;"
+        )
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -240,17 +273,10 @@ class MailCard(QWidget):
         main_layout.setContentsMargins(0, 2, 0, 2)
         main_layout.setSpacing(0)
 
-        card = QFrame()
-        card.setStyleSheet(f"""
-            QFrame {{
-                background-color: {GRAPHITE['surface']};
-                border: 1px solid {GRAPHITE['border']};
-                border-radius: 8px;
-            }}
-        """)
-        card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.card = QFrame()
+        self.card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
-        card_layout = QVBoxLayout(card)
+        card_layout = QVBoxLayout(self.card)
         card_layout.setContentsMargins(12, 8, 12, 8)
         card_layout.setSpacing(6)
 
@@ -262,69 +288,84 @@ class MailCard(QWidget):
         icon_label.setStyleSheet("font-size: 14px; border: none;")
         icon_label.setFixedWidth(20)
 
-        subject_label = QLabel(subject if subject else "(無主旨)")
-        subject_label.setStyleSheet("""
-            font-weight: bold;
-            font-size: 13px;
-            color: #8FBFA0;
-            border: none;
-        """)
-        subject_label.setWordWrap(False)
+        self.subject_label = QLabel(subject if subject else "(無主旨)")
+        self.subject_label.setWordWrap(False)
 
-        time_label = QLabel(time_str)
-        time_label.setStyleSheet(f"color: {GRAPHITE['text_muted']}; font-size: 10px; border: none;")
-        time_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.time_label = QLabel(time_str)
+        self.time_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
         header_layout.addWidget(icon_label)
-        header_layout.addWidget(subject_label, 1)
-        header_layout.addWidget(time_label)
+        header_layout.addWidget(self.subject_label, 1)
+        header_layout.addWidget(self.time_label)
 
         # 分隔線
-        divider = QFrame()
-        divider.setFrameShape(QFrame.HLine)
-        divider.setStyleSheet(f"background-color: {GRAPHITE['border']}; border: none; max-height: 1px;")
+        self.divider = QFrame()
+        self.divider.setFrameShape(QFrame.HLine)
 
         # 內文預覽 (最多 MAX_LINES 行)
         lines = text.splitlines()
         preview_text = "\n".join(lines[:self.MAX_LINES])
-        content_label = QLabel(preview_text if preview_text else " ")
-        content_label.setWordWrap(True)
-        content_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        content_label.setStyleSheet(f"color: {GRAPHITE['text']}; font-size: 13px; border: none;")
+        self.content_label = QLabel(preview_text if preview_text else " ")
+        self.content_label.setWordWrap(True)
+        self.content_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
         card_layout.addLayout(header_layout)
-        card_layout.addWidget(divider)
-        card_layout.addWidget(content_label)
+        card_layout.addWidget(self.divider)
+        card_layout.addWidget(self.content_label)
 
         # 若超過 MAX_LINES 行，顯示「展開全文」按鈕
+        self.expand_btn = None
         if len(lines) > self.MAX_LINES:
-            expand_btn = QPushButton("展開全文 ▾")
-            expand_btn.setStyleSheet("""
-                QPushButton {
-                    color: #8FBFA0;
+            self.expand_btn = QPushButton("展開全文 ▾")
+            self.expand_btn.setCursor(Qt.PointingHandCursor)
+            self.expand_btn.clicked.connect(self._show_full_content)
+            card_layout.addWidget(self.expand_btn)
+
+        main_layout.addWidget(self.card)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+
+        theme.register_restyle(self, lambda w: w._apply_theme())
+
+    def _apply_theme(self):
+        t = theme.active()
+        self.card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {t['surface']};
+                border: 1px solid {t['border']};
+                border-radius: 8px;
+            }}
+        """)
+        self.subject_label.setStyleSheet(f"""
+            font-weight: bold;
+            font-size: 13px;
+            color: {t['accent']};
+            border: none;
+        """)
+        self.time_label.setStyleSheet(f"color: {t['text_muted']}; font-size: 10px; border: none;")
+        self.divider.setStyleSheet(f"background-color: {t['border']}; border: none; max-height: 1px;")
+        self.content_label.setStyleSheet(f"color: {t['text']}; font-size: 13px; border: none;")
+        if self.expand_btn is not None:
+            self.expand_btn.setStyleSheet(f"""
+                QPushButton {{
+                    color: {t['accent']};
                     background: transparent;
                     border: none;
                     font-size: 12px;
                     text-align: left;
                     padding: 0;
-                }
-                QPushButton:hover {
-                    color: #C5DDD4;
+                }}
+                QPushButton:hover {{
+                    color: {t['accent_tint_hover']};
                     text-decoration: underline;
-                }
+                }}
             """)
-            expand_btn.setCursor(Qt.PointingHandCursor)
-            expand_btn.clicked.connect(self._show_full_content)
-            card_layout.addWidget(expand_btn)
-
-        main_layout.addWidget(card)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
     def _show_full_content(self):
+        t = theme.active()
         dialog = QDialog(self)
         dialog.setWindowTitle(f"✉️  {self.subject if self.subject else '信件內容'}")
         dialog.setMinimumSize(520, 420)
-        dialog.setStyleSheet(f"background-color: {GRAPHITE['bg']}; color: {GRAPHITE['text']};")
+        dialog.setStyleSheet(f"background-color: {t['bg']}; color: {t['text']};")
 
         layout = QVBoxLayout(dialog)
         layout.setSpacing(10)
@@ -334,9 +375,9 @@ class MailCard(QWidget):
         text_edit.setPlainText(self.full_text)
         text_edit.setStyleSheet(f"""
             QTextEdit {{
-                background-color: {GRAPHITE['surface_2']};
-                color: {GRAPHITE['text']};
-                border: 1px solid {GRAPHITE['border']};
+                background-color: {t['surface_2']};
+                color: {t['text']};
+                border: 1px solid {t['border']};
                 border-radius: 4px;
                 font-size: 13px;
                 font-family: {FONT_STACK};
@@ -347,14 +388,14 @@ class MailCard(QWidget):
         close_btn = QPushButton("關閉")
         close_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {GRAPHITE['surface_2']};
-                color: {GRAPHITE['text']};
-                border: 1px solid {GRAPHITE['border_strong']};
+                background-color: {t['surface_2']};
+                color: {t['text']};
+                border: 1px solid {t['border_strong']};
                 border-radius: 4px;
                 padding: 6px 20px;
                 font-size: 13px;
             }}
-            QPushButton:hover {{ background-color: {GRAPHITE['accent_bg']}; }}
+            QPushButton:hover {{ background-color: {t['accent_bg']}; }}
         """)
         close_btn.clicked.connect(dialog.accept)
 
@@ -374,6 +415,7 @@ class ContactItem(QWidget):
         self.is_pinned = is_pinned
         self.unread_count = unread_count
         self._is_online = False
+        self._online_state = 'offline'  # 'online' | 'offline' | 'unknown'
         self._is_archived = False
 
         self.setAttribute(Qt.WA_StyledBackground, True)
@@ -388,7 +430,6 @@ class ContactItem(QWidget):
         self.pin_bar = QFrame()
         self.pin_bar.setFixedWidth(3)
         self.pin_bar.setFixedHeight(32)
-        self._update_pin_style()
         main_layout.addWidget(self.pin_bar, alignment=Qt.AlignVCenter)
         main_layout.addSpacing(8)
 
@@ -401,19 +442,11 @@ class ContactItem(QWidget):
         self.avatar_label.setFixedSize(36, 36)
         self.avatar_label.move(0, 2)
         self.avatar_label.setAlignment(Qt.AlignCenter)
-        self.avatar_label.setStyleSheet("""
-            background-color: #2D3B35;
-            color: #8FBFA0;
-            border-radius: 18px;
-            font-weight: bold;
-            font-size: 14px;
-        """)
 
         # 在線狀態指示點 (右下角)
         self.online_dot = QLabel(avatar_container)
         self.online_dot.setFixedSize(10, 10)
         self.online_dot.move(27, 28)
-        self._update_online_dot_style()
 
         main_layout.addWidget(avatar_container, alignment=Qt.AlignVCenter)
         main_layout.addSpacing(8)
@@ -428,22 +461,11 @@ class ContactItem(QWidget):
 
         self.id_label = QLabel(self.ptt_id_display)
         self.id_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self.id_label.setStyleSheet(f"""
-            font-weight: bold;
-            font-size: 14px;
-            color: {GRAPHITE['text']};
-            background: transparent;
-        """)
 
         self.nickname_label = QLabel(f"({nickname})" if nickname else "")
         self.nickname_label.setFixedHeight(14)
         self.nickname_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.nickname_label.setWordWrap(False)
-        self.nickname_label.setStyleSheet(f"""
-            font-size: 11px;
-            color: {GRAPHITE['text_muted']};
-            background: transparent;
-        """)
 
         text_layout.addWidget(self.id_label)
         text_layout.addWidget(self.nickname_label)
@@ -462,7 +484,6 @@ class ContactItem(QWidget):
 
         self.time_label = QLabel(last_msg_time)
         self.time_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.time_label.setStyleSheet(f"font-size: 10px; color: {GRAPHITE['text_faint']}; background: transparent;")
 
         self.unread_label = QLabel()
         self.unread_label.setFixedSize(22, 22)
@@ -471,11 +492,27 @@ class ContactItem(QWidget):
         right_vbox.addWidget(self.time_label)
         right_vbox.addWidget(self.unread_label, alignment=Qt.AlignHCenter)
 
-        self.update_unread_style(unread_count)
         main_layout.addWidget(right_container, alignment=Qt.AlignVCenter)
 
         # 設定固定高度
         self.setFixedHeight(62)
+
+        theme.register_restyle(self, lambda w: w._apply_theme())
+
+    def _apply_theme(self):
+        t = theme.active()
+        self.avatar_label.setStyleSheet(f"""
+            background-color: {t['accent_bg']};
+            color: {t['accent']};
+            border-radius: 18px;
+            font-weight: bold;
+            font-size: 14px;
+        """)
+        self._update_online_dot_style()
+        self._update_pin_style()
+        self._update_text_colors()
+        self.time_label.setStyleSheet(f"font-size: 10px; color: {t['text_faint']}; background: transparent;")
+        self.update_unread_style(self.unread_count)
 
     def update_info(self, ptt_id_display: str, nickname: str):
         """
@@ -497,30 +534,31 @@ class ContactItem(QWidget):
         self.update_info(self.ptt_id_display, nickname)
 
     def _update_online_dot_style(self):
-        if self._is_online:
-            self.online_dot.setStyleSheet(
-                f"background-color: #56D364; border-radius: 5px; border: 2px solid {GRAPHITE['surface']};"
-            )
-        else:
-            self.online_dot.setStyleSheet(
-                f"background-color: {GRAPHITE['text_faint']}; border-radius: 5px; border: 2px solid {GRAPHITE['surface']};"
-            )
+        t = theme.active()
+        color = {
+            'online': t['status_online'],
+            'offline': t['text_faint'],
+            'unknown': t['status_unknown'],
+        }[self._online_state]
+        self.online_dot.setStyleSheet(
+            f"background-color: {color}; border-radius: 5px; border: 2px solid {t['surface']};"
+        )
 
     def set_online(self, is_online: bool):
         """更新在線狀態指示點。"""
         self._is_online = is_online
+        self._online_state = 'online' if is_online else 'offline'
         self._update_online_dot_style()
 
     def set_online_unknown(self):
         """副 session 降級時,把在線狀態點改為「未知」淺灰色。"""
-        self.online_dot.setStyleSheet(
-            f"background-color: #7D8590; border-radius: 5px; border: 2px solid {GRAPHITE['surface']};"
-        )
+        self._online_state = 'unknown'
+        self._update_online_dot_style()
         self.online_dot.setToolTip("使用者狀態暫時無法更新")
 
     def _update_pin_style(self):
         if self.is_pinned:
-            self.pin_bar.setStyleSheet("background-color: #8FBFA0; border-radius: 1px;")
+            self.pin_bar.setStyleSheet(f"background-color: {theme.active()['accent']}; border-radius: 1px;")
         else:
             self.pin_bar.setStyleSheet("background: transparent;")
 
@@ -543,24 +581,43 @@ class ContactItem(QWidget):
             'last_msg_time': self.time_label.text(),
         }
 
+    def _update_text_colors(self):
+        """依目前的封存狀態重上 id_label / nickname_label 顏色。"""
+        t = theme.active()
+        if self._is_archived:
+            self.id_label.setStyleSheet(f"""
+                font-weight: bold;
+                font-size: 14px;
+                color: {t['text_faint']};
+                background: transparent;
+            """)
+            self.nickname_label.setStyleSheet(f"""
+                font-size: 11px;
+                color: {t['archived_text']};
+                background: transparent;
+            """)
+        else:
+            self.id_label.setStyleSheet(f"""
+                font-weight: bold;
+                font-size: 14px;
+                color: {t['text']};
+                background: transparent;
+            """)
+            self.nickname_label.setStyleSheet(f"""
+                font-size: 11px;
+                color: {t['text_muted']};
+                background: transparent;
+            """)
+
     def set_archived(self, archived: bool):
         """標記此聯絡人為封存狀態（使用者已不存在）。"""
         self._is_archived = archived
         if archived:
             self._is_online = False
+            self._online_state = 'offline'
             self._update_online_dot_style()
-            self.id_label.setStyleSheet(f"""
-                font-weight: bold;
-                font-size: 14px;
-                color: {GRAPHITE['text_faint']};
-                background: transparent;
-            """)
             self.nickname_label.setText("(已不存在)")
-            self.nickname_label.setStyleSheet("""
-                font-size: 11px;
-                color: #6E4040;
-                background: transparent;
-            """)
+        self._update_text_colors()
 
     def set_last_msg_time(self, time_str: str):
         self.time_label.setText(time_str)
@@ -568,12 +625,13 @@ class ContactItem(QWidget):
     def update_unread_style(self, count: int):
         self.unread_count = count
         if count > 0:
+            t = theme.active()
             self.unread_label.setText(f"{count}")
             # 色值取樣自設計稿 14_main_graphite.png 的未讀徽章「3」「1」：實色底為
-            # #8fbfa0（= GRAPHITE['accent']），文字為 #0e1114（= GRAPHITE['bg']）。
+            # active()['accent']，文字為 active()['bg']。
             self.unread_label.setStyleSheet(f"""
-                background-color: {GRAPHITE['accent']};
-                color: {GRAPHITE['bg']};
+                background-color: {t['accent']};
+                color: {t['bg']};
                 border-radius: 11px;
                 font-size: 9px;
                 font-weight: bold;

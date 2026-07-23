@@ -1031,3 +1031,49 @@ def test_mailbox_full_state_inconsistency():
     # RequireLogin 也不觸發重連（非 ConnectionClosed），只呼叫一次
     # call_count = 2（del_mail 一次 + get_newest_index 一次）
     assert service.service.call.call_count == 2
+
+
+# ── 輪詢間隔設定即時套用 ─────────────────────────────────────────
+
+def test_apply_poll_intervals_updates_running_timers(qtbot, worker, db_mock):
+    """設定頁儲存後，apply_poll_intervals 應立即改變執行中的信件／水球計時器間隔。"""
+    worker.start_polling()
+    assert worker.polling_timer.isActive()
+    db_mock.get_config.return_value = 20  # 使用者將間隔設為 20 秒
+    worker.apply_poll_intervals()
+    assert worker.polling_timer.interval() == 20000
+    assert worker._waterball_timer.interval() == 20000
+
+
+def test_apply_poll_intervals_clamps_below_minimum(worker, db_mock):
+    """apply_poll_intervals 讀到低於下限的設定值時應夾到下限，不直接套用。"""
+    worker.start_polling()
+    db_mock.get_config.return_value = 1  # 低於 MAIL_INTERVAL_MIN/WATERBALL_INTERVAL_MIN
+    worker.apply_poll_intervals()
+    from src.uPtt import config
+    assert worker.polling_timer.interval() == config.MAIL_INTERVAL_MIN * 1000
+    assert worker._waterball_timer.interval() == config.WATERBALL_INTERVAL_MIN * 1000
+
+
+def test_apply_poll_intervals_noop_when_timers_not_started(worker, db_mock):
+    """尚未 start_polling 時呼叫 apply_poll_intervals 不應炸掉。"""
+    db_mock.get_config.return_value = 15
+    worker.apply_poll_intervals()  # 不應丟例外
+    assert worker.polling_timer is None
+    assert worker._waterball_timer is None
+
+
+def test_query_apply_poll_intervals_updates_timer(qtbot, query_worker, db_mock):
+    """apply_poll_intervals 應改變執行中的在線輪詢計時器間隔。"""
+    query_worker._start_online_polling()
+    assert query_worker._online_check_timer.isActive()
+    db_mock.get_config.return_value = 90
+    query_worker.apply_poll_intervals()
+    assert query_worker._online_check_timer.interval() == 90000
+
+
+def test_query_apply_poll_intervals_noop_when_timer_not_started(query_worker, db_mock):
+    """尚未啟動在線輪詢時呼叫 apply_poll_intervals 不應炸掉。"""
+    db_mock.get_config.return_value = 90
+    query_worker.apply_poll_intervals()  # 不應丟例外
+    assert query_worker._online_check_timer is None
