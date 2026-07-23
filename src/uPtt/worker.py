@@ -99,7 +99,9 @@ class PTTWorker(QObject):
         except PyPtt.LoginTooOften:
             self.login_result.emit(False, "登入太頻繁，請稍後再試")
         except Exception as e:
-            logger.error(f"登入失敗: {e}")
+            # 防禦性遮罩：此例外來自 self.ptt.login()，其呼叫鏈把明文密碼傳給 PyPtt，
+            # 若例外的 str() 意外帶出該引數，避免明文密碼落地到 uptt_error.log。
+            logger.error(f"登入失敗: {utils.redact_secret(str(e), password)}")
             self.login_result.emit(False, "連線失敗，請檢查網路連線")
 
     def start_polling(self):
@@ -224,18 +226,54 @@ class PTTWorker(QObject):
 
         div_pos = content.find(contant.PTT_MSG_DIVISION_LINE)
         end = content.rfind(contant.PTT_MSG_DIVISION_LINE)
+        has_division = (div_pos >= 0 and end > div_pos)
+        # 僅在分隔線成對存在時才嘗試解析嵌入時間戳
+        embedded_ts = utils.parse_embedded_timestamp(content, end) if has_division else None
 
-        if div_pos < 0 or end <= div_pos:
-            logger.error(
+        # 合法 uPtt 結構以「成對分隔線」為準:標題命中 + 成對分隔線即視為合法、
+        # 允許自動刪信;embedded_ts 缺失(被 PTT 折行/ANSI 汙損)時時間戳走
+        # fallback chain(mail date → now),不影響刪除。無成對分隔線者(對方在 PTT
+        # 回覆刪去格式,或偽造標題 + 垃圾內容)降級為一般站內信且「不刪除」,擋住
+        # 偽造刪信攻擊(backup 為自己所發故信任,仍清除)。
+        if not has_division:
+            if is_backup:
+                return None, True, True  # 格式異常的自己寄出備份：靜默刪除
+            # 對方在 PTT 回覆時刪去 uPtt 格式，或偽造標題但內容無成對分隔線
+            # 以一般站內信顯示，不刪除（與一般站內信行為一致）
+            logger.warning(
                 f"uPtt mail at index {mail_idx} has malformed content "
-                f"(div_pos={div_pos}, end={end}); skipping deletion."
+                f"(div_pos={div_pos}, end={end}); "
+                f"falling back to regular mail display"
             )
-            return None, True, is_backup  # 備份副本仍需刪除
+            content = utils.strip_ansi(content)
+            self.db.upsert_session(account_id=current_user, display_id=sender_id)
+            is_new = self.db.save_message(
+                account_id=current_user,
+                session_id=sender_id,
+                sender_id=sender_id,
+                receiver_id=current_user,
+                content=content,
+                timestamp=mail_time,
+                is_me=False,
+                mail_type='mail',
+                subject=title
+            )
+            emit_dict = None
+            if is_new:
+                emit_dict = {
+                    'sender': sender_id,
+                    'text': content,
+                    'time': mail_time.strftime("%H:%M"),
+                    'full_author': full_author,
+                    'timestamp': mail_time,
+                    'mail_type': 'mail',
+                    'subject': title
+                }
+            return emit_dict, True, False
 
         start = div_pos + len(contant.PTT_MSG_DIVISION_LINE)
         text = content[start:end].strip()
         text = utils.unwrap_ptt_lines(text)
-        embedded_ts = utils.parse_embedded_timestamp(content, end)
         msg_time = embedded_ts if embedded_ts else mail_time
 
         # 備份副本（自己發的）也需要存入本地 DB，避免多裝置訊息遺失
@@ -294,6 +332,8 @@ class PTTWorker(QObject):
     @Slot(int)
     def do_initial_scan(self, scan_days):
         """首次登入信箱掃描，帶進度回報"""
+        # 在 try 外宣告，確保迴圈中途拋例外時仍能 flush 已入庫訊息的通知
+        mails_to_emit = []
         try:
             current_poll_start = datetime.now()
             total_newest = self.ptt.call('get_newest_index', {'index_type': PyPtt.NewIndex.MAIL})
@@ -311,7 +351,6 @@ class PTTWorker(QObject):
             self.is_first_polling = False
 
             scanned_count = 0
-            mails_to_emit = []
             deleted_count = 0
 
             logger.info(f"首次掃描: 總數={total_newest}, 掃描範圍={'全部' if scan_all else f'{scan_days}天'}")
@@ -363,17 +402,18 @@ class PTTWorker(QObject):
             self.last_poll_time = current_poll_start
             self.db.set_config(f'LAST_POLL_TIME_{self.ptt.ptt_id.lower()}', current_poll_start.isoformat())
 
-            for mail_data in reversed(mails_to_emit):
-                self.new_message_received.emit(mail_data)
-                self.last_mail_time = mail_data['timestamp']
+            new_count = len(mails_to_emit)
+            self._flush_pending_emits(mails_to_emit)
 
-            logger.info(f"首次掃描完成: 掃描 {scanned_count} 封, 新訊息 {len(mails_to_emit)} 封")
+            logger.info(f"首次掃描完成: 掃描 {scanned_count} 封, 新訊息 {new_count} 封")
             self.scan_complete.emit()
             self.start_polling()
 
         except Exception as e:
             logger.exception(f"首次掃描發生錯誤: {e}")
             self.status_updated.emit(f"掃描錯誤: {e}")
+            # flush 迴圈中途已入庫訊息的通知，避免遺失（成功路徑已清空故不會重複）
+            self._flush_pending_emits(mails_to_emit)
             self.scan_complete.emit()
             self.start_polling()
 
@@ -386,6 +426,8 @@ class PTTWorker(QObject):
         """
         # 優先處理待發送訊息
         self._drain_send_queue()
+        # 在 try 外宣告，確保迴圈中途拋例外時 finally 仍能 flush 已入庫訊息的通知
+        mails_to_emit = []
         try:
             current_poll_start = datetime.now()
 
@@ -422,7 +464,6 @@ class PTTWorker(QObject):
 
             logger.debug(f"輪詢掃描中: 總數={total_newest}, 新增={total_newest - (self._last_newest_index or 0)}, 截止時間={stop_time}")
 
-            mails_to_emit = []
             deleted_count = 0
             scan_count = 0
 
@@ -477,16 +518,17 @@ class PTTWorker(QObject):
             self.last_poll_time = current_poll_start
             self.db.set_config(f'LAST_POLL_TIME_{self.ptt.ptt_id.lower()}', current_poll_start.isoformat())
 
-            for mail_data in reversed(mails_to_emit):
-                self.new_message_received.emit(mail_data)
-                self.last_mail_time = mail_data['timestamp']
-
         except PyPtt.ConnectionClosed:
-            logger.warning("輪詢時偵測到連線中斷，將延遲重連...")
+            logger.warning("輪詢時偵測到連線中斷，暫停輪詢並延遲重連...")
             if self._was_connected:
                 self._was_connected = False
                 self.connection_lost.emit()
                 self.status_updated.emit("連線中斷，正在嘗試重新連線...")
+            # 暫停輪詢，避免斷線期間 timer 每輪各自觸發重連風暴；改由 _deferred_reconnect 串行重試
+            if self.polling_timer:
+                self.polling_timer.stop()
+            if self._waterball_timer:
+                self._waterball_timer.stop()
             QTimer.singleShot(5000, self._deferred_reconnect)
         except PyPtt.MailboxFull:
             # PyPtt 的 del_mail() 偵測到信箱已滿時，會先呼叫 api.logout() 再拋出此例外。
@@ -503,6 +545,20 @@ class PTTWorker(QObject):
                 self._was_connected = False
                 self.connection_lost.emit()
             self.status_updated.emit(f"輪詢錯誤: {e}")
+        finally:
+            # 無論正常結束或中途例外，都 flush 已入庫訊息的通知，避免通知永久遺失
+            self._flush_pending_emits(mails_to_emit)
+
+    def _flush_pending_emits(self, mails_to_emit):
+        """依時間順序（舊→新）發射已收集的新訊息通知並清空清單。
+
+        mails_to_emit 由掃描迴圈以「新→舊」順序收集，故 reversed 後為時間正序。
+        清空清單可避免同一批訊息在成功與例外路徑被重複發射。
+        """
+        for mail_data in reversed(mails_to_emit):
+            self.new_message_received.emit(mail_data)
+            self.last_mail_time = mail_data['timestamp']
+        mails_to_emit.clear()
 
     def _deferred_reconnect(self):
         """延遲重連（由 QTimer.singleShot 觸發），避免阻塞事件迴圈。"""
@@ -510,9 +566,20 @@ class PTTWorker(QObject):
             self._was_connected = True
             self.connection_restored.emit()
             self.status_updated.emit("已重新連線")
-            logger.info("延遲重連成功，下次輪詢將恢復正常")
+            logger.info("延遲重連成功，恢復輪詢")
+            # 恢復先前暫停的輪詢 timer（沿用目前設定值：DB 設定 → config 預設）
+            if self.polling_timer:
+                self.polling_timer.start(self._mail_interval_ms)
+            if self._waterball_timer:
+                self._waterball_timer.start(self._wb_interval_ms)
         else:
-            logger.error("延遲重連失敗，將在下次輪詢時重試")
+            logger.error("延遲重連失敗，稍後再次嘗試")
+            # 已登出(手動關閉/帳密已清空)→ reconnect 恆 False,停止排程避免每 5s 無限空轉
+            if self.ptt.ptt_id is None:
+                logger.info("已登出，停止延遲重連排程")
+                return
+            # 輪詢已暫停，必須自行重新排程重試，否則永遠不會再嘗試重連
+            QTimer.singleShot(5000, self._deferred_reconnect)
 
     # ── 發送訊息：優先佇列機制 ──────────────────────────────
 
@@ -756,8 +823,10 @@ class QueryWorker(QObject):
             if self._replay_queue:
                 QTimer.singleShot(500, self._replay_next_pending)
         except Exception as e:
-            logger.warning(f"[Query] 副 session 登入失敗,使用者狀態功能將無法使用: {e}")
-            self._mark_degraded(f"登入失敗: {e}")
+            # 防禦性遮罩：同 PTTWorker.do_login，self.ptt.login() 把明文密碼傳給 PyPtt。
+            msg = utils.redact_secret(str(e), ptt_pw)
+            logger.warning(f"[Query] 副 session 登入失敗,使用者狀態功能將無法使用: {msg}")
+            self._mark_degraded(f"登入失敗: {msg}")
 
     def _replay_next_pending(self):
         """逐筆重放登入前暫存的 user_info 查詢，每筆間隔 2 秒避免阻塞。"""
