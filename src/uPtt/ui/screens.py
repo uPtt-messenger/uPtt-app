@@ -189,7 +189,7 @@ class LoginWindow(QWidget):
         wordmark_row.setStyleSheet("background: transparent;")
         wm_layout = QHBoxLayout(wordmark_row)
         wm_layout.setContentsMargins(0, 0, 0, 0)
-        wm_layout.setSpacing(10)
+        wm_layout.setSpacing(4)
         self.logo_label = QLabel()
         self.logo_label.setObjectName("logo-label")
         self.logo_label.setTextFormat(Qt.RichText)
@@ -198,9 +198,20 @@ class LoginWindow(QWidget):
             f'<span style="color:{c["text"]};">Ptt</span>'
         )
         self.logo_label.setStyleSheet(f"{mono} font-size: 66px; font-weight: 700; background: transparent;")
+        # 終端游標：直立長方 caret（設計稿 38×66 @84px 字標，按 66px 等比 → 30×52），直角、深綠
         accent_square = QLabel()
-        accent_square.setFixedSize(40, 40)
-        accent_square.setStyleSheet(f"background-color: {c['accent']}; border-radius: 4px; margin-bottom: 10px;")
+        accent_square.setFixedSize(30, 52)
+        _on = f"background-color: {c['accent_hover']}; border-radius: 0px; margin-bottom: 10px;"
+        _off = "background-color: transparent; border-radius: 0px; margin-bottom: 10px;"
+        accent_square.setStyleSheet(_on)
+        # 閃爍：550ms 硬切換（設計稿 1.1s steps(2)），固定尺寸不影響排版
+        self._cursor_timer = QTimer(self)
+        self._cursor_on = True
+        def _blink():
+            self._cursor_on = not self._cursor_on
+            accent_square.setStyleSheet(_on if self._cursor_on else _off)
+        self._cursor_timer.timeout.connect(_blink)
+        self._cursor_timer.start(550)
         wm_layout.addWidget(self.logo_label)
         wm_layout.addWidget(accent_square, 0, Qt.AlignBottom)
         wm_layout.addStretch()
@@ -339,6 +350,7 @@ class LoginWindow(QWidget):
             self._settings.setValue(self._REMEMBER_KEY, user)
         else:
             self._settings.remove(self._REMEMBER_KEY)
+        self._settings.sync()  # macOS/cfprefsd 需強制落盤，否則硬退出時新值遺失
 
         self.login_btn.setEnabled(False)
         self.login_btn.setText("正在連線...")
@@ -743,6 +755,22 @@ class MainWindow(QMainWindow):
         self.splitter.setHandleWidth(1)
         self.splitter.setStyleSheet(f"QSplitter::handle {{ background-color: {GRAPHITE['border']}; }}")
         
+        self._build_sidebar()
+        self._build_chat_pane()
+
+        self.splitter.addWidget(self.sidebar)
+        self.splitter.addWidget(self.chat_area)
+        self.splitter.setStretchFactor(1, 4)
+
+        chat_layout.addWidget(self.splitter, stretch=1)
+        chat_layout.addWidget(self.status_bar_widget)
+
+        self.central_stack.addWidget(self.login_screen)     # index 0
+        self.central_stack.addWidget(self.chat_screen)      # index 1
+        self.scan_setup_screen = ScanSetupScreen()
+        self.central_stack.addWidget(self.scan_setup_screen) # index 2
+
+    def _build_sidebar(self):
         # 左側: 會話清單
         self.sidebar = QWidget()
         self.sidebar.setObjectName("sidebar")
@@ -873,6 +901,7 @@ class MainWindow(QMainWindow):
         sidebar_vbox.addLayout(sidebar_header)
         sidebar_vbox.addWidget(self.contact_list)
         
+    def _build_chat_pane(self):
         # 右側: 對話區
         self.chat_area = QWidget()
         self.chat_area.setObjectName("chat-area")
@@ -1061,10 +1090,6 @@ class MainWindow(QMainWindow):
         chat_vbox.addWidget(self.input_area, stretch=0) # 輸入區不拉伸
         chat_vbox.setSpacing(0)
         
-        self.splitter.addWidget(self.sidebar)
-        self.splitter.addWidget(self.chat_area)
-        self.splitter.setStretchFactor(1, 4)
-
         # 底部狀態列（全寬）：左為對話/未讀計數，右為靜態資訊
         self.status_bar_widget = QWidget()
         self.status_bar_widget.setObjectName("status-bar")
@@ -1086,14 +1111,6 @@ class MainWindow(QMainWindow):
         status_layout.addWidget(self._status_left)
         status_layout.addStretch()
         status_layout.addWidget(self._status_right)
-
-        chat_layout.addWidget(self.splitter, stretch=1)
-        chat_layout.addWidget(self.status_bar_widget)
-
-        self.central_stack.addWidget(self.login_screen)     # index 0
-        self.central_stack.addWidget(self.chat_screen)      # index 1
-        self.scan_setup_screen = ScanSetupScreen()
-        self.central_stack.addWidget(self.scan_setup_screen) # index 2
 
     def init_tray(self):
         """初始化系統匣"""
