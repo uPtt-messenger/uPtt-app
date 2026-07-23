@@ -525,7 +525,8 @@ jobs:
         shell: pwsh
         run: |
           $langDir = "C:\Program Files (x86)\Inno Setup 6\Languages"
-          $url = "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/ChineseTraditional.isl"
+          # ChineseTraditional.isl was promoted from Unofficial/ to an official language; old path now 404s
+          $url = "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/ChineseTraditional.isl"
           Invoke-WebRequest -Uri $url -OutFile "$langDir\ChineseTraditional.isl"
 
       - name: Build installer with Inno Setup
