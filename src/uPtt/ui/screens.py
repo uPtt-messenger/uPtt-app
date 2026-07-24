@@ -20,7 +20,6 @@ from uPtt.ui.settings import SettingsWindow
 from uPtt.ui.search_palette import SearchPalette
 from uPtt.ui.new_chat_modal import NewChatModal
 from uPtt.ui.profile_panel import ProfilePanel
-from uPtt.ui.compose_dialog import ComposeDialog
 from uPtt.ui.styles import build_main_style
 from .theme import FONT_STACK, ASSETS_DIR, render_svg
 from uPtt.ui.widgets import ChatBubble, WaterballBubble, MailCard, ContactItem, ContactListWidget
@@ -677,7 +676,6 @@ class MainWindow(QMainWindow):
     send_requested = Signal(str, str, object, int)  # (receiver_id, text, timestamp, db_msg_id)
     user_info_requested = Signal(str)
     self_info_requested = Signal()  # 個人資料面板:請求查詢登入者本人資訊
-    compose_flush_requested = Signal()  # compose:喚醒 worker drain 立即送純站內信
     priority_online_requested = Signal(str)
     scan_requested = Signal(int)  # scan_days
     skip_scan_requested = Signal()
@@ -711,7 +709,6 @@ class MainWindow(QMainWindow):
         self._search_palette: Optional[SearchPalette] = None  # ⌘K 搜尋面板，單例
         self._new_chat_modal: Optional[NewChatModal] = None  # ⌘N 新對話 modal，單例
         self._profile_panel: Optional[ProfilePanel] = None  # 個人資料面板，單例
-        self._compose_dialog: Optional[ComposeDialog] = None  # 寫站內信 compose，單例
 
         # 初始化 UI 與背景執行緒
         self.init_ui()
@@ -792,7 +789,6 @@ class MainWindow(QMainWindow):
 
         # 連接發信訊號 (跨執行緒會自動排程)
         self.send_requested.connect(self.worker.send_message)
-        self.compose_flush_requested.connect(self.worker.flush_send_queue)
         self.scan_requested.connect(self.worker.do_initial_scan)
         self.skip_scan_requested.connect(self.worker.do_skip_scan)
 
@@ -814,7 +810,6 @@ class MainWindow(QMainWindow):
         # 連接主 Worker 訊號
         self.worker.new_message_received.connect(self.on_new_message)
         self.worker.send_result.connect(self.on_send_result)
-        self.worker.compose_result.connect(self.on_compose_result)
         self.worker.status_updated.connect(lambda s: logger.info(f"Worker Status: {s}"))
         self.worker.disconnected.connect(self._handle_disconnected)
         self.worker.login_result.connect(self.on_login_result)
@@ -1253,8 +1248,6 @@ class MainWindow(QMainWindow):
         settings_action.triggered.connect(self.open_settings)
         profile_action = QAction("個人資料…", self)
         profile_action.triggered.connect(self.open_profile_panel)
-        compose_action = QAction("寫站內信…", self)
-        compose_action.triggered.connect(self.open_compose)
         logout_action = QAction("登出", self)
         logout_action.triggered.connect(self.handle_logout)
         quit_action = QAction("關閉", self)
@@ -1266,7 +1259,6 @@ class MainWindow(QMainWindow):
         tray_menu.addAction(show_action)
         tray_menu.addAction(settings_action)
         tray_menu.addAction(profile_action)
-        tray_menu.addAction(compose_action)
         tray_menu.addAction(rescan_action)
         tray_menu.addAction(logout_action)
         tray_menu.addSeparator()
@@ -1336,24 +1328,6 @@ class MainWindow(QMainWindow):
             self._profile_panel.set_loading()
             self.self_info_requested.emit()  # → query_worker.refresh_self_info（不落 session）
         self._profile_panel.open_centered()
-
-    def open_compose(self):
-        """開啟寫站內信 compose（單例）。送出走 worker plain-mail 路徑。"""
-        if self._compose_dialog is None:
-            self._compose_dialog = ComposeDialog(self.ptt_service.ptt_id, parent=self)
-            self._compose_dialog.send_requested.connect(self._on_compose_send)
-        self._compose_dialog.account_id = self.ptt_service.ptt_id
-        self._compose_dialog.open_centered()
-
-    def _on_compose_send(self, receiver_id, title, content):
-        """compose 送出:入 thread-safe 佇列 + 喚醒 drain。"""
-        self.worker.enqueue_plain_mail(receiver_id, title, content)
-        self.compose_flush_requested.emit()
-
-    def on_compose_result(self, success, message):
-        """worker 回報純站內信結果 → 轉交 compose 對話框顯示。"""
-        if self._compose_dialog is not None:
-            self._compose_dialog.set_result(success, message)
 
     def eventFilter(self, obj, event):
         """過濾按鍵/尺寸事件：處理發送邏輯，並在尺寸變動時重新定位覆蓋層元件。"""
