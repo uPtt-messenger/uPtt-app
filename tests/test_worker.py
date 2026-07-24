@@ -1291,3 +1291,43 @@ def test_refresh_self_info_noop_when_not_logged_in(qtbot, db_mock):
     qw = QueryWorker(svc, db_mock)
     qw.refresh_self_info()
     svc.get_user_info.assert_not_called()
+
+
+def test_enqueue_plain_mail_sends_raw_and_emits_success(qtbot, worker, ptt_service_mock):
+    """compose:純站內信送出的內容不套 uPtt 外殼(原文直送),成功 emit compose_result。"""
+    calls = []
+    def call_side_effect(api, args=None):
+        calls.append((api, args))
+        return None
+    ptt_service_mock.call.side_effect = call_side_effect
+
+    worker.enqueue_plain_mail("bob", "標題", "純內文")
+    with qtbot.waitSignal(worker.compose_result) as blocker:
+        worker.flush_send_queue()
+
+    assert blocker.args == [True, ""]
+    mail_calls = [a for a in calls if a[0] == 'mail']
+    assert len(mail_calls) == 1
+    sent = mail_calls[0][1]
+    assert sent['ptt_id'] == "bob"
+    assert sent['title'] == "標題"
+    assert sent['content'] == "純內文"          # 原文,無 uPtt 分隔線/header
+    assert "uPtt" not in sent['content']
+
+
+def test_enqueue_plain_mail_failure_emits_error(qtbot, worker, ptt_service_mock):
+    ptt_service_mock.call.side_effect = RuntimeError("boom")
+    worker.enqueue_plain_mail("bob", "t", "body")
+    with qtbot.waitSignal(worker.compose_result) as blocker:
+        worker.flush_send_queue()
+    assert blocker.args[0] is False
+    assert blocker.args[1]
+
+
+def test_plain_and_normal_queue_items_coexist(qtbot, worker, ptt_service_mock):
+    """佇列同時含一般 4-tuple 與 compose dict 時,drain 兩者都處理不炸。"""
+    ptt_service_mock.call.return_value = None
+    worker.enqueue_plain_mail("bob", "t", "body")
+    worker.enqueue_send("carol", "hi", None, -1)   # 一般路徑(msg_id=-1)
+    worker._drain_send_queue()  # 不應拋例外
+    assert ptt_service_mock.call.called

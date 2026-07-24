@@ -24,6 +24,7 @@ class PTTWorker(QObject):
     login_result = Signal(bool, str)  # (成功與否, 訊息)
     new_message_received = Signal(dict)  # {'sender': str, 'text': str, 'time': str, 'full_author': str, 'msg_id': Optional[int]}
     send_result = Signal(int, bool, str)  # (DB row id, 成功與否, 錯誤訊息)；msg_id=-1 代表無對應 DB row
+    compose_result = Signal(bool, str)  # 純站內信(compose)發送結果 (成功與否, 錯誤訊息)
     status_updated = Signal(str)
     connection_lost = Signal()       # 連線中斷
     connection_restored = Signal()   # 連線恢復
@@ -593,6 +594,18 @@ class PTTWorker(QObject):
         """
         self._send_queue.put((receiver_id, text, timestamp, msg_id))
 
+    def enqueue_plain_mail(self, receiver_id: str, title: str, content: str):
+        """Thread-safe: 佇列一封「純站內信」(不套 uPtt 格式外殼)。供 compose
+        寫給非 uPtt 用戶。結果透過 compose_result 訊號回報。"""
+        self._send_queue.put({
+            'kind': 'plain', 'receiver_id': receiver_id, 'title': title, 'content': content,
+        })
+
+    @Slot()
+    def flush_send_queue(self):
+        """喚醒 drain(供 compose 等一次性送信立即處理,不必等下次輪詢)。"""
+        self._drain_send_queue()
+
     def _drain_send_queue(self) -> bool:
         """處理所有待發送訊息。在每個阻塞操作之間協作式呼叫。
 
@@ -602,13 +615,36 @@ class PTTWorker(QObject):
         sent = False
         while not self._send_queue.empty():
             try:
-                receiver_id, text, timestamp, msg_id = self._send_queue.get_nowait()
+                item = self._send_queue.get_nowait()
             except queue.Empty:
                 break
-            logger.info(f"[發送插隊] 偵測到待發送訊息，暫停當前任務，優先發送給 {receiver_id}")
-            self._do_send(receiver_id, text, timestamp, msg_id)
+            # 純站內信(compose)以 dict 表示;一般 uPtt 訊息仍為 4-tuple。
+            if isinstance(item, dict) and item.get('kind') == 'plain':
+                self._do_send_plain(item['receiver_id'], item['title'], item['content'])
+            else:
+                receiver_id, text, timestamp, msg_id = item
+                logger.info(f"[發送插隊] 偵測到待發送訊息，暫停當前任務，優先發送給 {receiver_id}")
+                self._do_send(receiver_id, text, timestamp, msg_id)
             sent = True
         return sent
+
+    def _do_send_plain(self, receiver_id: str, title: str, content: str):
+        """發送一封純站內信(不套 uPtt 格式)。emit compose_result(成功, 訊息)。"""
+        try:
+            receiver_id = (receiver_id or "").strip()
+            logger.info(f"正在發送純站內信給 {receiver_id}...")
+            self.ptt.call('mail', {
+                'ptt_id': receiver_id,
+                'title': title or "(無標題)",
+                'content': content,
+                'sign_file': '0',
+                'backup': False,
+            })
+            logger.info(f"純站內信已成功發送至 {receiver_id}")
+            self.compose_result.emit(True, "")
+        except Exception as e:
+            logger.exception(f"發送純站內信過程中發生例外狀況: {e}")
+            self.compose_result.emit(False, "發送失敗，請稍後再試")
 
     @Slot(str, str, object, int)
     def send_message(self, receiver_id, text, timestamp=None, msg_id: int = -1):
