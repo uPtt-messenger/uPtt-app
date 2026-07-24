@@ -22,7 +22,7 @@ class PTTWorker(QObject):
     """
     # 訊號定義
     login_result = Signal(bool, str)  # (成功與否, 訊息)
-    new_message_received = Signal(dict)  # {'sender': str, 'text': str, 'time': str, 'full_author': str}
+    new_message_received = Signal(dict)  # {'sender': str, 'text': str, 'time': str, 'full_author': str, 'msg_id': Optional[int]}
     send_result = Signal(int, bool, str)  # (DB row id, 成功與否, 錯誤訊息)；msg_id=-1 代表無對應 DB row
     status_updated = Signal(str)
     connection_lost = Signal()       # 連線中斷
@@ -325,7 +325,8 @@ class PTTWorker(QObject):
                 'full_author': full_author,
                 'timestamp': msg_time,
                 'mail_type': 'uptt',
-                'subject': ''
+                'subject': '',
+                'msg_id': is_new,
             }
         return emit_dict, True, True
 

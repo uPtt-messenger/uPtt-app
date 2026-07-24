@@ -226,6 +226,31 @@ def test_poll_new_mails_basic(qtbot, worker, ptt_service_mock, db_mock):
     assert blocker.args[0]['text'] == "Test Message Content"
 
 
+def test_poll_new_mails_includes_msg_id_from_save_message(qtbot, worker, ptt_service_mock, db_mock):
+    """new_message_received 應攜帶 save_message 回傳的 DB row id，供 UI 端刪除訊息定位（uPtt 訊息路徑）。"""
+    def call_side_effect(api, args=None):
+        if api == 'get_newest_index':
+            return 1
+        if api == 'get_mail':
+            return {
+                PyPtt.MailField.title: contant.PTT_MSG_TITLE,
+                PyPtt.MailField.author: "SenderID (Nick)",
+                PyPtt.MailField.date: "Wed Mar 15 10:00:00 2026",
+                PyPtt.MailField.content: f"Header\n{contant.PTT_MSG_DIVISION_LINE}\nTest Message Content\n{contant.PTT_MSG_DIVISION_LINE}\nFooter"
+            }
+        return None
+
+    ptt_service_mock.call.side_effect = call_side_effect
+    db_mock.save_message.return_value = 777  # 模擬 SQLite lastrowid
+
+    worker.is_first_polling = False
+
+    with qtbot.waitSignal(worker.new_message_received) as blocker:
+        worker._poll_new_mails()
+
+    assert blocker.args[0]['msg_id'] == 777
+
+
 def test_poll_new_mails_uses_embedded_timestamp(qtbot, worker, ptt_service_mock, db_mock):
     """收到帶有嵌入時間戳的 uPtt 訊息時，應使用發送端的時間戳而非 PTT 信件時間"""
     embedded_time = datetime(2026, 3, 15, 9, 58, 30)
