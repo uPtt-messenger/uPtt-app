@@ -430,6 +430,11 @@ section {
     overflow: hidden;
     box-shadow: var(--shadow);
     text-align: left;
+    /* App 示意畫面鏡射實物的 sage-green 強調色(App accent #8FBFA0);
+       官網自身品牌色維持 coral --accent,不受此作用域覆寫影響 */
+    --accent: #8FBFA0;
+    --accent-hover: #7FB093;
+    --accent-dim: rgba(143, 191, 160, .14);
 }
 
 .app-window-bar {
