@@ -2,7 +2,7 @@ import pytest
 import os
 import sqlite3
 from datetime import datetime, timedelta
-from src.uPtt.db import DatabaseManager
+from uPtt.db import DatabaseManager
 
 @pytest.fixture
 def db_manager(tmp_path):
@@ -521,3 +521,68 @@ def test_get_messages_limit_none_returns_all(db_manager):
 
     msgs_default = db_manager.get_messages(account_id, session_id)
     assert len(msgs_default) == 50
+
+
+def test_search_messages(db_manager):
+    """search_messages：跨 session 命中、英文大小寫不敏感、帳號隔離、時間新→舊。"""
+    acc = "alice"
+    other_acc = "bob"
+    db_manager.upsert_account(acc, acc)
+    db_manager.upsert_account(other_acc, other_acc)
+    db_manager.upsert_session(acc, "carol")
+    db_manager.upsert_session(acc, "dave")
+    db_manager.upsert_session(other_acc, "carol")
+
+    base = datetime(2026, 1, 1, 12, 0, 0)
+    db_manager.save_message(acc, "carol", "carol", acc, "Hello World from carol", base, False)
+    db_manager.save_message(acc, "dave", acc, "dave", "another hello here", base + timedelta(minutes=1), True)
+    db_manager.save_message(acc, "carol", acc, "carol", "unrelated message", base + timedelta(minutes=2), True)
+    # 他帳號的訊息（不得外洩）
+    db_manager.save_message(other_acc, "carol", "carol", other_acc, "secret hello for bob", base, False)
+
+    # ① 跨多 session 命中 + ② 英文大小寫不敏感（查 HELLO 命中 hello/Hello）
+    results = db_manager.search_messages(acc, "HELLO")
+    contents = [r['content'] for r in results]
+    assert "Hello World from carol" in contents      # session carol
+    assert "another hello here" in contents          # session dave
+    assert "unrelated message" not in contents
+    # ③ 只回當前帳號，他帳號訊息不外洩
+    assert "secret hello for bob" not in contents
+    assert all(r['session_id'] in ("carol", "dave") for r in results)
+
+    # 依 timestamp 新→舊排序
+    times = [r['timestamp'] for r in db_manager.search_messages(acc, "hello")]
+    assert times == sorted(times, reverse=True)
+
+    # 空查詢回傳空清單
+    assert db_manager.search_messages(acc, "") == []
+
+
+def test_search_messages_escapes_wildcards(db_manager):
+    """search_messages：% _ 視為字面、單引號不注入。"""
+    acc = "alice"
+    db_manager.upsert_account(acc, acc)
+    db_manager.upsert_session(acc, "carol")
+    base = datetime(2026, 1, 1, 12, 0, 0)
+    db_manager.save_message(acc, "carol", acc, "carol", "50% off today", base, True)
+    db_manager.save_message(acc, "carol", acc, "carol", "50X off tomorrow", base + timedelta(minutes=1), True)
+    db_manager.save_message(acc, "carol", "carol", acc, "path a_b value", base + timedelta(minutes=2), False)
+    db_manager.save_message(acc, "carol", "carol", acc, "path aXb value", base + timedelta(minutes=3), False)
+    db_manager.save_message(acc, "carol", "carol", acc, "O'Brien said hi", base + timedelta(minutes=4), False)
+
+    # % 應被視為字面，不當萬用字元
+    pct = [r['content'] for r in db_manager.search_messages(acc, "50%")]
+    assert "50% off today" in pct
+    assert "50X off tomorrow" not in pct
+
+    # _ 應被視為字面，不當單字元萬用字元
+    us = [r['content'] for r in db_manager.search_messages(acc, "a_b")]
+    assert "path a_b value" in us
+    assert "path aXb value" not in us
+
+    # 單引號不造成 SQL 注入或錯誤
+    assert any("O'Brien" in r['content'] for r in db_manager.search_messages(acc, "O'Brien"))
+
+    # 經典注入字串應查無資料且不刪表
+    assert db_manager.search_messages(acc, "'; DROP TABLE messages;--") == []
+    assert db_manager.search_messages(acc, "50%")  # messages 表仍在

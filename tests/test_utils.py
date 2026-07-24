@@ -7,13 +7,13 @@ import requests
 
 sys.path.append(os.getcwd())
 
-from src.uPtt.utils import (
+from uPtt.utils import (
     gen_random_string, msg_to_mail,
     get_latest_github_release_version,
     is_update_available, get_app_data_dir,
     VersionCheckWorker, resolve_display_name,
 )
-from src.uPtt import contant
+from uPtt import contant
 
 def test_get_app_data_dir():
     with patch('sys.platform', 'win32'):
@@ -114,23 +114,23 @@ def test_get_latest_github_release_version_key_error(mock_get):
 
 # --- is_update_available tests ---
 
-@patch('src.uPtt.utils.get_latest_github_release_version')
-@patch('src.uPtt.utils.__version__', "1.0.0")
+@patch('uPtt.utils.get_latest_github_release_version')
+@patch('uPtt.utils.__version__', "1.0.0")
 def test_is_update_available_true(mock_get_gh):
     """有新版本時回傳 True"""
     mock_get_gh.return_value = "1.1.0"
     assert is_update_available() is True
     mock_get_gh.assert_called_once()
 
-@patch('src.uPtt.utils.get_latest_github_release_version')
-@patch('src.uPtt.utils.__version__', "1.2.0")
+@patch('uPtt.utils.get_latest_github_release_version')
+@patch('uPtt.utils.__version__', "1.2.0")
 def test_is_update_available_false(mock_get_gh):
     """已是最新版本時回傳 False"""
     mock_get_gh.return_value = "1.1.0"
     assert is_update_available() is False
 
-@patch('src.uPtt.utils.get_latest_github_release_version', return_value="1.1.0")
-@patch('src.uPtt.utils.__version__', "1.0.0")
+@patch('uPtt.utils.get_latest_github_release_version', return_value="1.1.0")
+@patch('uPtt.utils.__version__', "1.0.0")
 def test_is_update_available_exception(mock_get_gh):
     with patch('packaging.version.parse', side_effect=Exception("Parse error")):
         assert is_update_available() is False
@@ -139,9 +139,9 @@ def test_is_update_available_exception(mock_get_gh):
 # --- VersionCheckWorker tests ---
 
 class TestVersionCheckWorker:
-    @patch('src.uPtt.utils.is_update_available', return_value=True)
-    @patch('src.uPtt.utils.get_latest_github_release_version', return_value="2.0.0")
-    @patch('src.uPtt.utils.__version__', "1.0.0")
+    @patch('uPtt.utils.is_update_available', return_value=True)
+    @patch('uPtt.utils.get_latest_github_release_version', return_value="2.0.0")
+    @patch('uPtt.utils.__version__', "1.0.0")
     def test_emits_signal_when_update_available(self, *_mocks):
         """有更新時 emit GitHub release 版本"""
         worker = VersionCheckWorker()
@@ -150,7 +150,7 @@ class TestVersionCheckWorker:
         worker.check()
         assert received == ["2.0.0"]
 
-    @patch('src.uPtt.utils.is_update_available', return_value=False)
+    @patch('uPtt.utils.is_update_available', return_value=False)
     def test_no_signal_when_up_to_date(self, _mock):
         worker = VersionCheckWorker()
         received = []
@@ -158,7 +158,7 @@ class TestVersionCheckWorker:
         worker.check()
         assert received == []
 
-    @patch('src.uPtt.utils.is_update_available', side_effect=Exception("network error"))
+    @patch('uPtt.utils.is_update_available', side_effect=Exception("network error"))
     def test_no_crash_on_exception(self, _mock):
         worker = VersionCheckWorker()
         received = []
@@ -169,7 +169,7 @@ class TestVersionCheckWorker:
 
 # --- encode_reply / decode_reply / strip_ansi / parse_embedded_timestamp ---
 
-from src.uPtt.utils import encode_reply, decode_reply, strip_ansi, parse_embedded_timestamp, unwrap_ptt_lines
+from uPtt.utils import encode_reply, decode_reply, strip_ansi, parse_embedded_timestamp, unwrap_ptt_lines
 
 
 def test_encode_decode_reply_roundtrip():

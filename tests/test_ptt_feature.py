@@ -1,7 +1,7 @@
 import pytest
 import time
 from unittest.mock import MagicMock, patch
-from src.uPtt.ptt import UPttService
+from uPtt.ptt import UPttService
 import PyPtt
 from security_utils import TEST_PASSWORD_CANARY
 
@@ -97,6 +97,8 @@ def test_login_failure_redacts_password_from_log(caplog):
 
     assert TEST_PASSWORD_CANARY not in caplog.text
 
+    assert TEST_PASSWORD_CANARY not in caplog.text
+
 def test_login_get_info_failure():
     service = UPttService()
     with patch.object(service.service, 'call'), \
@@ -162,7 +164,7 @@ def test_close():
         mock_close.assert_called_once()
 
 
-# ── reconnect 退避策略與鎖範圍 ──────────────────────────
+# ── Issue #2: reconnect 退避策略與鎖範圍 ──────────────────────────
 # UPttService() 先於 monkeypatch 建立，其 __init__ 會初始化 PyPtt i18n，
 # 使得 PyPtt.LoginTooOften()/LoginError() 可正常實例化。
 
@@ -191,9 +193,9 @@ def test_reconnect_login_too_often_backs_off_60s_max_5(monkeypatch):
     UPttService._last_reconnect_ts = 0.0
 
     sleeps = []
-    monkeypatch.setattr("src.uPtt.ptt.time.sleep", lambda s: sleeps.append(s))
+    monkeypatch.setattr("uPtt.ptt.time.sleep", lambda s: sleeps.append(s))
     login_calls = []
-    monkeypatch.setattr("src.uPtt.ptt.PyPtt.Service",
+    monkeypatch.setattr("uPtt.ptt.PyPtt.Service",
                         _login_raiser(PyPtt.LoginTooOften, login_calls))
 
     result = service.reconnect()
@@ -213,8 +215,8 @@ def test_reconnect_login_error_waits_3s(monkeypatch):
     UPttService._last_reconnect_ts = 0.0
 
     sleeps = []
-    monkeypatch.setattr("src.uPtt.ptt.time.sleep", lambda s: sleeps.append(s))
-    monkeypatch.setattr("src.uPtt.ptt.PyPtt.Service", _login_raiser(PyPtt.LoginError))
+    monkeypatch.setattr("uPtt.ptt.time.sleep", lambda s: sleeps.append(s))
+    monkeypatch.setattr("uPtt.ptt.PyPtt.Service", _login_raiser(PyPtt.LoginError))
 
     result = service.reconnect()
 
@@ -230,7 +232,7 @@ def test_reconnect_login_happens_within_lock(monkeypatch):
     service.ptt_pw = "pass"
     service.service = MagicMock()
     UPttService._last_reconnect_ts = 0.0
-    monkeypatch.setattr("src.uPtt.ptt.time.sleep", lambda s: None)
+    monkeypatch.setattr("uPtt.ptt.time.sleep", lambda s: None)
 
     lock_state_at_login = []
 
@@ -243,7 +245,7 @@ def test_reconnect_login_happens_within_lock(monkeypatch):
         svc.call.side_effect = call
         return svc
 
-    monkeypatch.setattr("src.uPtt.ptt.PyPtt.Service", factory)
+    monkeypatch.setattr("uPtt.ptt.PyPtt.Service", factory)
 
     result = service.reconnect()
 
@@ -268,7 +270,7 @@ def test_reconnect_backoff_releases_lock(monkeypatch):
     def fake_sleep(s):
         if s == 3:  # LoginError 的 3s backoff
             lock_held_during_backoff.append(UPttService._reconnect_lock.locked())
-    monkeypatch.setattr("src.uPtt.ptt.time.sleep", fake_sleep)
+    monkeypatch.setattr("uPtt.ptt.time.sleep", fake_sleep)
 
     # 第一次 login 失敗（LoginError → 3s backoff），第二次成功
     attempts = {'n': 0}
@@ -284,7 +286,7 @@ def test_reconnect_backoff_releases_lock(monkeypatch):
         svc.call.side_effect = call
         return svc
 
-    monkeypatch.setattr("src.uPtt.ptt.PyPtt.Service", factory)
+    monkeypatch.setattr("uPtt.ptt.PyPtt.Service", factory)
 
     result = service.reconnect()
 
@@ -302,9 +304,9 @@ def test_reconnect_wrong_credentials_gives_up_immediately(monkeypatch):
     UPttService._last_reconnect_ts = 0.0
 
     sleeps = []
-    monkeypatch.setattr("src.uPtt.ptt.time.sleep", lambda s: sleeps.append(s))
+    monkeypatch.setattr("uPtt.ptt.time.sleep", lambda s: sleeps.append(s))
     login_calls = []
-    monkeypatch.setattr("src.uPtt.ptt.PyPtt.Service",
+    monkeypatch.setattr("uPtt.ptt.PyPtt.Service",
                         _login_raiser(PyPtt.WrongIDorPassword, login_calls))
 
     result = service.reconnect()
@@ -323,9 +325,9 @@ def test_reconnect_generic_failure_redacts_password_from_log(monkeypatch, caplog
     service.service = MagicMock()
     UPttService._last_reconnect_ts = 0.0
 
-    monkeypatch.setattr("src.uPtt.ptt.time.sleep", lambda s: None)
+    monkeypatch.setattr("uPtt.ptt.time.sleep", lambda s: None)
     boom = Exception(f"boom {{'ptt_pw': '{TEST_PASSWORD_CANARY}'}}")
-    monkeypatch.setattr("src.uPtt.ptt.PyPtt.Service", _login_raiser(lambda: boom))
+    monkeypatch.setattr("uPtt.ptt.PyPtt.Service", _login_raiser(lambda: boom))
 
     result = service.reconnect()
 

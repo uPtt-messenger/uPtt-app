@@ -1,5 +1,7 @@
 import argparse
 import logging
+import shutil
+import ssl
 import sys
 import os
 
@@ -19,14 +21,7 @@ def setup_linux_im():
     if sys.platform == "linux":
         is_wayland = os.environ.get("XDG_SESSION_TYPE") == "wayland"
 
-        # 在 Wayland 環境下，如果不設定 QT_IM_MODULE，Qt 6 通常能透過 Wayland 協定更好地支援輸入法
-        # 但有些使用者環境已經預設設定了 fcitx (通常是針對 X11)，這反而可能導致 Qt 6 無法在 Wayland 下輸入
         if is_wayland:
-            curr_im = os.environ.get("QT_IM_MODULE")
-            if curr_im and curr_im in ["fcitx", "ibus"]:
-                logger.info(f"偵測到 Wayland 環境，將清除不相容的 QT_IM_MODULE ({curr_im}) 以使用原生支援")
-                os.environ.pop("QT_IM_MODULE", None)
-
             # 過濾 Wayland 文字輸入產生的瑣碎偵錯訊息 (qt.qpa.wayland.textinput)
             if "QT_LOGGING_RULES" not in os.environ:
                 os.environ["QT_LOGGING_RULES"] = "qt.qpa.wayland.textinput=false"
@@ -35,10 +30,10 @@ def setup_linux_im():
         else:
             # 如果使用者沒有手動設定 QT_IM_MODULE，嘗試自動設定常見值
             if "QT_IM_MODULE" not in os.environ:
-                if os.path.exists("/usr/bin/ibus"):
+                if shutil.which("ibus"):
                     os.environ["QT_IM_MODULE"] = "ibus"
-                elif os.path.exists("/usr/bin/fcitx") or os.path.exists("/usr/bin/fcitx5"):
-                    os.environ["QT_IM_MODULE"] = "fcitx"
+                elif shutil.which("fcitx5") or shutil.which("fcitx"):
+                    os.environ["QT_IM_MODULE"] = "fcitx"  # fcitx5 的 Qt module 名稱仍為 "fcitx"
 
 
         # 確保 XMODIFIERS 也有設定 (IBus/Fcitx 需要)
@@ -48,6 +43,16 @@ def setup_linux_im():
                 os.environ["XMODIFIERS"] = "@im=ibus"
             elif im_module == "fcitx":
                 os.environ["XMODIFIERS"] = "@im=fcitx"
+
+
+def _ensure_ssl_ca():
+    """若系統找不到 CA bundle（macOS Python.org 安裝常見），改用 certifi。"""
+    if not ssl.get_default_verify_paths().cafile:
+        try:
+            import certifi
+            os.environ.setdefault("SSL_CERT_FILE", certifi.where())
+        except ImportError:
+            pass
 
 
 # --- 日誌設定 ---
@@ -99,6 +104,7 @@ def main():
 
     setup_logging(args.debug)
     setup_linux_im()
+    _ensure_ssl_ca()
 
     # 初始化 Qt 應用程式
     qt_app = QApplication(sys.argv)

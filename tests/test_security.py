@@ -3,7 +3,7 @@ import logging
 import requests
 from unittest.mock import patch
 from urllib.parse import urlparse
-from src.uPtt.ptt import UPttService
+from uPtt.ptt import UPttService
 from security_utils import TEST_PASSWORD_CANARY, PasswordLeakError
 
 def test_password_leak_detection_in_api_call():
