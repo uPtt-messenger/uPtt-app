@@ -14,15 +14,17 @@ from PySide6.QtCore import Qt, Signal, Slot, QThread, QSize, QEvent, QUrl, QTime
 from PySide6.QtGui import QIcon, QAction, QShortcut, QKeySequence, QPixmap, QPainter, QFontMetrics, QDesktopServices, QIntValidator
 from PySide6.QtSvg import QSvgRenderer
 
+# 同套件（uPtt.ui.*）一律相對匯入、跨套件用絕對匯入。相對匯入亦確保
+# render_svg 等 re-export 在專案 src.uPtt/uPtt 雙重載入下維持同一模組物件。
 from uPtt import __version__, config, contant
-from uPtt.ui import theme
-from uPtt.ui.settings import SettingsWindow
-from uPtt.ui.search_palette import SearchPalette
-from uPtt.ui.new_chat_modal import NewChatModal
-from uPtt.ui.profile_panel import ProfilePanel
-from uPtt.ui.styles import build_main_style
+from . import theme
+from .settings import SettingsWindow
+from .search_palette import SearchPalette
+from .new_chat_modal import NewChatModal
+from .profile_panel import ProfilePanel
+from .styles import build_main_style
 from .theme import FONT_STACK, ASSETS_DIR, render_svg
-from uPtt.ui.widgets import ChatBubble, WaterballBubble, MailCard, ContactItem, ContactListWidget
+from .widgets import ChatBubble, WaterballBubble, MailCard, ContactItem, ContactListWidget
 from uPtt.utils import encode_reply, decode_reply, VersionCheckWorker, resolve_display_name
 from uPtt.worker import PTTWorker, QueryWorker
 from uPtt.ptt import UPttService
@@ -1847,7 +1849,7 @@ class MainWindow(QMainWindow):
                 'mail_type': m.get('mail_type', 'uptt'),
                 'subject': m.get('subject', ''),
                 'reply_info': reply_info,
-                'msg_id': m.get('id', -1),
+                'msg_id': m.get('id'),
             }
             if entry['is_me']:
                 entry['send_status'] = m.get('send_status') or 'sent'
@@ -2021,6 +2023,9 @@ class MainWindow(QMainWindow):
             if widget and widget.ptt_id == session_id:
                 widget.set_last_msg_time(_format_contact_time(row.get('last_message_time', '') if row else ''))
                 break
+        # 刪最新訊息會讓該會話 last_message_time 回退，需即時依時間重排到正確位置
+        # （否則順序會暫時錯，得等下次事件才自癒）。
+        self._reposition_contact_by_time(session_id, sessions)
 
     def handle_retry_message(self, msg_id: int):
         """重新傳送發送失敗的自訊息：狀態翻回 pending、重用同 msg_id re-enqueue
@@ -2333,6 +2338,41 @@ class MainWindow(QMainWindow):
         self.contact_list.setItemWidget(new_item, new_widget)
         return new_item
 
+    def _reposition_contact_by_time(self, session_id: str, sessions: list):
+        """依 DB 時間排序，把非釘選聯絡人移到正確位置。sessions 為 get_all_sessions
+        結果（非釘選段已按 last_message_time DESC）。釘選段為手動排序，不動。"""
+        if session_id in self.pinned_ids:
+            return
+        pinned_count = self.contact_list._pinned_count()
+        unpinned_order = [s['id'] for s in sessions if not s.get('is_pinned')]
+        if session_id not in unpinned_order:
+            return
+        target_row = pinned_count + unpinned_order.index(session_id)
+
+        cur_row = -1
+        for i in range(self.contact_list.count()):
+            w = self.contact_list.itemWidget(self.contact_list.item(i))
+            if w and w.ptt_id == session_id:
+                cur_row = i
+                break
+        if cur_row < 0 or cur_row == target_row:
+            return
+
+        item = self.contact_list.item(cur_row)
+        widget = self.contact_list.itemWidget(item)
+        was_selected = (self.contact_list.currentItem() == item)
+        data = widget.get_data()
+        self.contact_list.removeItemWidget(item)
+        self.contact_list.takeItem(cur_row)
+        # target_row 是該項在 unpinned_order 的絕對位置；移除後其餘項相對序不變，
+        # 直接插到 target_row 即重建正確順序（含末端 append 情形）。
+        new_item = self._rebuild_contact_item(data, target_row, False)
+        unread = self.unread_counts.get(session_id, 0)
+        if unread > 0:
+            self.contact_list.itemWidget(new_item).set_unread(unread)
+        if was_selected:
+            self.contact_list.setCurrentItem(new_item)
+
     def _move_contact_to_top(self, sender: str):
         """將指定非釘選聯絡人移至非釘選區頂端 (sender 為小寫)"""
         if sender in self.pinned_ids:
@@ -2457,12 +2497,14 @@ class MainWindow(QMainWindow):
             return
 
         messages = self.db.get_messages(current_acc, ptt_id_lower, limit=None)
+        # 本人訊息的 sender 取帳號的權威顯示 ID（正確大小寫），與對方用 display_name 一致。
+        me_display = self.db.get_account_display_id(current_acc)
         lines = []
         for m in messages:
             ts = m['timestamp']
             ts_dt = datetime.fromisoformat(ts) if isinstance(ts, str) else ts
             ts_str = ts_dt.strftime('%Y-%m-%d %H:%M:%S')
-            sender = current_acc if m['is_me'] else display_name
+            sender = me_display if m['is_me'] else display_name
             _, text = decode_reply(m['content'])
             lines.append(f"[{ts_str}] {sender}: {text}")
 

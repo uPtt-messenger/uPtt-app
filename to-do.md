@@ -51,7 +51,12 @@
 
 > **核心 4 項已完成 ✅** @ `feature/app-redesign`（2026-07-24，commits `083b1cd..6c2168d`，10 個 commit，232→239 測試綠，最終 opus whole-branch review = Ready to merge）。spec `specs/2026-07-24-app-phase3a-menu-actions-design.md`、計畫 `specs/2026-07-24-app-phase3a-menu-actions-plan.md`。流程：brainstorm→spec→plan→subagent-driven 逐 task（developer 實作 + fresh verifier 兩段驗收）+ opus 最終審。
 > 附帶結構調整：`render_svg`/`ASSETS_DIR` 搬到 `theme.py` 解 widgets↔screens 循環 import（screens 保留 re-export）。
-> 延後 5 個 Minor（全外觀、無 bug）：`[re:@]` 剝除邏輯重複、export 自訊息 sender 用帳號 ID、`screens.py` import 風格混用、`m.get('id',-1)` 宜改 `None`、刪最新訊息時聯絡人列未即時重排（自癒）。
+> ~~延後 5 個 Minor~~ **✅ 已全數處理** @ `feature/app-phase3a-minors`（2026-07-24，281 測試綠）：
+> 1. `[re:@]` 剝除重複 → db.py 抽 `_strip_reply_prefix`，3 處併 1
+> 2. export 自訊息 sender → 改用 `db.get_account_display_id`（權威正確大小寫）
+> 3. `screens.py` import 風格混用 → 同套件一律相對、跨套件絕對（相對亦維持 render_svg re-export 同一物件）
+> 4. `m.get('id',-1)` → `m.get('id')`（None；讓無 id 泡泡正確隱藏刪除項）
+> 5. 刪最新訊息聯絡人列未即時重排 → 新增 `_reposition_contact_by_time`，刪後依 DB 時序即時下移
 
 - [x] 訊息 · **刪除（僅本機）**（32）— 新增 `db.delete_message` + 確認框；無 id 的泡泡不出現刪除項
 - [x] 聯絡人 · **重新命名…**（17）— 新增本機 `custom_name` 欄，顯示序 `custom_name > PTT nickname > display_id`，PTT 查詢不覆寫；空字串還原

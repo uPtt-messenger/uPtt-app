@@ -588,6 +588,34 @@ def test_search_messages_escapes_wildcards(db_manager):
     assert db_manager.search_messages(acc, "50%")  # messages 表仍在
 
 
+def test_strip_reply_prefix():
+    from uPtt.db import _strip_reply_prefix
+    # 有回覆包裝 → 只留實際內容
+    assert _strip_reply_prefix("[re:@bob|原文預覽]\n實際內容") == "實際內容"
+    # 無包裝 → 原樣
+    assert _strip_reply_prefix("一般訊息") == "一般訊息"
+    # 有前綴樣但無換行分隔 → 不誤剝
+    assert _strip_reply_prefix("[re:@bob|x] 沒換行") == "[re:@bob|x] 沒換行"
+
+
+def test_get_account_display_id(db_manager):
+    db_manager.upsert_account("TestUser", "TestUser", "Nick")
+    # 以小寫 key 查得正確大小寫顯示 ID
+    assert db_manager.get_account_display_id("testuser") == "TestUser"
+    assert db_manager.get_account_display_id("TestUser") == "TestUser"
+    # 查無帳號 → 回傳傳入值本身
+    assert db_manager.get_account_display_id("ghost") == "ghost"
+
+
+def test_session_summary_strips_reply_wrapper(db_manager):
+    """save_message 後,session 摘要應剝掉回覆包裝(驗證 _strip_reply_prefix 接線)。"""
+    acc, sid = "alice", "bob"
+    db_manager.upsert_account(acc, acc)
+    db_manager.upsert_session(acc, sid)
+    db_manager.save_message(acc, sid, sid, acc, "[re:@alice|你說的]\n這是回覆", datetime.now(), False)
+    sessions = db_manager.get_all_sessions(acc)
+    assert sessions[0]['last_message_text'] == "這是回覆"
+
 def test_get_message_content_returns_stored_content(db_manager):
     acc, sid = "alice", "bob"
     db_manager.upsert_account(acc, acc)
