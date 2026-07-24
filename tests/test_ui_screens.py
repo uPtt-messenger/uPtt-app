@@ -246,6 +246,33 @@ def test_chat_header_shows_custom_name_over_nickname(mock_qthread, mock_worker, 
 @patch('src.uPtt.ui.screens.QueryWorker')
 @patch('src.uPtt.ui.screens.PTTWorker')
 @patch('src.uPtt.ui.screens.QThread')
+def test_new_message_case_only_update_preserves_nickname_over_custom_name(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
+    """水球 case-only 更新路徑不應把 custom_name 誤當 PTT 暱稱寫回 widget._nickname。"""
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        window.add_or_select_contact("bob")
+
+        widget = window.contact_list.itemWidget(window.contact_list.item(0))
+        widget.update_info("bob", "PTTNick")
+        widget.set_custom_name("MyAlias")
+
+        now = datetime.now()
+        msg_data = {
+            'sender': 'Bob', 'text': 'Hello',
+            'time': now.strftime("%H:%M"), 'full_author': 'Bob',  # 無括號暱稱 -> case-only 更新路徑
+            'timestamp': now, 'mail_type': 'uptt',
+        }
+        window.on_new_message(msg_data)
+
+        assert widget._nickname == "PTTNick"
+        assert widget._custom_name == "MyAlias"
+
+
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.QueryWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
 def test_handle_send(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)

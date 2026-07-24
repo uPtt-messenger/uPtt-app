@@ -2019,10 +2019,9 @@ class MainWindow(QMainWindow):
                 if nickname:
                     widget.update_info(sender_id_display, nickname)
                 elif widget.ptt_id_display != sender_id_display:
-                    # 只更新大小寫，保留現有暱稱
-                    nick_text = widget.nickname_label.text()
-                    existing_nick = nick_text[1:-1] if nick_text.startswith("(") and nick_text.endswith(")") else ""
-                    widget.update_info(sender_id_display, existing_nick)
+                    # 只更新大小寫，保留現有暱稱（讀 _nickname 快取，避免誤讀 nickname_label
+                    # 顯示的 resolve_display_name 結果——若有 custom_name 會污染 PTT 暱稱）
+                    widget.update_info(sender_id_display, widget._nickname)
                 widget.set_last_msg_time(now_time)
                 break
 
