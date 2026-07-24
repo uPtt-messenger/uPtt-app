@@ -586,3 +586,18 @@ def test_search_messages_escapes_wildcards(db_manager):
     # 經典注入字串應查無資料且不刪表
     assert db_manager.search_messages(acc, "'; DROP TABLE messages;--") == []
     assert db_manager.search_messages(acc, "50%")  # messages 表仍在
+
+
+def test_get_message_content_returns_stored_content(db_manager):
+    acc, sid = "alice", "bob"
+    db_manager.upsert_account(acc, acc)
+    db_manager.upsert_session(acc, sid)
+    mid = db_manager.save_message(acc, sid, acc, sid, "[re:@bob|x]\n編碼內容", datetime.now(), True)
+    assert db_manager.get_message_content(acc, mid) == "[re:@bob|x]\n編碼內容"
+    # 大小寫不敏感的 account key
+    assert db_manager.get_message_content("ALICE", mid) == "[re:@bob|x]\n編碼內容"
+
+
+def test_get_message_content_unknown_returns_none(db_manager):
+    db_manager.upsert_account("alice", "alice")
+    assert db_manager.get_message_content("alice", 999999) is None

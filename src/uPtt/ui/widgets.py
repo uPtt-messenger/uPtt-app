@@ -46,6 +46,7 @@ class ChatBubble(QWidget):
     """
     reply_requested = Signal(str, bool)  # (message_text, is_me)
     delete_requested = Signal(int)  # message_id
+    retry_requested = Signal(int)  # message_id（重新傳送發送失敗的自訊息）
 
     def __init__(self, text: str, time_str: str, is_me: bool = False,
                  reply_info: Optional[dict] = None, send_status: Optional[str] = None,
@@ -189,6 +190,11 @@ class ChatBubble(QWidget):
 
         if self.message_id is not None:
             menu.addSeparator()
+            # 自訊息且發送失敗 → 提供「重新傳送」
+            if self.is_me and self._send_status == 'failed':
+                retry_action = QAction("重新傳送", self)
+                retry_action.triggered.connect(lambda: self.retry_requested.emit(self.message_id))
+                menu.addAction(retry_action)
             delete_action = QAction("刪除（僅本機）", self)
             delete_action.triggered.connect(lambda: self.delete_requested.emit(self.message_id))
             menu.addAction(delete_action)
