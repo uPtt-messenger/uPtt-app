@@ -19,8 +19,8 @@
 > - Bone/Mono 色值取自畫布 `window.THEMES` ground-truth，並以 beta 同源 palette 校對（修正 status_connecting 用權威 warn 值）。
 > - Logo/Wordmark 主題變體、首次跟隨系統偏好 → 依 YAGNI 未做。
 >
-> **⚠️ 待辦（merge 準備，next）**：本線分岔太早，缺 beta #25 的**非 UI 後端 audit 修正**，需移植 —— 🔴密碼遮罩（防 `str(e)` 把明文密碼寫進 log）、🔴mail anti-forgery（僅成對分隔線才准自動刪信，防被誘刪他人來信）、reconnect storm/退避（retry 3→5、LoginTooOften 60s）/通知遺失修復。清單：`scratchpad/beta-backend-fixes-to-port.md`（會過期，必要時重跑盤點）。
-> **merge 策略（已與使用者確認）**：2026 重設計當基準；併 beta 時 UI 檔 take-ours（刪 beta 的 main_window/login_window/scan_setup/dialogs 拆檔）、port beta 非 UI 後端修正過來。
+> **✅ merge 已完成（beta #27，2026-07-24）**：2026 重設計（Phase 1–3A）已併入 `beta` 基準；beta #25 的**非 UI 後端 audit 修正**皆已 port 到本線並確認在線上 —— ✅密碼遮罩（`ptt.py` 用 `utils.redact_secret` 包住 `str(e)`）、✅mail anti-forgery（`worker.py` 成對分隔線才准自動刪信）、✅reconnect 退避（`ptt.py` LoginTooOften 60s + 共享節流鎖）。Phase 3B 隨後亦併入 beta（#29）。原盤點清單 `scratchpad/beta-backend-fixes-to-port.md` 已過期，無需再跑。
+> **merge 策略（已執行）**：2026 重設計當基準；併 beta 時 UI 檔 take-ours、port beta 非 UI 後端修正過來。
 >
 > ↓ 以下原始計畫留存作對照（勾選狀態未逐一更新，以上方摘要為準）。
 
@@ -65,9 +65,9 @@
 ### 3B 新畫面（對應 artboard）
 
 > **進度 @ `feature/app-phase3b`（2026-07-24）**：⌘K 搜尋、⌘N 新對話 modal、
-> 個人資料面板、偏好設定分頁化 四項已完成（各含測試，全套件 270 綠）。
+> 個人資料面板、偏好設定分頁化 四項已完成（各含測試）。
 > 送水球 overlay **不做**（使用者確認：只需接收水球到聊天視窗，已具備）。
-> 剩 compose、onboarding 兩項。
+> **compose 不做、onboarding 已完成（`fa525d3`，6 測試，全套件 283 綠）→ Phase 3B 全數收尾**。
 
 - [x] **⌘K 搜尋/指令面板** — artboard 27。接 `db.search_messages`（beta 併入）；聯絡人＋訊息，↑↓/↵/esc。`ui/search_palette.py`
 - [x] **新對話 modal（⌘N）** — artboard 23。即時格式查驗（PTT ID 規則＋擋自我）；真存在性沿用 add→archived 流程。`ui/new_chat_modal.py`
