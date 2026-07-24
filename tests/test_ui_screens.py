@@ -851,6 +851,7 @@ def test_export_chat_history_writes_txt_file(mock_qthread, mock_worker, mock_que
         {'content': 'Hello', 'timestamp': '2026-01-01 12:00:00', 'is_me': 0},
         {'content': 'Hi back', 'timestamp': '2026-01-01 12:01:00', 'is_me': 1},
     ]
+    db_mock.get_account_display_id.return_value = "MyID"  # 本人 sender 取權威顯示 ID
     with patch('os.path.exists', return_value=True):
         window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
         qtbot.addWidget(window)
@@ -932,3 +933,56 @@ def test_load_sessions_shows_mute_icon_for_muted_session(mock_qthread, mock_work
         widget = window.contact_list.itemWidget(window.contact_list.item(0))
         assert widget._is_muted is True
         assert widget.mute_icon_label.isVisible() is True
+
+
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.QueryWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_reposition_contact_by_time_moves_to_correct_row(
+        mock_qthread, mock_worker, mock_query_worker, mock_ver_worker,
+        qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
+    """刪最新訊息後,依 DB 時間排序把該聯絡人即時移到正確位置(Minor 5)。"""
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        for name in ("Alice", "Bob", "Carol"):
+            window.add_or_select_contact(name)
+
+    def ids():
+        return [window.contact_list.itemWidget(window.contact_list.item(i)).ptt_id
+                for i in range(window.contact_list.count())]
+
+    order = ids()
+    assert set(order) == {"alice", "bob", "carol"}
+    top = order[0]
+
+    # 模擬 top 的最新訊息被刪 → 其 last_message_time 回退,DB 排序改把它放最末
+    others = [x for x in order if x != top]
+    sessions = [{'id': x, 'is_pinned': 0} for x in others] + [{'id': top, 'is_pinned': 0}]
+    window._reposition_contact_by_time(top, sessions)
+
+    assert ids() == others + [top]  # top 已下移到底端
+
+
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.QueryWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_reposition_contact_noop_when_already_correct(
+        mock_qthread, mock_worker, mock_query_worker, mock_ver_worker,
+        qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        for name in ("Alice", "Bob"):
+            window.add_or_select_contact(name)
+
+    def ids():
+        return [window.contact_list.itemWidget(window.contact_list.item(i)).ptt_id
+                for i in range(window.contact_list.count())]
+
+    order = ids()
+    sessions = [{'id': x, 'is_pinned': 0} for x in order]  # 已是正確順序
+    window._reposition_contact_by_time(order[0], sessions)
+    assert ids() == order  # 不變

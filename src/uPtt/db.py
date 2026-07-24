@@ -7,6 +7,17 @@ from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
+
+def _strip_reply_prefix(text: str) -> str:
+    """把回覆包裝 `[re:@sender|preview]\\n` 剝掉，只留實際內容（供 session 摘要用）。
+
+    與 utils.decode_reply 同語意，但刻意在此保留獨立純字串實作，避免 db 這層
+    為了剝前綴而耦合到 PySide6-heavy 的 utils 模組。"""
+    if text.startswith('[re:@') and ']\n' in text:
+        return text[text.index(']\n') + 2:]
+    return text
+
+
 class DatabaseManager:
     """
     uPtt 資料庫管理器，支援多帳號隔離。
@@ -156,6 +167,19 @@ class DatabaseManager:
                 conn.commit()
         except sqlite3.Error as e:
             logger.error(f"更新帳號失敗：{e}")
+
+    def get_account_display_id(self, account_id: str) -> str:
+        """回傳帳號的顯示用 ID（正確大小寫）。查無則回傳傳入值本身。"""
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT display_id FROM accounts WHERE id = ?", (account_id.lower(),)
+                ).fetchone()
+                if row and row['display_id']:
+                    return row['display_id']
+        except sqlite3.Error as e:
+            logger.error(f"查詢帳號顯示 ID 失敗：{e}")
+        return account_id
 
     # --- 會話與聯絡人 (需傳入 account_id) ---
 
@@ -333,8 +357,7 @@ class DatabaseManager:
                 """, (acc_id_lower, session_id)).fetchone()
 
                 summary = next_msg['content'] if next_msg else ''
-                if summary.startswith('[re:@') and ']\n' in summary:
-                    summary = summary[summary.index(']\n') + 2:]
+                summary = _strip_reply_prefix(summary)
                 last_time = next_msg['timestamp'] if next_msg else None
 
                 conn.execute("""
@@ -371,8 +394,7 @@ class DatabaseManager:
                 # 2. 更新會話摘要並強制設為可見 (收到新訊息或發送訊息時)
                 # 若為回覆訊息格式，摘要只顯示實際內容部分
                 summary = content
-                if summary.startswith('[re:@') and ']\n' in summary:
-                    summary = summary[summary.index(']\n') + 2:]
+                summary = _strip_reply_prefix(summary)
 
                 if is_me:
                     conn.execute("""
@@ -424,8 +446,7 @@ class DatabaseManager:
                 msg_id = cursor.lastrowid
 
                 summary = content
-                if summary.startswith('[re:@') and ']\n' in summary:
-                    summary = summary[summary.index(']\n') + 2:]
+                summary = _strip_reply_prefix(summary)
                 conn.execute("""
                     UPDATE sessions SET
                         last_message_text = CASE
