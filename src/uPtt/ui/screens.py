@@ -18,6 +18,7 @@ from uPtt import __version__, config, contant
 from uPtt.ui import theme
 from uPtt.ui.settings import SettingsWindow
 from uPtt.ui.search_palette import SearchPalette
+from uPtt.ui.new_chat_modal import NewChatModal
 from uPtt.ui.styles import build_main_style
 from .theme import FONT_STACK, ASSETS_DIR, render_svg
 from uPtt.ui.widgets import ChatBubble, WaterballBubble, MailCard, ContactItem, ContactListWidget
@@ -638,6 +639,7 @@ class MainWindow(QMainWindow):
         self._quitting = False  # 退出程序旗標，防止遞迴
         self._settings_window: Optional[SettingsWindow] = None  # 單例，重複開就 raise/activate
         self._search_palette: Optional[SearchPalette] = None  # ⌘K 搜尋面板，單例
+        self._new_chat_modal: Optional[NewChatModal] = None  # ⌘N 新對話 modal，單例
 
         # 初始化 UI 與背景執行緒
         self.init_ui()
@@ -1195,7 +1197,7 @@ class MainWindow(QMainWindow):
 
     def init_shortcuts(self):
         """初始化快捷鍵"""
-        QShortcut(QKeySequence("Ctrl+N"), self, self.new_chat_input.setFocus)
+        QShortcut(QKeySequence("Ctrl+N"), self, self.open_new_chat_modal)
         QShortcut(QKeySequence("Ctrl+K"), self, self.open_search_palette)
         QShortcut(QKeySequence("Ctrl+Q"), self, self.fully_quit)
         QShortcut(QKeySequence("Ctrl+W"), self, self.close_current_chat)
@@ -1230,6 +1232,15 @@ class MainWindow(QMainWindow):
         # 帳號可能於登入後才確定，開窗時同步一次
         self._search_palette.account_id = self.ptt_service.ptt_id
         self._search_palette.open_centered()
+
+    def open_new_chat_modal(self):
+        """開啟 ⌘N 新對話 modal（單例）。輸入有效帳號後開啟對話。"""
+        if self._new_chat_modal is None:
+            self._new_chat_modal = NewChatModal(self.ptt_service.ptt_id, parent=self)
+            self._new_chat_modal.chat_requested.connect(self.add_or_select_contact)
+        # 帳號可能於登入後才確定，開窗時同步一次
+        self._new_chat_modal.account_id = self.ptt_service.ptt_id
+        self._new_chat_modal.open_centered()
 
     def eventFilter(self, obj, event):
         """過濾按鍵/尺寸事件：處理發送邏輯，並在尺寸變動時重新定位覆蓋層元件。"""
