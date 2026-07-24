@@ -1867,8 +1867,10 @@ class MainWindow(QMainWindow):
             else:
                 widget = ChatBubble(msg['text'], msg['time'], msg['is_me'],
                                     reply_info=msg.get('reply_info'),
-                                    send_status=msg.get('send_status'))
+                                    send_status=msg.get('send_status'),
+                                    message_id=msg.get('msg_id'))
                 widget.reply_requested.connect(self.set_reply_to)
+                widget.delete_requested.connect(self.handle_delete_message)
             self.messages_layout.addWidget(widget)
         
         # 標記強制捲到底部，待 rangeChanged 信號觸發時執行
@@ -1895,6 +1897,34 @@ class MainWindow(QMainWindow):
         """取消回覆，隱藏預覽條。"""
         self.reply_to = None
         self.reply_bar.hide()
+
+    def handle_delete_message(self, message_id: int):
+        """刪除單則本機訊息（僅本機，不影響 PTT 上的信件），需使用者確認。"""
+        confirm = QMessageBox.question(
+            self, "確認刪除", "確定要刪除這則訊息嗎？\n(僅從本機刪除，不影響 PTT 上的信件)",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        current_acc = self.ptt_service.ptt_id
+        session_id = self.db.delete_message(current_acc, message_id)
+        if session_id is None:
+            return
+
+        history = self.chat_histories.get(session_id, [])
+        self.chat_histories[session_id] = [m for m in history if m.get('msg_id') != message_id]
+
+        if self.current_chat_id == session_id:
+            self.refresh_chat_display()
+
+        sessions = self.db.get_all_sessions(current_acc)
+        row = next((s for s in sessions if s['id'] == session_id), None)
+        for i in range(self.contact_list.count()):
+            widget = self.contact_list.itemWidget(self.contact_list.item(i))
+            if widget and widget.ptt_id == session_id:
+                widget.set_last_msg_time(_format_contact_time(row.get('last_message_time', '') if row else ''))
+                break
 
     def _get_contact_display_id(self, ptt_id_lower: str) -> str:
         for i in range(self.contact_list.count()):
@@ -2036,6 +2066,7 @@ class MainWindow(QMainWindow):
             'mail_type': data.get('mail_type', 'uptt'),
             'subject': data.get('subject', ''),
             'reply_info': reply_info,
+            'msg_id': data.get('msg_id'),
         }
         # PTT 可能會把自己寄出的信透過輪詢路徑回送（多裝置 backup 等情境）；補上
         # send_status 才能在 UI 顯示 ✓，保持與 handle_send 路徑一致。

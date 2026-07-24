@@ -727,3 +727,49 @@ def test_draft_cleared_on_close(mock_qthread, mock_worker, mock_query_worker, mo
 
         window.handle_contact_action("CloseUser", "CLOSE")
         assert 'closeuser' not in window.session_drafts
+
+
+@patch('src.uPtt.ui.screens.QMessageBox')
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.QueryWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_handle_delete_message_removes_from_history_and_refreshes(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, mock_msgbox, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
+    mock_msgbox.question.return_value = mock_msgbox.Yes
+    db_mock.delete_message.return_value = "bob"
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        window.add_or_select_contact("Bob")
+        window.chat_histories['bob'] = [
+            {'text': 'Hi', 'time': '10:00', 'timestamp': datetime.now(), 'is_me': False, 'msg_id': 5},
+            {'text': 'Yo', 'time': '10:01', 'timestamp': datetime.now(), 'is_me': True, 'msg_id': 6, 'send_status': 'sent'},
+        ]
+        window.current_chat_id = 'bob'
+
+        window.handle_delete_message(5)
+
+        db_mock.delete_message.assert_called_once_with("MyID", 5)
+        assert [m['msg_id'] for m in window.chat_histories['bob']] == [6]
+
+
+@patch('src.uPtt.ui.screens.QMessageBox')
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.QueryWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_handle_delete_message_cancelled_keeps_history(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, mock_msgbox, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
+    mock_msgbox.question.return_value = mock_msgbox.No
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        window.add_or_select_contact("Bob")
+        window.chat_histories['bob'] = [
+            {'text': 'Hi', 'time': '10:00', 'timestamp': datetime.now(), 'is_me': False, 'msg_id': 5},
+        ]
+        window.current_chat_id = 'bob'
+
+        window.handle_delete_message(5)
+
+        db_mock.delete_message.assert_not_called()
+        assert len(window.chat_histories['bob']) == 1
