@@ -205,6 +205,47 @@ def test_load_sessions_from_db(mock_qthread, mock_worker, mock_query_worker, moc
 @patch('src.uPtt.ui.screens.QueryWorker')
 @patch('src.uPtt.ui.screens.PTTWorker')
 @patch('src.uPtt.ui.screens.QThread')
+def test_load_sessions_uses_custom_name_priority(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
+    db_mock.get_all_sessions.return_value = [
+        {
+            'account_id': 'myid', 'id': 'bob', 'display_id': 'Bob',
+            'nickname': 'PTTNick', 'custom_name': 'MyAlias',
+            'last_message_text': '', 'last_message_time': None,
+            'unread_count': 0, 'is_visible': 1, 'is_pinned': 0,
+            'pin_order': 0, 'is_archived': 0,
+        }
+    ]
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        window.load_sessions_from_db()
+
+        widget = window.contact_list.itemWidget(window.contact_list.item(0))
+        assert "(MyAlias)" in widget.nickname_label.text()
+
+
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.QueryWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_chat_header_shows_custom_name_over_nickname(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        window.add_or_select_contact("Bob")
+
+        widget = window.contact_list.itemWidget(window.contact_list.item(0))
+        widget.update_info("Bob", "PTTNick")
+        widget.set_custom_name("MyAlias")
+
+        window.on_contact_selected(window.contact_list.item(0))
+        assert window.chat_header_nick.text() == "MyAlias"
+
+
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.QueryWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
 def test_handle_send(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)

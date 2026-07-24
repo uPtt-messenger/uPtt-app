@@ -52,6 +52,40 @@ def test_contact_item_update_info(qtbot):
     
     item.set_unread(10)
     assert item.unread_label.text() == "10"
-    
+
     item.set_unread(0)
     assert item.unread_label.text() == ""
+
+
+def test_contact_item_custom_name_overrides_nickname_label(qtbot):
+    item = ContactItem("TestUser", "PTTNick", custom_name="MyAlias")
+    qtbot.addWidget(item)
+    assert "(MyAlias)" in item.nickname_label.text()
+    assert "PTTNick" not in item.nickname_label.text()
+
+
+def test_contact_item_set_custom_name_updates_label(qtbot):
+    item = ContactItem("TestUser", "PTTNick")
+    qtbot.addWidget(item)
+    assert "(PTTNick)" in item.nickname_label.text()
+
+    item.set_custom_name("MyAlias")
+    assert "(MyAlias)" in item.nickname_label.text()
+
+    item.set_custom_name("")
+    assert "(PTTNick)" in item.nickname_label.text()
+
+
+def test_contact_item_update_info_keeps_custom_name_priority(qtbot):
+    item = ContactItem("TestUser", "OldNick", custom_name="MyAlias")
+    qtbot.addWidget(item)
+    item.update_info("TestUserCorrect", "NewNick")
+    # PTT 暱稱查詢刷新不應蓋掉本機自訂名稱的顯示優先權
+    assert "(MyAlias)" in item.nickname_label.text()
+
+
+def test_contact_item_get_data_includes_custom_name(qtbot):
+    item = ContactItem("TestUser", "Nick", custom_name="Alias")
+    qtbot.addWidget(item)
+    data = item.get_data()
+    assert data['custom_name'] == "Alias"

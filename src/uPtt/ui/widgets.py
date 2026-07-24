@@ -11,6 +11,7 @@ from PySide6.QtGui import QAction, QDrag
 from uPtt.ui.styles import get_bubble_style, get_waterball_bubble_style
 from uPtt.ui import theme
 from uPtt.ui.theme import FONT_STACK
+from uPtt.utils import resolve_display_name
 
 
 def _apply_bubble_resize(message_label, bubble_container, owner_widget, new_size):
@@ -408,7 +409,8 @@ class ContactItem(QWidget):
     """
     自訂會話清單項目。
     """
-    def __init__(self, ptt_id: str, nickname: str = "", unread_count: int = 0, is_pinned: bool = False, last_msg_time: str = "", parent=None):
+    def __init__(self, ptt_id: str, nickname: str = "", unread_count: int = 0, is_pinned: bool = False,
+                 last_msg_time: str = "", custom_name: str = "", parent=None):
         super().__init__(parent)
         self.ptt_id_display = ptt_id
         self.ptt_id = ptt_id.lower()
@@ -417,6 +419,8 @@ class ContactItem(QWidget):
         self._is_online = False
         self._online_state = 'offline'  # 'online' | 'offline' | 'unknown'
         self._is_archived = False
+        self._nickname = nickname
+        self._custom_name = custom_name
 
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setStyleSheet("background: transparent;")
@@ -462,7 +466,7 @@ class ContactItem(QWidget):
         self.id_label = QLabel(self.ptt_id_display)
         self.id_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
-        self.nickname_label = QLabel(f"({nickname})" if nickname else "")
+        self.nickname_label = QLabel()
         self.nickname_label.setFixedHeight(14)
         self.nickname_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.nickname_label.setWordWrap(False)
@@ -497,7 +501,14 @@ class ContactItem(QWidget):
         # 設定固定高度
         self.setFixedHeight(62)
 
+        self._refresh_secondary_label()
+
         theme.register_restyle(self, lambda w: w._apply_theme())
+
+    def _refresh_secondary_label(self):
+        """依 custom_name > nickname > display_id 優先序，重繪二級標籤（括號名）。"""
+        resolved = resolve_display_name(self.ptt_id_display, self._nickname, self._custom_name)
+        self.nickname_label.setText(f"({resolved})" if resolved != self.ptt_id_display else "")
 
     def _apply_theme(self):
         t = theme.active()
@@ -523,15 +534,19 @@ class ContactItem(QWidget):
             self.id_label.setText(ptt_id_display)
             self.avatar_label.setText(ptt_id_display[0].upper())
 
-        if nickname:
-            self.nickname_label.setText(f"({nickname})")
-        else:
-            self.nickname_label.setText("")
+        self._nickname = nickname
+        self._refresh_secondary_label()
 
         logger.debug(f"UI 已更新資訊: {self.ptt_id} -> ID={ptt_id_display}, Nick={nickname}")
 
     def set_nickname(self, nickname: str):
-        self.update_info(self.ptt_id_display, nickname)
+        self._nickname = nickname
+        self._refresh_secondary_label()
+
+    def set_custom_name(self, custom_name: str):
+        """設定本機自訂顯示名稱（空字串 = 清除，還原為讀 PTT 暱稱）。"""
+        self._custom_name = custom_name
+        self._refresh_secondary_label()
 
     def _update_online_dot_style(self):
         t = theme.active()
@@ -568,12 +583,11 @@ class ContactItem(QWidget):
 
     def get_data(self) -> dict:
         """返回此項目的完整資料，供重建時使用。"""
-        nick_text = self.nickname_label.text()
-        nickname = nick_text[1:-1] if nick_text.startswith("(") and nick_text.endswith(")") else nick_text
         return {
             'ptt_id': self.ptt_id,
             'ptt_id_display': self.ptt_id_display,
-            'nickname': nickname,
+            'nickname': self._nickname,
+            'custom_name': self._custom_name,
             'unread_count': self.unread_count,
             'is_pinned': self.is_pinned,
             'is_online': self._is_online,

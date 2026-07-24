@@ -20,7 +20,7 @@ from uPtt.ui.settings import SettingsWindow
 from uPtt.ui.styles import build_main_style
 from uPtt.ui.theme import FONT_STACK
 from uPtt.ui.widgets import ChatBubble, WaterballBubble, MailCard, ContactItem, ContactListWidget
-from uPtt.utils import encode_reply, decode_reply, VersionCheckWorker
+from uPtt.utils import encode_reply, decode_reply, VersionCheckWorker, resolve_display_name
 from uPtt.worker import PTTWorker, QueryWorker
 from uPtt.ptt import UPttService
 
@@ -1490,6 +1490,7 @@ class MainWindow(QMainWindow):
                 unread_count=s['unread_count'] or 0,
                 is_pinned=is_pinned,
                 last_msg_time=_format_contact_time(s.get('last_message_time', '')),
+                custom_name=s.get('custom_name') or "",
             )
             # 更新顯示大小寫
             widget.update_info(s['display_id'], s['nickname'] or "")
@@ -1772,8 +1773,8 @@ class MainWindow(QMainWindow):
 
         # 每次切換聯絡人時更新視窗標題與聊天標題列
         self.setWindowTitle(f"uPtt - 與 {widget.ptt_id_display} 對話中")
-        nick_text = widget.nickname_label.text()
-        nickname = nick_text[1:-1] if nick_text.startswith("(") and nick_text.endswith(")") else ""
+        resolved_secondary = resolve_display_name(widget.ptt_id_display, widget._nickname, widget._custom_name)
+        nickname = resolved_secondary if resolved_secondary != widget.ptt_id_display else ""
         self._update_chat_header(widget.ptt_id_display, nickname, widget._is_online)
         self._update_chat_header_tooltip(widget.ptt_id)
 
@@ -2152,6 +2153,7 @@ class MainWindow(QMainWindow):
             unread_count=data.get('unread_count', 0),
             is_pinned=is_pinned,
             last_msg_time=data.get('last_msg_time', ''),
+            custom_name=data.get('custom_name', ''),
         )
         new_widget.set_online(data.get('is_online', False))
         if data.get('is_archived'):
