@@ -48,14 +48,19 @@
 > 提醒：設計畫布是**探索稿**，非施工令。下列每項施工前先確認是否真要做、是否適配 PTT-mail 傳輸。
 
 ### 3A 右鍵選單 action（Phase 1 已延後，需後端）
-- [ ] 訊息 · **轉寄給…**（artboard 32）— 需選對象 UI + resend 流程
-- [ ] 訊息 · **釘選訊息**（32）— 需訊息級 pin 的新 DB 欄位（現只有 session 級釘選）
-- [ ] 訊息 · **刪除（僅本機）**（32）— 需單則訊息刪除 API（`db.py` 現只有 `delete_session`）
-- [ ] 聯絡人 · **標記為未讀**（17）— 需可手動設 unread（現 `unread_counts` 只能歸零）
-- [ ] 聯絡人 · **重新命名…**（17）— 需本機暱稱覆寫欄位（現 nickname 來自 PTT 查詢）
-- [ ] 聯絡人 · **靜音通知**（17）— 需靜音欄位 + 通知端判斷
-- [ ] 聯絡人 · **匯出對話紀錄…**（17）— DB → 檔案匯出
-- [ ] 選單項 **destructive 紅字**（封鎖/隱藏/刪除）— Qt `QMenu::item` 屬性選取器無效，需改 `QWidgetAction` 自訂上色（見 `styles.py` 選單註解）
+
+> **核心 4 項已完成 ✅** @ `feature/app-redesign`（2026-07-24，commits `083b1cd..6c2168d`，10 個 commit，232→239 測試綠，最終 opus whole-branch review = Ready to merge）。spec `specs/2026-07-24-app-phase3a-menu-actions-design.md`、計畫 `specs/2026-07-24-app-phase3a-menu-actions-plan.md`。流程：brainstorm→spec→plan→subagent-driven 逐 task（developer 實作 + fresh verifier 兩段驗收）+ opus 最終審。
+> 附帶結構調整：`render_svg`/`ASSETS_DIR` 搬到 `theme.py` 解 widgets↔screens 循環 import（screens 保留 re-export）。
+> 延後 5 個 Minor（全外觀、無 bug）：`[re:@]` 剝除邏輯重複、export 自訊息 sender 用帳號 ID、`screens.py` import 風格混用、`m.get('id',-1)` 宜改 `None`、刪最新訊息時聯絡人列未即時重排（自癒）。
+
+- [x] 訊息 · **刪除（僅本機）**（32）— 新增 `db.delete_message` + 確認框；無 id 的泡泡不出現刪除項
+- [x] 聯絡人 · **重新命名…**（17）— 新增本機 `custom_name` 欄，顯示序 `custom_name > PTT nickname > display_id`，PTT 查詢不覆寫；空字串還原
+- [x] 聯絡人 · **靜音通知**（17）— `is_muted` 欄 + 選單 toggle + 通知 gate 擋靜音 + 聯絡人列靜音 icon（三主題連動）
+- [x] 聯絡人 · **匯出對話紀錄…**（17）— `get_messages(limit=None)` 全撈 → 純文字 `.txt`，`decode_reply` 剝除回覆包裝
+- [ ] 訊息 · **轉寄給…**（artboard 32）— 需選對象 UI + resend 流程 · **本輪砍**（1-1 PTT-mail 需求薄弱）
+- [ ] 訊息 · **釘選訊息**（32）— 需訊息級 pin 的新 DB 欄位（現只有 session 級釘選）· **本輪砍**（需求低）
+- [ ] 聯絡人 · **標記為未讀**（17）— 需可手動設 unread（現 `unread_count` 只能歸零）· **本輪延後**（可選）
+- [ ] 選單項 **destructive 紅字**（封鎖/隱藏/刪除）— Qt `QMenu::item` 屬性選取器無效，需改 `QWidgetAction` 自訂上色（見 `styles.py` 選單註解）· **本輪延後**
 
 ### 3B 新畫面（對應 artboard）
 - [ ] **偏好設定視窗** 7 分頁（帳號/通知/連線·同步/資料·儲存/快捷鍵/進階/關於）— artboard 33-38, 45。多數設定要接目前寫死在 `config.py` 的常數（輪詢間隔、自動清理、max messages 256…）
