@@ -905,3 +905,30 @@ def test_on_new_message_notifies_when_not_muted(mock_qthread, mock_worker, mock_
         })
 
         window.tray_icon.showMessage.assert_called_once()
+
+
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.QueryWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_load_sessions_shows_mute_icon_for_muted_session(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
+    db_mock.get_all_sessions.return_value = [
+        {
+            'account_id': 'myid', 'id': 'bob', 'display_id': 'Bob',
+            'nickname': '', 'custom_name': '', 'last_message_text': '',
+            'last_message_time': None, 'unread_count': 0, 'is_visible': 1,
+            'is_pinned': 0, 'pin_order': 0, 'is_archived': 0, 'is_muted': 1,
+        }
+    ]
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        window.load_sessions_from_db()
+
+        # 需切到聊天頁並 show，isVisible() 才會反映清單項內 icon 的可見狀態
+        window.central_stack.setCurrentIndex(1)
+        window.show()
+
+        widget = window.contact_list.itemWidget(window.contact_list.item(0))
+        assert widget._is_muted is True
+        assert widget.mute_icon_label.isVisible() is True

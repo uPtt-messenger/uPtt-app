@@ -110,3 +110,25 @@ def test_chat_bubble_no_delete_action_without_message_id(qtbot):
     qtbot.addWidget(bubble)
     menu = bubble._build_context_menu()
     assert not any(a.text().startswith("刪除") for a in menu.actions())
+
+
+def test_contact_item_set_muted_shows_and_hides_icon(qtbot):
+    item = ContactItem("TestUser")
+    qtbot.addWidget(item)
+    item.show()  # isVisible() 需頂層被 show 後才反映子項可見狀態
+    assert item.mute_icon_label.isVisible() is False
+
+    item.set_muted(True)
+    assert item.mute_icon_label.isVisible() is True
+    assert not item.mute_icon_label.pixmap().isNull()
+
+    item.set_muted(False)
+    assert item.mute_icon_label.isVisible() is False
+
+
+def test_contact_item_get_data_includes_is_muted(qtbot):
+    item = ContactItem("TestUser")
+    qtbot.addWidget(item)
+    item.set_muted(True)
+    data = item.get_data()
+    assert data['is_muted'] is True

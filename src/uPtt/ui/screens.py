@@ -1463,6 +1463,8 @@ class MainWindow(QMainWindow):
             widget.update_info(s['display_id'], s['nickname'] or "")
             if s.get('is_archived'):
                 widget.set_archived(True)
+            if s.get('is_muted'):
+                widget.set_muted(True)
             self.contact_list.addItem(item)
             self.contact_list.setItemWidget(item, widget)
 
@@ -2156,6 +2158,8 @@ class MainWindow(QMainWindow):
         new_widget.set_online(data.get('is_online', False))
         if data.get('is_archived'):
             new_widget.set_archived(True)
+        if data.get('is_muted'):
+            new_widget.set_muted(True)
         self.contact_list.insertItem(insert_pos, new_item)
         self.contact_list.setItemWidget(new_item, new_widget)
         return new_item

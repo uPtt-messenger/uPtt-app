@@ -1,3 +1,4 @@
+import os
 import logging
 from datetime import datetime
 from typing import Optional
@@ -7,10 +8,10 @@ from PySide6.QtWidgets import (
     QPushButton, QDialog, QTextEdit, QMenu, QApplication
 )
 from PySide6.QtCore import Qt, QSize, Signal
-from PySide6.QtGui import QAction, QDrag
+from PySide6.QtGui import QAction, QDrag, QColor, QPainter, QPixmap
 from uPtt.ui.styles import get_bubble_style, get_waterball_bubble_style
 from uPtt.ui import theme
-from uPtt.ui.theme import FONT_STACK
+from uPtt.ui.theme import FONT_STACK, ASSETS_DIR, render_svg
 from uPtt.utils import resolve_display_name
 
 
@@ -485,6 +486,13 @@ class ContactItem(QWidget):
         main_layout.addWidget(text_container, 1, Qt.AlignVCenter)
         main_layout.addSpacing(4)
 
+        # 3.5 靜音圖示（僅靜音時顯示，位於文字區與時間欄之間，trailing 端）
+        self.mute_icon_label = QLabel()
+        self.mute_icon_label.setFixedSize(14, 14)
+        self.mute_icon_label.setVisible(False)
+        main_layout.addWidget(self.mute_icon_label, alignment=Qt.AlignVCenter)
+        main_layout.addSpacing(4)
+
         # 3. 右側：時間（上）+ 未讀紅點（下）
         right_container = QWidget()
         right_container.setStyleSheet("background: transparent;")
@@ -532,6 +540,7 @@ class ContactItem(QWidget):
         self._update_text_colors()
         self.time_label.setStyleSheet(f"font-size: 10px; color: {t['text_faint']}; background: transparent;")
         self.update_unread_style(self.unread_count)
+        self._update_mute_icon()
 
     def update_info(self, ptt_id_display: str, nickname: str):
         """
@@ -556,9 +565,38 @@ class ContactItem(QWidget):
         self._custom_name = custom_name
         self._refresh_secondary_label()
 
+    def _tinted_icon_pixmap(self, path: str, size: int, color: str) -> QPixmap:
+        """把單色 SVG 依主題色重上色：先用 render_svg 取得形狀 alpha 遮罩，
+        再用 SourceIn 合成模式把遮罩填成目標顏色，讓同一份 SVG 資產能套三主題。"""
+        dpr = self.devicePixelRatioF()
+        base = render_svg(path, size, size, dpr)
+        if base.isNull():
+            return base
+        tinted = QPixmap(base.size())
+        tinted.setDevicePixelRatio(dpr)
+        tinted.fill(Qt.transparent)
+        painter = QPainter(tinted)
+        painter.drawPixmap(0, 0, base)
+        painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+        painter.fillRect(tinted.rect(), QColor(color))
+        painter.end()
+        return tinted
+
+    def _update_mute_icon(self):
+        if not self._is_muted:
+            self.mute_icon_label.setVisible(False)
+            return
+        t = theme.active()
+        path = os.path.join(ASSETS_DIR, "icon_mute.svg")
+        pixmap = self._tinted_icon_pixmap(path, 14, t['text_muted'])
+        self.mute_icon_label.setPixmap(pixmap)
+        self.mute_icon_label.setVisible(True)
+        self.mute_icon_label.setToolTip("已靜音通知")
+
     def set_muted(self, muted: bool):
-        # ponytail: 最小占位，僅供 Task 4 呼叫；圖示與完整邏輯留給 Task 5。
+        """設定並即時反映聯絡人的靜音通知狀態（icon 隨三主題上色）。"""
         self._is_muted = muted
+        self._update_mute_icon()
 
     def _update_online_dot_style(self):
         t = theme.active()
@@ -604,6 +642,7 @@ class ContactItem(QWidget):
             'is_pinned': self.is_pinned,
             'is_online': self._is_online,
             'is_archived': self._is_archived,
+            'is_muted': self._is_muted,
             'last_msg_time': self.time_label.text(),
         }
 
