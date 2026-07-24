@@ -615,3 +615,17 @@ def test_session_summary_strips_reply_wrapper(db_manager):
     db_manager.save_message(acc, sid, sid, acc, "[re:@alice|你說的]\n這是回覆", datetime.now(), False)
     sessions = db_manager.get_all_sessions(acc)
     assert sessions[0]['last_message_text'] == "這是回覆"
+
+def test_get_message_content_returns_stored_content(db_manager):
+    acc, sid = "alice", "bob"
+    db_manager.upsert_account(acc, acc)
+    db_manager.upsert_session(acc, sid)
+    mid = db_manager.save_message(acc, sid, acc, sid, "[re:@bob|x]\n編碼內容", datetime.now(), True)
+    assert db_manager.get_message_content(acc, mid) == "[re:@bob|x]\n編碼內容"
+    # 大小寫不敏感的 account key
+    assert db_manager.get_message_content("ALICE", mid) == "[re:@bob|x]\n編碼內容"
+
+
+def test_get_message_content_unknown_returns_none(db_manager):
+    db_manager.upsert_account("alice", "alice")
+    assert db_manager.get_message_content("alice", 999999) is None

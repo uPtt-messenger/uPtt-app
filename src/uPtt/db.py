@@ -499,6 +499,19 @@ class DatabaseManager:
             logger.error(f"清理殘留 pending 訊息失敗：{e}")
             return 0
 
+    def get_message_content(self, account_id: str, message_id: int) -> Optional[str]:
+        """回傳指定訊息 row 存的（編碼後）content，供重送使用。查無回傳 None。"""
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT content FROM messages WHERE account_id = ? AND id = ?",
+                    (account_id.lower(), message_id)
+                ).fetchone()
+                return row['content'] if row else None
+        except sqlite3.Error as e:
+            logger.error(f"取得訊息內容失敗 (id={message_id})：{e}")
+            return None
+
     def get_messages(self, account_id: str, session_id: str, limit: Optional[int] = 50) -> List[Dict[str, Any]]:
         """取得特定帳號與特定對象的歷史訊息。limit=None 時回傳全部（不截斷）。"""
         try:

@@ -1968,6 +1968,7 @@ class MainWindow(QMainWindow):
                                     message_id=msg.get('msg_id'))
                 widget.reply_requested.connect(self.set_reply_to)
                 widget.delete_requested.connect(self.handle_delete_message)
+                widget.retry_requested.connect(self.handle_retry_message)
             self.messages_layout.addWidget(widget)
         
         # 標記強制捲到底部，待 rangeChanged 信號觸發時執行
@@ -2025,6 +2026,41 @@ class MainWindow(QMainWindow):
         # 刪最新訊息會讓該會話 last_message_time 回退，需即時依時間重排到正確位置
         # （否則順序會暫時錯，得等下次事件才自癒）。
         self._reposition_contact_by_time(session_id, sessions)
+
+    def handle_retry_message(self, msg_id: int):
+        """重新傳送發送失敗的自訊息：狀態翻回 pending、重用同 msg_id re-enqueue
+        （走既有 _do_send，不動 worker）。"""
+        if not msg_id or msg_id <= 0:
+            return
+        current_acc = self.ptt_service.ptt_id
+        content = self.db.get_message_content(current_acc, msg_id)
+        if content is None:
+            return
+
+        # 從快取找到訊息所在會話與時間戳（失敗泡泡必在已載入的對話中）
+        receiver_id = None
+        timestamp = None
+        target_msg = None
+        for chat_id, history in self.chat_histories.items():
+            for msg in history:
+                if msg.get('msg_id') == msg_id:
+                    receiver_id, timestamp, target_msg = chat_id, msg.get('timestamp'), msg
+                    break
+            if receiver_id is not None:
+                break
+        if receiver_id is None:
+            return
+
+        # 狀態翻回 pending（DB + 快取 + 畫面）
+        self.db.update_message_status(msg_id, 'pending')
+        if target_msg is not None:
+            target_msg['send_status'] = 'pending'
+        if self.current_chat_id == receiver_id:
+            self.refresh_chat_display()
+
+        # 重用同 msg_id re-enqueue（thread-safe 佇列 + 喚醒 worker drain）
+        self.worker.enqueue_send(receiver_id, content, timestamp, msg_id)
+        self.send_requested.emit(receiver_id, content, timestamp, msg_id)
 
     def _get_contact_display_id(self, ptt_id_lower: str) -> str:
         for i in range(self.contact_list.count()):
@@ -2216,7 +2252,14 @@ class MainWindow(QMainWindow):
         if updated_chat == self.current_chat_id:
             self.refresh_chat_display()
         if not success:
-            QMessageBox.warning(self, "發送失敗", f"無法發送訊息: {error_msg}")
+            # 非阻斷提示：狀態列閃現，不再彈 QMessageBox 卡住操作。
+            # 使用者可在失敗泡泡右鍵「重新傳送」。
+            self._flash_status(f"發送失敗：{error_msg}（可於訊息右鍵重新傳送）")
+
+    def _flash_status(self, message: str, ms: int = 5000):
+        """在底部狀態列左側暫時顯示提示，ms 後還原為對話/未讀計數。"""
+        self._status_left.setText(message)
+        QTimer.singleShot(ms, self._update_status_bar)
 
     def on_tray_activated(self, reason):
         if reason == QSystemTrayIcon.Trigger:
