@@ -1,15 +1,18 @@
+import os
 import logging
 from datetime import datetime
 from typing import Optional
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QFrame, QSizePolicy, QStyle, QListWidgetItem, QListWidget, QAbstractItemView,
-    QPushButton, QDialog, QTextEdit, QPlainTextEdit, QMenu, QCheckBox
+    QPushButton, QDialog, QTextEdit, QMenu, QApplication
 )
-from PySide6.QtCore import Qt, QSize, Signal, QTimer
-from PySide6.QtGui import QAction, QDrag, QPainter, QPen, QColor
-from uPtt.ui import styles
+from PySide6.QtCore import Qt, QSize, Signal
+from PySide6.QtGui import QAction, QDrag, QColor, QPainter, QPixmap
 from uPtt.ui.styles import get_bubble_style, get_waterball_bubble_style
+from uPtt.ui import theme
+from uPtt.ui.theme import FONT_STACK, ASSETS_DIR, render_svg
+from uPtt.utils import resolve_display_name
 
 
 def _apply_bubble_resize(message_label, bubble_container, owner_widget, new_size):
@@ -37,108 +40,62 @@ def _apply_bubble_resize(message_label, bubble_container, owner_widget, new_size
 
 logger = logging.getLogger("uPtt.ui.widgets")
 
-
-class MessageInput(QPlainTextEdit):
-    """訊息輸入框：Enter 送出、Shift+Enter 換行；隨內容自動長高（上限約 4 行後內部捲動）。"""
-    send_requested = Signal()
-
-    _MAX_LINES = 4
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setObjectName("message-edit")
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.setTabChangesFocus(True)
-        # 內容變動時重算高度
-        self.document().documentLayout().documentSizeChanged.connect(self._adjust_height)
-        self._adjust_height()
-
-    def keyPressEvent(self, event):
-        # Enter 送出；Shift+Enter 交給父類插入換行
-        if event.key() in (Qt.Key_Return, Qt.Key_Enter) and not (event.modifiers() & Qt.ShiftModifier):
-            self.send_requested.emit()
-            return
-        super().keyPressEvent(event)
-
-    def _adjust_height(self, *_):
-        fm = self.fontMetrics()
-        line_h = fm.lineSpacing()
-        doc = self.document()
-        # QPlainTextEdit 的 documentSize().height() 以「行數」為單位
-        line_count = int(doc.size().height()) or 1
-        lines = max(1, min(self._MAX_LINES, line_count))
-        # 上下 padding（QSS）+ document margin + 邊框
-        extra = int(doc.documentMargin() * 2) + self.frameWidth() * 2 + 12
-        self.setFixedHeight(line_h * lines + extra)
-
-
 class ChatBubble(QWidget):
     """
     自訂對話氣泡元件 (極致緊湊與貼合版)。
     """
     reply_requested = Signal(str, bool)  # (message_text, is_me)
+    delete_requested = Signal(int)  # message_id
 
     def __init__(self, text: str, time_str: str, is_me: bool = False,
-                 reply_info: Optional[dict] = None, send_status: Optional[str] = None, parent=None):
+                 reply_info: Optional[dict] = None, send_status: Optional[str] = None,
+                 message_id: Optional[int] = None, parent=None):
         super().__init__(parent)
         self.is_me = is_me
         self._text = text
+        self._reply_info = reply_info
+        self._send_status = send_status
+        self.message_id = message_id
 
         self.main_layout = QHBoxLayout(self)
         self.main_layout.setContentsMargins(0, 1, 0, 1)
         self.main_layout.setSpacing(4)
 
         self.bubble_container = QFrame()
-        self.bubble_container.setStyleSheet(get_bubble_style(is_me))
         self.bubble_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
 
-        t = styles.theme()
-
         self.content_layout = QVBoxLayout(self.bubble_container)
-        self.content_layout.setContentsMargins(12, 8, 12, 8)
+        self.content_layout.setContentsMargins(10, 6, 10, 6)
         self.content_layout.setSpacing(4)
 
         # 若有回覆引用資訊，在訊息上方加一個引用區塊
+        # 本人氣泡底色現為實心 accent 綠（見 get_bubble_style），引用區塊要跟著換成
+        # 深色系，否則綠字疊綠底會看不清楚；對方氣泡維持原本的綠色點綴風格。
+        self.quote_frame = None
+        self.quote_sender_label = None
+        self.quote_preview_label = None
         if reply_info:
-            quote_frame = QFrame()
-            quote_frame.setStyleSheet(f"""
-                QFrame {{
-                    background-color: {t['quoteBg']};
-                    border-left: 2px solid {t['quoteBar']};
-                    border-radius: 0px 4px 4px 0px;
-                }}
-            """)
-            quote_layout = QVBoxLayout(quote_frame)
-            quote_layout.setContentsMargins(9, 5, 9, 5)
+            self.quote_frame = QFrame()
+            quote_layout = QVBoxLayout(self.quote_frame)
+            quote_layout.setContentsMargins(6, 3, 6, 3)
             quote_layout.setSpacing(1)
 
-            sender_label = QLabel(f"@{reply_info['sender']}")
-            sender_label.setTextFormat(Qt.PlainText)  # 引用來源同屬不受信任內容
-            sender_label.setStyleSheet(f"color: {t['accent']}; font-size: 10px; font-weight: bold; background: transparent;")
+            self.quote_sender_label = QLabel(f"@{reply_info['sender']}")
+            self.quote_preview_label = QLabel(reply_info['preview'])
+            self.quote_preview_label.setWordWrap(True)
 
-            preview_label = QLabel(reply_info['preview'])
-            preview_label.setTextFormat(Qt.PlainText)  # 引用預覽同屬不受信任內容
-            preview_label.setStyleSheet(f"color: {t['muted']}; font-size: 12px; background: transparent;")
-            preview_label.setWordWrap(True)
-
-            quote_layout.addWidget(sender_label)
-            quote_layout.addWidget(preview_label)
-            self.content_layout.addWidget(quote_frame)
+            quote_layout.addWidget(self.quote_sender_label)
+            quote_layout.addWidget(self.quote_preview_label)
+            self.content_layout.addWidget(self.quote_frame)
 
         self.message_label = QLabel(text)
-        # 站內信內容來自任意 PTT 使用者（信任邊界）；強制純文字算繪，
-        # 避免預設 AutoText 把夾帶的 <img src=遠端>/<a> 當 rich text 執行。
-        self.message_label.setTextFormat(Qt.PlainText)
         self.message_label.setWordWrap(True)
         self.message_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         # 移除硬編碼寬度，改由 resizeEvent 動態控制
         self.message_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
-        self.message_label.setStyleSheet("font-size: 13px; font-weight: normal; background: transparent;")
         self.content_layout.addWidget(self.message_label)
 
         self.time_label = QLabel(time_str)
-        self.time_label.setStyleSheet(f"color: {t['faint']}; font-size: 10px;")
         self.time_label.setAlignment(Qt.AlignBottom)
 
         # 送出狀態指示標籤（僅自己的訊息）
@@ -147,13 +104,10 @@ class ChatBubble(QWidget):
         if is_me and send_status:
             if send_status == 'sent':
                 self.status_label.setText("✓")
-                self.status_label.setStyleSheet(f"color: {t['online']}; font-size: 10px;")
             elif send_status == 'failed':
                 self.status_label.setText("✗")
-                self.status_label.setStyleSheet(f"color: {t['danger']}; font-size: 10px;")
             elif send_status == 'pending':
                 self.status_label.setText("⏳")
-                self.status_label.setStyleSheet(f"color: {t['faint']}; font-size: 10px;")
 
         if is_me:
             self.main_layout.addStretch()
@@ -174,16 +128,77 @@ class ChatBubble(QWidget):
             widget.setContextMenuPolicy(Qt.CustomContextMenu)
             widget.customContextMenuRequested.connect(self._show_context_menu_from_child)
 
+        theme.register_restyle(self, lambda w: w._apply_theme())
+
+    def _apply_theme(self):
+        t = theme.active()
+        self.bubble_container.setStyleSheet(get_bubble_style(self.is_me))
+
+        if self.quote_frame is not None:
+            if self.is_me:
+                self.quote_frame.setStyleSheet(f"""
+                    QFrame {{
+                        background-color: rgba(14, 17, 20, 0.14);
+                        border-left: 2px solid {t['bg']};
+                        border-radius: 2px;
+                    }}
+                """)
+                quote_sender_color = t['bg']
+                quote_preview_color = "rgba(14, 17, 20, 0.65)"
+            else:
+                self.quote_frame.setStyleSheet(f"""
+                    QFrame {{
+                        background-color: rgba(143, 191, 160, 0.08);
+                        border-left: 2px solid {t['accent']};
+                        border-radius: 2px;
+                    }}
+                """)
+                quote_sender_color = t['accent']
+                quote_preview_color = t['text_muted']
+            self.quote_sender_label.setStyleSheet(
+                f"color: {quote_sender_color}; font-size: 11px; font-weight: bold; background: transparent;"
+            )
+            self.quote_preview_label.setStyleSheet(
+                f"color: {quote_preview_color}; font-size: 11px; background: transparent;"
+            )
+
+        self.time_label.setStyleSheet(f"color: {t['text_muted']}; font-size: 10px;")
+
+        if self.is_me and self._send_status:
+            if self._send_status == 'sent':
+                self.status_label.setStyleSheet(f"color: {t['status_online']}; font-size: 10px;")
+            elif self._send_status == 'failed':
+                self.status_label.setStyleSheet(f"color: {t['danger']}; font-size: 10px;")
+            elif self._send_status == 'pending':
+                self.status_label.setStyleSheet(f"color: {t['msg_pending']}; font-size: 10px;")
+
     def _show_context_menu_from_child(self, pos):
         # 將子元件座標轉換為全域座標後顯示選單
         self._show_context_menu(self.sender().mapToGlobal(pos))
 
-    def _show_context_menu(self, global_pos):
+    def _build_context_menu(self) -> QMenu:
         menu = QMenu(self)
-        reply_action = QAction("回覆", self)
+
+        copy_action = QAction("複製文字\t⌘C", self)
+        copy_action.triggered.connect(lambda: QApplication.clipboard().setText(self._text))
+        menu.addAction(copy_action)
+
+        reply_action = QAction("引用回覆\t⇧⌘R", self)
         reply_action.triggered.connect(lambda: self.reply_requested.emit(self._text, self.is_me))
         menu.addAction(reply_action)
-        menu.exec(global_pos)
+
+        if self.message_id is not None:
+            menu.addSeparator()
+            delete_action = QAction("刪除（僅本機）", self)
+            delete_action.triggered.connect(lambda: self.delete_requested.emit(self.message_id))
+            menu.addAction(delete_action)
+
+        # ponytail: 設計稿另有「轉寄給…」「釘選訊息」，轉寄需要新聯絡人選擇 UI、
+        # 釘選需要 message 級新欄位 + 釘選面板，兩者都延後至下一輪 Phase 3。
+        return menu
+
+    def _show_context_menu(self, global_pos):
+        self._build_context_menu().exec(global_pos)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -191,54 +206,60 @@ class ChatBubble(QWidget):
 
 class WaterballBubble(QWidget):
     """
-    水球訊息氣泡，帶有 💧 標記和藍色調背景。
+    水球訊息：置中的低調細 pill（非左右對話氣泡），內容依序為
+    💧 標記 / 訊息內容 / 時間，兩側以 stretch 置中，對齊設計稿。
+    水球是即時提示訊息而非一般對話，故不分本人/對方分靠左靠右。
     """
     def __init__(self, text: str, time_str: str, is_me: bool = False, parent=None):
         super().__init__(parent)
         self.is_me = is_me
 
         self.main_layout = QHBoxLayout(self)
-        self.main_layout.setContentsMargins(0, 1, 0, 1)
-        self.main_layout.setSpacing(4)
-
-        t = styles.theme()
+        self.main_layout.setContentsMargins(0, 4, 0, 4)
+        self.main_layout.setSpacing(0)
+        self.main_layout.addStretch(1)
 
         self.bubble_container = QFrame()
-        self.bubble_container.setStyleSheet(get_waterball_bubble_style(is_me))
         self.bubble_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
 
-        content_layout = QVBoxLayout(self.bubble_container)
-        content_layout.setContentsMargins(8, 4, 12, 4)
-        content_layout.setSpacing(2)
+        content_layout = QHBoxLayout(self.bubble_container)
+        content_layout.setContentsMargins(10, 4, 10, 4)
+        content_layout.setSpacing(6)
 
         # 水球標記
-        tag_label = QLabel("💧 水球")
-        tag_label.setStyleSheet(f"color: {t['waterballInk']}; font-size: 10px; font-weight: bold; background: transparent; border: none;")
-        content_layout.addWidget(tag_label)
+        self.tag_label = QLabel("💧 水球")
+        content_layout.addWidget(self.tag_label)
 
         # 訊息內容
         self.message_label = QLabel(text)
-        self.message_label.setTextFormat(Qt.PlainText)  # 不受信任內容，禁止 HTML 算繪
         self.message_label.setWordWrap(True)
         self.message_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
         self.message_label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
-        self.message_label.setStyleSheet("font-size: 12px; background: transparent;")
         content_layout.addWidget(self.message_label)
 
-        time_label = QLabel(time_str)
-        time_label.setStyleSheet(f"color: {t['faint']}; font-size: 10px;")
-        time_label.setAlignment(Qt.AlignBottom)
+        # 時間（含分隔點，行內顯示於 pill 尾端）
+        self.time_label = QLabel(f"·  {time_str}")
+        content_layout.addWidget(self.time_label)
 
-        if is_me:
-            self.main_layout.addStretch()
-            self.main_layout.addWidget(time_label)
-            self.main_layout.addWidget(self.bubble_container)
-        else:
-            self.main_layout.addWidget(self.bubble_container)
-            self.main_layout.addWidget(time_label)
-            self.main_layout.addStretch()
+        self.main_layout.addWidget(self.bubble_container)
+        self.main_layout.addStretch(1)
 
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+
+        theme.register_restyle(self, lambda w: w._apply_theme())
+
+    def _apply_theme(self):
+        t = theme.active()
+        self.bubble_container.setStyleSheet(get_waterball_bubble_style(self.is_me))
+        self.tag_label.setStyleSheet(
+            f"color: {t['accent']}; font-size: 10px; font-weight: bold; background: transparent; border: none;"
+        )
+        self.message_label.setStyleSheet(
+            f"color: {t['text_muted']}; font-size: 12px; background: transparent; border: none;"
+        )
+        self.time_label.setStyleSheet(
+            f"color: {t['text_faint']}; font-size: 10px; background: transparent; border: none;"
+        )
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -257,24 +278,15 @@ class MailCard(QWidget):
         self.full_text = text
         self.subject = subject
 
-        t = styles.theme()
-
         main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(0, 2, 0, 2)
         main_layout.setSpacing(0)
 
         self.card = QFrame()
-        self.card.setStyleSheet(f"""
-            QFrame {{
-                background-color: {t['mail']};
-                border: 1px dashed {t['mailBorder']};
-                border-radius: 6px;
-            }}
-        """)
         self.card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
         card_layout = QVBoxLayout(self.card)
-        card_layout.setContentsMargins(14, 10, 14, 10)
+        card_layout.setContentsMargins(12, 8, 12, 8)
         card_layout.setSpacing(6)
 
         # 標題列：✉️ 圖示 + 主旨 + 時間
@@ -285,46 +297,64 @@ class MailCard(QWidget):
         icon_label.setStyleSheet("font-size: 14px; border: none;")
         icon_label.setFixedWidth(20)
 
-        subject_label = QLabel(subject if subject else "(無主旨)")
-        subject_label.setTextFormat(Qt.PlainText)  # 信件主旨為不受信任內容
-        subject_label.setStyleSheet(f"""
-            font-weight: bold;
-            font-size: 12px;
-            color: {t['accent']};
-            border: none;
-        """)
-        subject_label.setWordWrap(False)
+        self.subject_label = QLabel(subject if subject else "(無主旨)")
+        self.subject_label.setWordWrap(False)
 
-        time_label = QLabel(time_str)
-        time_label.setStyleSheet(f"color: {t['faint']}; font-size: 10px; border: none;")
-        time_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.time_label = QLabel(time_str)
+        self.time_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
         header_layout.addWidget(icon_label)
-        header_layout.addWidget(subject_label, 1)
-        header_layout.addWidget(time_label)
+        header_layout.addWidget(self.subject_label, 1)
+        header_layout.addWidget(self.time_label)
 
         # 分隔線
-        divider = QFrame()
-        divider.setFrameShape(QFrame.HLine)
-        divider.setStyleSheet(f"background-color: {t['divider']}; border: none; max-height: 1px;")
+        self.divider = QFrame()
+        self.divider.setFrameShape(QFrame.HLine)
 
         # 內文預覽 (最多 MAX_LINES 行)
         lines = text.splitlines()
         preview_text = "\n".join(lines[:self.MAX_LINES])
-        content_label = QLabel(preview_text if preview_text else " ")
-        content_label.setTextFormat(Qt.PlainText)  # 不受信任內容，禁止 HTML 算繪
-        content_label.setWordWrap(True)
-        content_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        content_label.setStyleSheet(f"color: {t['ink2']}; font-size: 12px; border: none;")
+        self.content_label = QLabel(preview_text if preview_text else " ")
+        self.content_label.setWordWrap(True)
+        self.content_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
         card_layout.addLayout(header_layout)
-        card_layout.addWidget(divider)
-        card_layout.addWidget(content_label)
+        card_layout.addWidget(self.divider)
+        card_layout.addWidget(self.content_label)
 
         # 若超過 MAX_LINES 行，顯示「展開全文」按鈕
+        self.expand_btn = None
         if len(lines) > self.MAX_LINES:
-            expand_btn = QPushButton("展開全文 ▾")
-            expand_btn.setStyleSheet(f"""
+            self.expand_btn = QPushButton("展開全文 ▾")
+            self.expand_btn.setCursor(Qt.PointingHandCursor)
+            self.expand_btn.clicked.connect(self._show_full_content)
+            card_layout.addWidget(self.expand_btn)
+
+        main_layout.addWidget(self.card)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+
+        theme.register_restyle(self, lambda w: w._apply_theme())
+
+    def _apply_theme(self):
+        t = theme.active()
+        self.card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {t['surface']};
+                border: 1px solid {t['border']};
+                border-radius: 8px;
+            }}
+        """)
+        self.subject_label.setStyleSheet(f"""
+            font-weight: bold;
+            font-size: 13px;
+            color: {t['accent']};
+            border: none;
+        """)
+        self.time_label.setStyleSheet(f"color: {t['text_muted']}; font-size: 10px; border: none;")
+        self.divider.setStyleSheet(f"background-color: {t['border']}; border: none; max-height: 1px;")
+        self.content_label.setStyleSheet(f"color: {t['text']}; font-size: 13px; border: none;")
+        if self.expand_btn is not None:
+            self.expand_btn.setStyleSheet(f"""
                 QPushButton {{
                     color: {t['accent']};
                     background: transparent;
@@ -334,29 +364,17 @@ class MailCard(QWidget):
                     padding: 0;
                 }}
                 QPushButton:hover {{
-                    color: {t['ink']};
+                    color: {t['accent_tint_hover']};
                     text-decoration: underline;
                 }}
             """)
-            expand_btn.setCursor(Qt.PointingHandCursor)
-            expand_btn.clicked.connect(self._show_full_content)
-            card_layout.addWidget(expand_btn)
-
-        main_layout.addWidget(self.card)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        total_w = event.size().width()
-        if total_w > 0:
-            self.card.setMaximumWidth(int(total_w * 0.72))
 
     def _show_full_content(self):
-        t = styles.theme()
+        t = theme.active()
         dialog = QDialog(self)
         dialog.setWindowTitle(f"✉️  {self.subject if self.subject else '信件內容'}")
         dialog.setMinimumSize(520, 420)
-        dialog.setStyleSheet(f"background-color: {t['bg']}; color: {t['ink2']};")
+        dialog.setStyleSheet(f"background-color: {t['bg']}; color: {t['text']};")
 
         layout = QVBoxLayout(dialog)
         layout.setSpacing(10)
@@ -366,12 +384,12 @@ class MailCard(QWidget):
         text_edit.setPlainText(self.full_text)
         text_edit.setStyleSheet(f"""
             QTextEdit {{
-                background-color: {t['surface']};
-                color: {t['ink2']};
+                background-color: {t['surface_2']};
+                color: {t['text']};
                 border: 1px solid {t['border']};
                 border-radius: 4px;
                 font-size: 13px;
-                font-family: "JetBrains Mono", "Cascadia Code", "SF Mono", "Menlo", "Consolas", "DejaVu Sans Mono", monospace;
+                font-family: {FONT_STACK};
                 padding: 8px;
             }}
         """)
@@ -379,14 +397,14 @@ class MailCard(QWidget):
         close_btn = QPushButton("關閉")
         close_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {t['surface2']};
-                color: {t['ink2']};
-                border: 1px solid {t['border']};
+                background-color: {t['surface_2']};
+                color: {t['text']};
+                border: 1px solid {t['border_strong']};
                 border-radius: 4px;
                 padding: 6px 20px;
                 font-size: 13px;
             }}
-            QPushButton:hover {{ background-color: {t['selection']}; }}
+            QPushButton:hover {{ background-color: {t['accent_bg']}; }}
         """)
         close_btn.clicked.connect(dialog.accept)
 
@@ -399,19 +417,22 @@ class ContactItem(QWidget):
     """
     自訂會話清單項目。
     """
-    def __init__(self, ptt_id: str, nickname: str = "", unread_count: int = 0, is_pinned: bool = False, last_msg_time: str = "", parent=None):
+    def __init__(self, ptt_id: str, nickname: str = "", unread_count: int = 0, is_pinned: bool = False,
+                 last_msg_time: str = "", custom_name: str = "", parent=None):
         super().__init__(parent)
         self.ptt_id_display = ptt_id
         self.ptt_id = ptt_id.lower()
         self.is_pinned = is_pinned
         self.unread_count = unread_count
         self._is_online = False
+        self._online_state = 'offline'  # 'online' | 'offline' | 'unknown'
         self._is_archived = False
+        self._nickname = nickname
+        self._custom_name = custom_name
+        self._is_muted = False
 
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setStyleSheet("background: transparent;")
-
-        t = styles.theme()
 
         # 主佈局：左右排列
         main_layout = QHBoxLayout(self)
@@ -422,7 +443,6 @@ class ContactItem(QWidget):
         self.pin_bar = QFrame()
         self.pin_bar.setFixedWidth(3)
         self.pin_bar.setFixedHeight(32)
-        self._update_pin_style()
         main_layout.addWidget(self.pin_bar, alignment=Qt.AlignVCenter)
         main_layout.addSpacing(8)
 
@@ -432,24 +452,14 @@ class ContactItem(QWidget):
         avatar_container.setStyleSheet("background: transparent;")
 
         self.avatar_label = QLabel(ptt_id[0].upper() if ptt_id else "?", avatar_container)
-        # 頭像字首取自對方 ID（不受信任內容），一併禁止 HTML 算繪
-        self.avatar_label.setTextFormat(Qt.TextFormat.PlainText)
         self.avatar_label.setFixedSize(36, 36)
         self.avatar_label.move(0, 2)
         self.avatar_label.setAlignment(Qt.AlignCenter)
-        self.avatar_label.setStyleSheet(f"""
-            background-color: {t['accentSoft']};
-            color: {t['ink']};
-            border-radius: 8px;
-            font-weight: bold;
-            font-size: 13px;
-        """)
 
         # 在線狀態指示點 (右下角)
         self.online_dot = QLabel(avatar_container)
         self.online_dot.setFixedSize(10, 10)
         self.online_dot.move(27, 28)
-        self._update_online_dot_style()
 
         main_layout.addWidget(avatar_container, alignment=Qt.AlignVCenter)
         main_layout.addSpacing(8)
@@ -463,31 +473,24 @@ class ContactItem(QWidget):
         text_layout.setSpacing(2)
 
         self.id_label = QLabel(self.ptt_id_display)
-        # 對方 PTT ID/暱稱同屬不受信任內容，禁止 HTML 算繪；一次設定，setText 更新時沿用
-        self.id_label.setTextFormat(Qt.TextFormat.PlainText)
         self.id_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self.id_label.setStyleSheet(f"""
-            font-weight: bold;
-            font-size: 12px;
-            color: {t['ink']};
-            background: transparent;
-        """)
 
-        self.nickname_label = QLabel(f"({nickname})" if nickname else "")
-        self.nickname_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.nickname_label = QLabel()
         self.nickname_label.setFixedHeight(14)
         self.nickname_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.nickname_label.setWordWrap(False)
-        self.nickname_label.setStyleSheet(f"""
-            font-size: 11px;
-            color: {t['muted']};
-            background: transparent;
-        """)
 
         text_layout.addWidget(self.id_label)
         text_layout.addWidget(self.nickname_label)
 
         main_layout.addWidget(text_container, 1, Qt.AlignVCenter)
+        main_layout.addSpacing(4)
+
+        # 3.5 靜音圖示（僅靜音時顯示，位於文字區與時間欄之間，trailing 端）
+        self.mute_icon_label = QLabel()
+        self.mute_icon_label.setFixedSize(14, 14)
+        self.mute_icon_label.setVisible(False)
+        main_layout.addWidget(self.mute_icon_label, alignment=Qt.AlignVCenter)
         main_layout.addSpacing(4)
 
         # 3. 右側：時間（上）+ 未讀紅點（下）
@@ -501,21 +504,43 @@ class ContactItem(QWidget):
 
         self.time_label = QLabel(last_msg_time)
         self.time_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.time_label.setStyleSheet(f"font-size: 10px; color: {t['faint']}; background: transparent;")
 
         self.unread_label = QLabel()
-        self.unread_label.setFixedHeight(16)
-        self.unread_label.setMinimumWidth(16)
+        self.unread_label.setFixedSize(22, 22)
         self.unread_label.setAlignment(Qt.AlignCenter)
 
         right_vbox.addWidget(self.time_label)
         right_vbox.addWidget(self.unread_label, alignment=Qt.AlignHCenter)
 
-        self.update_unread_style(unread_count)
         main_layout.addWidget(right_container, alignment=Qt.AlignVCenter)
 
         # 設定固定高度
         self.setFixedHeight(62)
+
+        self._refresh_secondary_label()
+
+        theme.register_restyle(self, lambda w: w._apply_theme())
+
+    def _refresh_secondary_label(self):
+        """依 custom_name > nickname > display_id 優先序，重繪二級標籤（括號名）。"""
+        resolved = resolve_display_name(self.ptt_id_display, self._nickname, self._custom_name)
+        self.nickname_label.setText(f"({resolved})" if resolved != self.ptt_id_display else "")
+
+    def _apply_theme(self):
+        t = theme.active()
+        self.avatar_label.setStyleSheet(f"""
+            background-color: {t['accent_bg']};
+            color: {t['accent']};
+            border-radius: 18px;
+            font-weight: bold;
+            font-size: 14px;
+        """)
+        self._update_online_dot_style()
+        self._update_pin_style()
+        self._update_text_colors()
+        self.time_label.setStyleSheet(f"font-size: 10px; color: {t['text_faint']}; background: transparent;")
+        self.update_unread_style(self.unread_count)
+        self._update_mute_icon()
 
     def update_info(self, ptt_id_display: str, nickname: str):
         """
@@ -526,40 +551,79 @@ class ContactItem(QWidget):
             self.id_label.setText(ptt_id_display)
             self.avatar_label.setText(ptt_id_display[0].upper())
 
-        if nickname:
-            self.nickname_label.setText(f"({nickname})")
-        else:
-            self.nickname_label.setText("")
+        self._nickname = nickname
+        self._refresh_secondary_label()
 
         logger.debug(f"UI 已更新資訊: {self.ptt_id} -> ID={ptt_id_display}, Nick={nickname}")
 
     def set_nickname(self, nickname: str):
-        self.update_info(self.ptt_id_display, nickname)
+        self._nickname = nickname
+        self._refresh_secondary_label()
+
+    def set_custom_name(self, custom_name: str):
+        """設定本機自訂顯示名稱（空字串 = 清除，還原為讀 PTT 暱稱）。"""
+        self._custom_name = custom_name
+        self._refresh_secondary_label()
+
+    def _tinted_icon_pixmap(self, path: str, size: int, color: str) -> QPixmap:
+        """把單色 SVG 依主題色重上色：先用 render_svg 取得形狀 alpha 遮罩，
+        再用 SourceIn 合成模式把遮罩填成目標顏色，讓同一份 SVG 資產能套三主題。"""
+        dpr = self.devicePixelRatioF()
+        base = render_svg(path, size, size, dpr)
+        if base.isNull():
+            return base
+        tinted = QPixmap(base.size())
+        tinted.setDevicePixelRatio(dpr)
+        tinted.fill(Qt.transparent)
+        painter = QPainter(tinted)
+        painter.drawPixmap(0, 0, base)
+        painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+        painter.fillRect(tinted.rect(), QColor(color))
+        painter.end()
+        return tinted
+
+    def _update_mute_icon(self):
+        if not self._is_muted:
+            self.mute_icon_label.setVisible(False)
+            return
+        t = theme.active()
+        path = os.path.join(ASSETS_DIR, "icon_mute.svg")
+        pixmap = self._tinted_icon_pixmap(path, 14, t['text_muted'])
+        self.mute_icon_label.setPixmap(pixmap)
+        self.mute_icon_label.setVisible(True)
+        self.mute_icon_label.setToolTip("已靜音通知")
+
+    def set_muted(self, muted: bool):
+        """設定並即時反映聯絡人的靜音通知狀態（icon 隨三主題上色）。"""
+        self._is_muted = muted
+        self._update_mute_icon()
 
     def _update_online_dot_style(self):
-        t = styles.theme()
-        color = t['online'] if self._is_online else t['danger']
+        t = theme.active()
+        color = {
+            'online': t['status_online'],
+            'offline': t['text_faint'],
+            'unknown': t['status_unknown'],
+        }[self._online_state]
         self.online_dot.setStyleSheet(
-            f"background-color: {color}; border-radius: 5px; border: 2px solid {t['panel']};"
+            f"background-color: {color}; border-radius: 5px; border: 2px solid {t['surface']};"
         )
 
     def set_online(self, is_online: bool):
         """更新在線狀態指示點。"""
         self._is_online = is_online
+        self._online_state = 'online' if is_online else 'offline'
         self._update_online_dot_style()
 
     def set_online_unknown(self):
         """副 session 降級時,把在線狀態點改為「未知」淺灰色。"""
-        t = styles.theme()
-        self.online_dot.setStyleSheet(
-            f"background-color: {t['faint']}; border-radius: 5px; border: 2px solid {t['panel']};"
-        )
+        self._online_state = 'unknown'
+        self._update_online_dot_style()
         self.online_dot.setToolTip("使用者狀態暫時無法更新")
 
     def _update_pin_style(self):
         if self.is_pinned:
-            t = styles.theme()
-            self.pin_bar.setStyleSheet(f"background-color: {t['accent']}; border-radius: 1px;")
+            self.pin_bar.setStyleSheet(f"background-color: {theme.active()['accent']}; border-radius: 1px;")
         else:
             self.pin_bar.setStyleSheet("background: transparent;")
 
@@ -569,38 +633,56 @@ class ContactItem(QWidget):
 
     def get_data(self) -> dict:
         """返回此項目的完整資料，供重建時使用。"""
-        nick_text = self.nickname_label.text()
-        nickname = nick_text[1:-1] if nick_text.startswith("(") and nick_text.endswith(")") else nick_text
         return {
             'ptt_id': self.ptt_id,
             'ptt_id_display': self.ptt_id_display,
-            'nickname': nickname,
+            'nickname': self._nickname,
+            'custom_name': self._custom_name,
             'unread_count': self.unread_count,
             'is_pinned': self.is_pinned,
             'is_online': self._is_online,
             'is_archived': self._is_archived,
+            'is_muted': self._is_muted,
             'last_msg_time': self.time_label.text(),
         }
+
+    def _update_text_colors(self):
+        """依目前的封存狀態重上 id_label / nickname_label 顏色。"""
+        t = theme.active()
+        if self._is_archived:
+            self.id_label.setStyleSheet(f"""
+                font-weight: bold;
+                font-size: 14px;
+                color: {t['text_faint']};
+                background: transparent;
+            """)
+            self.nickname_label.setStyleSheet(f"""
+                font-size: 11px;
+                color: {t['archived_text']};
+                background: transparent;
+            """)
+        else:
+            self.id_label.setStyleSheet(f"""
+                font-weight: bold;
+                font-size: 14px;
+                color: {t['text']};
+                background: transparent;
+            """)
+            self.nickname_label.setStyleSheet(f"""
+                font-size: 11px;
+                color: {t['text_muted']};
+                background: transparent;
+            """)
 
     def set_archived(self, archived: bool):
         """標記此聯絡人為封存狀態（使用者已不存在）。"""
         self._is_archived = archived
         if archived:
-            t = styles.theme()
             self._is_online = False
+            self._online_state = 'offline'
             self._update_online_dot_style()
-            self.id_label.setStyleSheet(f"""
-                font-weight: bold;
-                font-size: 12px;
-                color: {t['faint']};
-                background: transparent;
-            """)
             self.nickname_label.setText("(已不存在)")
-            self.nickname_label.setStyleSheet(f"""
-                font-size: 11px;
-                color: {t['danger']};
-                background: transparent;
-            """)
+        self._update_text_colors()
 
     def set_last_msg_time(self, time_str: str):
         self.time_label.setText(time_str)
@@ -608,15 +690,16 @@ class ContactItem(QWidget):
     def update_unread_style(self, count: int):
         self.unread_count = count
         if count > 0:
-            t = styles.theme()
+            t = theme.active()
             self.unread_label.setText(f"{count}")
+            # 色值取樣自設計稿 14_main_graphite.png 的未讀徽章「3」「1」：實色底為
+            # active()['accent']，文字為 active()['bg']。
             self.unread_label.setStyleSheet(f"""
                 background-color: {t['accent']};
-                color: {t['accentInk']};
-                border-radius: 8px;
-                font-size: 10px;
+                color: {t['bg']};
+                border-radius: 11px;
+                font-size: 9px;
                 font-weight: bold;
-                padding: 0 5px;
             """)
         else:
             self.unread_label.setText("")
@@ -637,22 +720,6 @@ class ContactListWidget(QListWidget):
         self.setDragDropMode(QAbstractItemView.InternalMove)
         self.setDefaultDropAction(Qt.MoveAction)
         self.setSelectionMode(QAbstractItemView.SingleSelection)
-
-    def resizeEvent(self, event):
-        """side-effect: 立即同步既有 itemWidget 的列內佈局。
-
-        QAbstractItemView 對 setItemWidget() 掛上去的 widget，其幾何同步
-        (updateEditorGeometries) 預設延後到下一輪事件迴圈/繪製才真正套用，
-        於是會出現一個時間差：view 本身已經改變寬度，但列內的 ContactItem
-        仍依照舊寬度排列子元件（未讀徽章因此沒有貼齊右緣，直到下一次重繪
-        才自我修正）。resize 當下立即同步一次，消除這個時間差。
-        """
-        super().resizeEvent(event)
-        self.updateEditorGeometries()
-        for i in range(self.count()):
-            w = self.itemWidget(self.item(i))
-            if w and w.layout():
-                w.layout().activate()
 
     def startDrag(self, supportedActions):
         """覆寫以防止 InternalMove 在拖放完成後自動刪除來源項目。
@@ -723,14 +790,8 @@ class ContactListWidget(QListWidget):
         moved = items_data.pop(source_row)
         items_data.insert(target_row, moved)
 
-        # 清除並重建清單。removeItemWidget() 只解除綁定，widget 仍留在 viewport 底下
-        # 存活，須額外 deleteLater() 才會真的釋放（否則每次拖曳都洩漏舊 ContactItem）。
+        # 清除並重建清單
         while self.count() > 0:
-            item = self.item(0)
-            old_widget = self.itemWidget(item)
-            self.removeItemWidget(item)
-            if old_widget:
-                old_widget.deleteLater()
             self.takeItem(0)
 
         for data in items_data:
@@ -760,270 +821,3 @@ class ContactListWidget(QListWidget):
         new_order = [d['ptt_id'] for d in items_data]
         self.items_reordered.emit(new_order)
         event.accept()
-
-
-class EmptyChatPlaceholder(QWidget):
-    """未選任何對話時，聊天區中央顯示的置中空狀態（logo 方塊 + 標題 + 提示文字）。"""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setStyleSheet("background: transparent;")
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 0, 24, 0)
-        layout.setSpacing(16)
-        layout.addStretch(1)
-
-        self.logo_label = QLabel("[u]")
-        self.logo_label.setFixedSize(72, 72)
-        self.logo_label.setAlignment(Qt.AlignCenter)
-
-        self.title_label = QLabel("選一個對話，或開始新的")
-        self.title_label.setAlignment(Qt.AlignCenter)
-
-        self.subtitle_label = QLabel("從左側點一位聯絡人，或在搜尋框輸入 PTT ID 開始聊天")
-        # 提示文字為靜態文案，非 PTT 來源，但沿用全域「不受信任內容禁 HTML」慣例
-        self.subtitle_label.setTextFormat(Qt.PlainText)
-        self.subtitle_label.setAlignment(Qt.AlignCenter)
-        self.subtitle_label.setWordWrap(True)
-        # 注意：wordWrap 的 QLabel 若用 setMaximumWidth() 限制寬度、又搭配
-        # addWidget(..., alignment=Qt.AlignHCenter)，Qt 算出來的 sizeHint()
-        # 不會考慮換行後的高度（仍當單行計算），導致換行後的第二行疊繪在
-        # 第一行上面。改用 setFixedWidth() 給 sizeHint() 一個明確寬度即可正確
-        # 換行；置中則交給下面 addWidget 的 AlignHCenter。
-        self.subtitle_label.setFixedWidth(360)
-
-        layout.addWidget(self.logo_label, alignment=Qt.AlignHCenter)
-        layout.addWidget(self.title_label)
-        layout.addWidget(self.subtitle_label, alignment=Qt.AlignHCenter)
-        layout.addStretch(1)
-
-        self.refresh_theme()
-
-    def refresh_theme(self):
-        t = styles.theme()
-        self.logo_label.setStyleSheet(f"""
-            background-color: {t['accentSoft']};
-            color: {t['accent']};
-            border-radius: 16px;
-            font-family: {t['fontDisplay']};
-            font-size: 36px;
-            font-weight: bold;
-        """)
-        self.title_label.setStyleSheet(f"""
-            font-family: {t['fontDisplay']};
-            font-size: 22px;
-            font-weight: 500;
-            color: {t['ink']};
-            background: transparent;
-        """)
-        self.subtitle_label.setStyleSheet(
-            f"font-size: 12px; color: {t['muted']}; background: transparent; line-height: 1.7;"
-        )
-
-
-class EmptySidebarPlaceholder(QWidget):
-    """聯絡人清單為空時，側欄顯示的置中提示（虛線圖示框 + 標題 + 提示文字）。"""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setStyleSheet("background: transparent;")
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 0, 20, 0)
-        layout.setSpacing(10)
-        layout.addStretch(1)
-
-        self.icon_label = QLabel("＋")
-        self.icon_label.setFixedSize(40, 40)
-        self.icon_label.setAlignment(Qt.AlignCenter)
-
-        self.title_label = QLabel("還沒有對話")
-        self.title_label.setAlignment(Qt.AlignCenter)
-
-        self.subtitle_label = QLabel("在上方搜尋框輸入 PTT ID 新增聯絡人")
-        self.subtitle_label.setTextFormat(Qt.PlainText)
-        self.subtitle_label.setAlignment(Qt.AlignCenter)
-        self.subtitle_label.setWordWrap(True)
-
-        layout.addWidget(self.icon_label, alignment=Qt.AlignHCenter)
-        layout.addWidget(self.title_label)
-        layout.addWidget(self.subtitle_label)
-        layout.addStretch(1)
-
-        self.refresh_theme()
-
-    def refresh_theme(self):
-        t = styles.theme()
-        self.icon_label.setStyleSheet(f"""
-            border: 1px dashed {t['border']};
-            border-radius: 9px;
-            color: {t['faint']};
-            font-size: 16px;
-            background: transparent;
-        """)
-        self.title_label.setStyleSheet(
-            f"font-size: 12px; font-weight: 500; color: {t['ink2']}; background: transparent;"
-        )
-        self.subtitle_label.setStyleSheet(
-            f"font-size: 10px; color: {t['muted']}; background: transparent;"
-        )
-
-
-class SyncSpinner(QWidget):
-    """初次同步進度畫面用的旋轉圓環（34x34，2px accent 弧線，缺口約 90 度，約 0.9 秒轉一圈）。
-
-    Qt 沒有 CSS animation，這裡用 QTimer 逐格推進角度、QPainter 畫弧線來模擬旋轉。
-    start()/stop() 由呼叫端在顯示/離開進度畫面時控制，避免畫面不可見時仍持續計時重繪。
-    """
-
-    _INTERVAL_MS = 60
-    _STEP_DEG = 24  # 360 度 / (900ms / 60ms) ≈ 每格 24 度，約 0.9 秒轉一圈
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedSize(34, 34)
-        self.setStyleSheet("background: transparent;")
-        self._angle = 0
-        self._timer = QTimer(self)
-        self._timer.setInterval(self._INTERVAL_MS)
-        self._timer.timeout.connect(self._tick)
-
-    def start(self):
-        self._angle = 0
-        self._timer.start()
-        self.update()
-
-    def stop(self):
-        self._timer.stop()
-
-    def _tick(self):
-        self._angle = (self._angle + self._STEP_DEG) % 360
-        self.update()
-
-    def paintEvent(self, event):
-        t = styles.theme()
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        pen = QPen(QColor(t['accent']))
-        pen.setWidth(2)
-        pen.setCapStyle(Qt.RoundCap)
-        painter.setPen(pen)
-        margin = 3
-        rect = self.rect().adjusted(margin, margin, -margin, -margin)
-        # QPainter 角度單位為 1/16 度、0 度在 3 點鐘方向、正值逆時針；缺口約 90 度
-        # (270 度弧線)，缺口位置隨 _angle 推進，視覺上呈現旋轉效果。
-        start_angle = int(self._angle * 16)
-        span_angle = int(-270 * 16)
-        painter.drawArc(rect, start_angle, span_angle)
-        painter.end()
-
-
-class ToggleSwitch(QCheckBox):
-    """滑動式開關（設定頁用），取代預設 QCheckBox 外觀。
-    軌道 32x18、radius 999，on=accent、off=中性灰；把手 14x14 白圓。
-    繼承 QCheckBox 只為維持 isChecked()/setChecked()/toggled 等標準 API，
-    好讓既有的存讀邏輯（db.get_config/set_config 讀寫 bool）不必改動；
-    外觀完全由 paintEvent 自行繪製，不呼叫 super().paintEvent()。"""
-
-    _W, _H = 32, 18
-    _KNOB = 14
-    _MARGIN = (_H - _KNOB) // 2
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedSize(self._W, self._H)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setStyleSheet("background: transparent;")
-        self.toggled.connect(lambda _checked: self.update())
-
-    def hitButton(self, pos):
-        return self.rect().contains(pos)
-
-    def paintEvent(self, event):
-        t = styles.theme()  # 當下取色，不快取，切主題後下次重繪即生效
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.setPen(Qt.NoPen)
-
-        track_rect = self.rect()
-        track_color = QColor(t['accent']) if self.isChecked() else QColor(t['faint'])
-        painter.setBrush(track_color)
-        painter.drawRoundedRect(track_rect, self._H / 2, self._H / 2)
-
-        knob_x = (track_rect.width() - self._MARGIN - self._KNOB) if self.isChecked() else self._MARGIN
-        # ponytail: 把手固定白圓，設計稿三主題通用（在 accent/faint 軌道上皆有對比），刻意不 token 化
-        painter.setBrush(QColor(Qt.white))
-        painter.drawEllipse(knob_x, self._MARGIN, self._KNOB, self._KNOB)
-        painter.end()
-
-
-class ThemeCard(QFrame):
-    """單張主題預覽卡：name + tag + bg/surface/accent 色票，選中時套 accent 邊框。
-    點擊發射 clicked(theme_id)；選中狀態由外層容器 (ThemePicker) 透過 set_selected() 控制。"""
-
-    clicked = Signal(str)
-
-    def __init__(self, theme_id: str, theme_dict: dict, parent=None):
-        super().__init__(parent)
-        self.theme_id = theme_id
-        self._selected = False
-        self.setCursor(Qt.PointingHandCursor)
-        self.setFixedSize(116, 116)  # tag 最長兩行需要的高度（如 mono 的「純黑白‧排版至上」）
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 8)
-        layout.setSpacing(6)
-
-        swatch = QWidget()
-        swatch.setFixedHeight(24)
-        swatch.setStyleSheet("background: transparent;")
-        swatch_layout = QHBoxLayout(swatch)
-        swatch_layout.setContentsMargins(0, 0, 0, 0)
-        swatch_layout.setSpacing(0)
-        for i, color_key in enumerate(('bg', 'surface', 'accent')):
-            chip = QFrame()
-            radius_css = ""
-            if i == 0:
-                radius_css = "border-top-left-radius: 4px; border-bottom-left-radius: 4px;"
-            elif i == 2:
-                radius_css = "border-top-right-radius: 4px; border-bottom-right-radius: 4px;"
-            chip.setStyleSheet(
-                f"background-color: {theme_dict[color_key]}; border: none; {radius_css}"
-            )
-            swatch_layout.addWidget(chip, 1)
-        layout.addWidget(swatch)
-
-        self._name_label = QLabel(theme_dict['name'])
-        layout.addWidget(self._name_label)
-
-        self._tag_label = QLabel(theme_dict['tag'])
-        self._tag_label.setWordWrap(True)
-        layout.addWidget(self._tag_label)
-
-        self.set_selected(False)
-
-    def mousePressEvent(self, event):
-        self.clicked.emit(self.theme_id)
-        super().mousePressEvent(event)
-
-    def set_selected(self, is_selected: bool):
-        """套用選中/未選中外觀。卡片外框與文字一律用「目前作用中 UI 主題」
-        （非卡片代表的主題）的 token 當下取色，確保在任何主題下都清晰可讀；
-        只有色票 swatch 才顯示該卡代表的主題本身的顏色。"""
-        self._selected = is_selected
-        t = styles.theme()
-        border_color = t['accent'] if is_selected else t['border']
-        border_width = 2 if is_selected else 1
-        self.setStyleSheet(
-            f"QFrame {{ background-color: {t['surface']}; "
-            f"border: {border_width}px solid {border_color}; border-radius: 8px; }}"
-        )
-        self._name_label.setStyleSheet(
-            f"font-size: 12px; font-weight: 600; color: {t['ink']}; background: transparent;"
-        )
-        self._tag_label.setStyleSheet(
-            f"font-size: 10px; color: {t['muted']}; background: transparent;"
-        )

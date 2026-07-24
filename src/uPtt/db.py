@@ -98,6 +98,8 @@ class DatabaseManager:
                     "ALTER TABLE messages ADD COLUMN mail_type TEXT DEFAULT 'uptt'",
                     "ALTER TABLE messages ADD COLUMN subject TEXT DEFAULT ''",
                     "ALTER TABLE messages ADD COLUMN send_status TEXT DEFAULT 'sent'",
+                    "ALTER TABLE sessions ADD COLUMN custom_name TEXT DEFAULT ''",
+                    "ALTER TABLE sessions ADD COLUMN is_muted BOOLEAN DEFAULT 0",
                 ]
                 for sql in migrations:
                     try:
@@ -208,13 +210,50 @@ class DatabaseManager:
             logger.error(f"查詢封存狀態失敗：{e}")
             return False
 
+    def set_custom_name(self, account_id: str, session_id: str, name: str):
+        """設定會話的本機自訂顯示名稱（空字串 = 清除，還原為讀 PTT 暱稱）。"""
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    "UPDATE sessions SET custom_name = ? WHERE account_id = ? AND id = ?",
+                    (name, account_id.lower(), session_id.lower())
+                )
+                conn.commit()
+        except sqlite3.Error as e:
+            logger.error(f"更新本機別名失敗：{e}")
+
+    def set_muted(self, account_id: str, session_id: str, muted: bool):
+        """設定會話的靜音通知狀態。"""
+        try:
+            with self._get_connection() as conn:
+                conn.execute(
+                    "UPDATE sessions SET is_muted = ? WHERE account_id = ? AND id = ?",
+                    (1 if muted else 0, account_id.lower(), session_id.lower())
+                )
+                conn.commit()
+        except sqlite3.Error as e:
+            logger.error(f"更新靜音狀態失敗：{e}")
+
+    def is_session_muted(self, account_id: str, session_id: str) -> bool:
+        """檢查會話是否已被靜音。"""
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT is_muted FROM sessions WHERE account_id = ? AND id = ?",
+                    (account_id.lower(), session_id.lower())
+                ).fetchone()
+                return bool(row and row['is_muted'])
+        except sqlite3.Error as e:
+            logger.error(f"查詢靜音狀態失敗：{e}")
+            return False
+
     def get_all_sessions(self, account_id: str) -> List[Dict[str, Any]]:
         """取得特定帳號的所有「可見」會話清單。釘選項目排在最前面。"""
         try:
             with self._get_connection() as conn:
                 rows = conn.execute("""
                     SELECT * FROM sessions
-                    WHERE account_id = ? AND is_visible = 1
+                    WHERE account_id = ? AND is_visible = 1 AND id != account_id
                     ORDER BY is_pinned DESC,
                              CASE WHEN is_pinned=1 THEN pin_order ELSE 9999999 END ASC,
                              last_message_time DESC,
@@ -264,11 +303,56 @@ class DatabaseManager:
         except sqlite3.Error as e:
             logger.error(f"刪除會話失敗：{e}")
 
+    def delete_message(self, account_id: str, message_id: int) -> Optional[str]:
+        """刪除單則本機訊息（僅本機，不影響 PTT 上的信件）。
+
+        若該則為所屬 session 目前最新的一則，重算 session 的
+        last_message_text/last_message_time 為次新一則（無剩餘訊息則清空為預設）。
+        回傳受影響的 session_id（小寫）；找不到該訊息時回傳 None。
+        """
+        acc_id_lower = account_id.lower()
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT session_id FROM messages WHERE account_id = ? AND id = ?",
+                    (acc_id_lower, message_id)
+                ).fetchone()
+                if not row:
+                    return None
+                session_id = row['session_id']
+
+                conn.execute(
+                    "DELETE FROM messages WHERE account_id = ? AND id = ?",
+                    (acc_id_lower, message_id)
+                )
+
+                next_msg = conn.execute("""
+                    SELECT content, timestamp FROM messages
+                    WHERE account_id = ? AND session_id = ?
+                    ORDER BY timestamp DESC, id DESC LIMIT 1
+                """, (acc_id_lower, session_id)).fetchone()
+
+                summary = next_msg['content'] if next_msg else ''
+                if summary.startswith('[re:@') and ']\n' in summary:
+                    summary = summary[summary.index(']\n') + 2:]
+                last_time = next_msg['timestamp'] if next_msg else None
+
+                conn.execute("""
+                    UPDATE sessions SET last_message_text = ?, last_message_time = ?
+                    WHERE account_id = ? AND id = ?
+                """, (summary, last_time, acc_id_lower, session_id))
+
+                conn.commit()
+                return session_id
+        except sqlite3.Error as e:
+            logger.error(f"刪除訊息失敗 (id={message_id})：{e}")
+            return None
+
     # --- 訊息相關 (需傳入 account_id) ---
 
     def save_message(self, account_id: str, session_id: str, sender_id: str,
                      receiver_id: str, content: str, timestamp: datetime, is_me: bool,
-                     mail_type: str = 'uptt', subject: str = '') -> bool:
+                     mail_type: str = 'uptt', subject: str = '') -> Optional[int]:
         acc_id_lower = account_id.lower()
         session_id_lower = session_id.lower()
         try:
@@ -282,7 +366,7 @@ class DatabaseManager:
                 
                 # 如果沒有新資料插入 (rows_affected == 0), 代表是重複訊息
                 if cursor.rowcount == 0:
-                    return False
+                    return None
 
                 # 2. 更新會話摘要並強制設為可見 (收到新訊息或發送訊息時)
                 # 若為回覆訊息格式，摘要只顯示實際內容部分
@@ -311,9 +395,9 @@ class DatabaseManager:
                             is_visible = 1
                         WHERE account_id = ? AND id = ?
                     """, (timestamp, summary, timestamp, acc_id_lower, session_id_lower))
-                
+
                 conn.commit()
-                return True
+                return cursor.lastrowid
         except sqlite3.Error as e:
             logger.error(f"儲存訊息失敗：{e}")
             raise
@@ -394,18 +478,25 @@ class DatabaseManager:
             logger.error(f"清理殘留 pending 訊息失敗：{e}")
             return 0
 
-    def get_messages(self, account_id: str, session_id: str, limit: int = 50) -> List[Dict[str, Any]]:
-        """取得特定帳號與特定對象的歷史訊息。"""
+    def get_messages(self, account_id: str, session_id: str, limit: Optional[int] = 50) -> List[Dict[str, Any]]:
+        """取得特定帳號與特定對象的歷史訊息。limit=None 時回傳全部（不截斷）。"""
         try:
             with self._get_connection() as conn:
-                rows = conn.execute("""
-                    SELECT * FROM (
+                if limit is None:
+                    rows = conn.execute("""
                         SELECT * FROM messages
                         WHERE account_id = ? AND session_id = ?
-                        ORDER BY timestamp DESC, id DESC
-                        LIMIT ?
-                    ) ORDER BY timestamp ASC, id ASC
-                """, (account_id.lower(), session_id.lower(), limit)).fetchall()
+                        ORDER BY timestamp ASC, id ASC
+                    """, (account_id.lower(), session_id.lower())).fetchall()
+                else:
+                    rows = conn.execute("""
+                        SELECT * FROM (
+                            SELECT * FROM messages
+                            WHERE account_id = ? AND session_id = ?
+                            ORDER BY timestamp DESC, id DESC
+                            LIMIT ?
+                        ) ORDER BY timestamp ASC, id ASC
+                    """, (account_id.lower(), session_id.lower(), limit)).fetchall()
                 return [dict(row) for row in rows]
         except sqlite3.Error as e:
             logger.error(f"查詢訊息失敗：{e}")

@@ -1,443 +1,313 @@
-# --- uPtt 主題與 QSS 樣式表 ---
+# --- uPtt QSS 樣式表 ---
 #
-# 三套主題（graphite / bone / mono）的 token 定義，逐字搬自設計稿
-# scratchpad/assets/themes.jsx.js，設計稿沒有但功能上必需的補充：
-#   - `danger`：dark 用 #E08070、light 用 #B33A20
-#   - `warn`（重連中狀態，需與 `online`/`danger` 有色相或明度區隔）：
-#     graphite #D29922（琥珀，沿用 tokenize 前的舊硬編碼色）、
-#     bone #9A6700（深琥珀，淺底上維持對比）、
-#     mono #8A8A8A（mono 刻意零彩度，改用中灰做明度區分，不用彩色；
-#     介於 muted #6A6A6A 與 faint #A8A8A8 中間，避免與兩者混淆——
-#     原本誤用 #6A6A6A 與 muted 完全同色，已修正）
-#
-# 鐵則：任何模組都不准在 import time 快取 token（不可 `INK = theme()['ink']`），
-# 一律在需要顏色的當下呼叫 styles.theme()['ink']。
+# 所有顏色 / 字型從當前主題 token 組出，不在此硬寫 hex。
 
-THEMES = {
-    # i · Graphite — cool dark, sage accent. The daily driver.
-    'graphite': {
-        'id': 'graphite',
-        'name': 'Graphite',
-        'tag': '主推 · 日常',
-        'mode': 'dark',
-        'font': "'IBM Plex Mono', 'Noto Sans Mono CJK TC', 'Noto Sans TC', ui-monospace, monospace",
-        'fontDisplay': "'IBM Plex Mono', 'Noto Sans TC', ui-monospace, monospace",
-        'bg': '#0E1114',
-        'bgGrain': 'none',
-        'surface': '#15191E',
-        'surface2': '#1A1F25',
-        'panel': '#11151A',
-        'ink': '#E6EAEF',
-        'ink2': '#B8BFC8',
-        'muted': '#6E7682',
-        'faint': '#444B55',
-        'divider': 'rgba(230,234,239,0.06)',
-        'border': 'rgba(230,234,239,0.11)',
-        'accent': '#8FBFA0',
-        'accentInk': '#0E1114',
-        'accentSoft': '#1E2D24',
-        'selection': 'rgba(143,191,160,0.14)',
-        'own': '#1F3528',
-        'ownInk': '#D6EADD',
-        'other': '#1A1F25',
-        'otherInk': '#E6EAEF',
-        'mail': '#161A1F',
-        'mailBorder': 'rgba(230,234,239,0.14)',
-        'waterball': '#1E2A33',
-        'waterballInk': '#9FBCD0',
-        'quoteBar': '#8FBFA0',
-        'quoteBg': 'rgba(143,191,160,0.08)',
-        'online': '#8FBFA0',
-        'warn': '#D29922',
-        'danger': '#E08070',
-    },
-
-    # ii · Bone — cool light, forest accent. Day / mail mode.
-    'bone': {
-        'id': 'bone',
-        'name': 'Bone',
-        'tag': '白天 · 收信',
-        'mode': 'light',
-        'font': "'JetBrains Mono', 'Noto Sans Mono CJK TC', 'Noto Sans TC', ui-monospace, monospace",
-        'fontDisplay': "'JetBrains Mono', 'Noto Sans TC', ui-monospace, monospace",
-        'bg': '#F3F5F5',
-        'bgGrain': 'none',
-        'surface': '#EAECEE',
-        'surface2': '#FFFFFF',
-        'panel': '#FFFFFF',
-        'ink': '#14171B',
-        'ink2': '#2E343C',
-        'muted': '#5C6470',
-        'faint': '#9098A4',
-        'divider': 'rgba(20,23,27,0.08)',
-        'border': 'rgba(20,23,27,0.14)',
-        'accent': '#2F6B47',
-        'accentInk': '#FFFFFF',
-        'accentSoft': '#D6E2DA',
-        'selection': 'rgba(47,107,71,0.08)',
-        'own': '#1F2429',
-        'ownInk': '#E8EBEF',
-        'other': '#FFFFFF',
-        'otherInk': '#14171B',
-        'mail': '#FFFFFF',
-        'mailBorder': 'rgba(20,23,27,0.18)',
-        'waterball': '#E3E9EF',
-        'waterballInk': '#2A4356',
-        'quoteBar': '#2F6B47',
-        'quoteBg': 'rgba(47,107,71,0.06)',
-        'online': '#2F6B47',
-        'warn': '#9A6700',
-        'danger': '#B33A20',
-    },
-
-    # iii · Mono — pure monochrome editorial. Zero chroma.
-    'mono': {
-        'id': 'mono',
-        'name': 'Mono',
-        'tag': '純黑白 · 排版至上',
-        'mode': 'light',
-        'font': "'Geist Mono', 'JetBrains Mono', 'Noto Sans Mono CJK TC', 'Noto Sans TC', ui-monospace, monospace",
-        'fontDisplay': "'Geist Mono', 'Noto Sans TC', ui-monospace, monospace",
-        'bg': '#F7F7F7',
-        'bgGrain': 'none',
-        'surface': '#EFEFEF',
-        'surface2': '#FFFFFF',
-        'panel': '#FFFFFF',
-        'ink': '#0A0A0A',
-        'ink2': '#2E2E2E',
-        'muted': '#6A6A6A',
-        'faint': '#A8A8A8',
-        'divider': 'rgba(0,0,0,0.08)',
-        'border': 'rgba(0,0,0,0.16)',
-        'accent': '#0A0A0A',
-        'accentInk': '#FFFFFF',
-        'accentSoft': '#E4E4E4',
-        'selection': 'rgba(0,0,0,0.06)',
-        'own': '#0A0A0A',
-        'ownInk': '#FFFFFF',
-        'other': '#FFFFFF',
-        'otherInk': '#0A0A0A',
-        'mail': '#FFFFFF',
-        'mailBorder': 'rgba(0,0,0,0.20)',
-        'waterball': '#EFEFEF',
-        'waterballInk': '#0A0A0A',
-        'quoteBar': '#0A0A0A',
-        'quoteBg': 'rgba(0,0,0,0.04)',
-        'online': '#0A0A0A',
-        'warn': '#8A8A8A',
-        'danger': '#B33A20',
-    },
-}
-
-DEFAULT_THEME = 'graphite'
-
-# 目前生效中的主題名稱（僅存 name，不快取任何 token 值）
-_active_theme = DEFAULT_THEME
+from uPtt.ui import theme
+from uPtt.ui.theme import FONT_STACK
 
 
-def set_theme(name: str) -> None:
-    """切換 active theme；未知 name fallback 到 DEFAULT_THEME。"""
-    global _active_theme
-    _active_theme = name if name in THEMES else DEFAULT_THEME
+def build_main_style() -> str:
+    """組出 MainWindow / LoginWindow 共用的 QSS，讀當前主題（theme.active()）。"""
+    t = theme.active()
+    bg = t["bg"]
+    surface = t["surface"]
+    surface_hover = t["surface_hover"]
+    surface_2 = t["surface_2"]
+    border = t["border"]
+    border_strong = t["border_strong"]
+    text = t["text"]
+    text_muted = t["text_muted"]  # noqa: F841 (保留供未來 QSS 規則使用，與舊常數對齊)
+    text_faint = t["text_faint"]
+    accent = t["accent"]
+    accent_hover = t["accent_hover"]
+    accent_bg = t["accent_bg"]
+    accent_bg_hover = t["accent_bg_hover"]
+    danger = t["danger"]
 
-
-def theme() -> dict:
-    """取得 active theme 的 token dict —— 所有 widget 只走這個，不得於 import time 快取結果。"""
-    return THEMES.get(_active_theme, THEMES[DEFAULT_THEME])
-
-
-def build_style() -> str:
-    """回傳 active theme 的整窗 QSS。"""
-    return MAIN_STYLE_TEMPLATE % theme()
-
-
-# QSS 樣板：用 %(token)s 佔位（不能用 str.format 的 {} ，QSS 選擇器本身就用花括號）。
-MAIN_STYLE_TEMPLATE = """
+    return f"""
 /* 全域字體與背景 */
-QWidget {
-    font-family: %(font)s;
+QWidget {{
+    font-family: {FONT_STACK};
     font-size: 14px;
-    background-color: %(bg)s;
-    color: %(ink)s;
-}
+    background-color: {bg};
+    color: {text};
+}}
 
 /* 登入視窗 */
-#login-window {
-    background-color: %(bg)s;
-}
+#login-window {{
+    background-color: {bg};
+}}
 
 
-#login-window QLineEdit {
+#login-window QLineEdit {{
     padding: 9px 13px;
-    border: 1px solid %(border)s;
+    border: 1px solid {border};
     border-radius: 7px;
-    background-color: %(surface)s;
-    color: %(ink)s;
+    background-color: {surface};
+    color: {text};
     font-size: 14px;
-}
+}}
 
-#login-window QLineEdit:focus {
-    border: 1px solid %(accent)s;
-    background-color: %(surface)s;
-}
+#login-window QLineEdit:focus {{
+    border: 1px solid {accent};
+    background-color: {surface};
+}}
 
 /* 登入按鈕 */
-#login-window #login-btn {
-    background-color: %(accentSoft)s;
-    color: %(accent)s;
-    border: 1px solid %(accent)s;
+#login-window #login-btn {{
+    background-color: {accent_bg};
+    color: {accent};
+    border: 1px solid {accent_hover};
     border-radius: 8px;
     font-weight: bold;
     font-size: 14px;
     letter-spacing: 2px;
-}
+}}
 
-#login-window #login-btn:hover {
-    background-color: %(accent)s;
-    color: %(accentInk)s;
-    border-color: %(accent)s;
-}
+#login-window #login-btn:hover {{
+    background-color: {accent_bg_hover};
+    color: {accent};
+    border-color: {accent};
+}}
 
-#login-window #login-btn:disabled {
-    background-color: %(panel)s;
-    border: 1px solid %(divider)s;
-    color: %(faint)s;
-}
+#login-window #login-btn:disabled {{
+    background-color: {surface};
+    border: 1px solid {surface_2};
+    color: {text_faint};
+}}
 
-#login-window #error-label {
-    color: %(danger)s;
+#login-window #error-label {{
+    color: {danger};
     font-size: 12px;
-}
+}}
 
 /* 全域 QLineEdit */
-QLineEdit {
+QLineEdit {{
     padding: 8px 12px;
-    border: 1px solid %(border)s;
+    border: 1px solid {border};
     border-radius: 6px;
-    background-color: %(bg)s;
-    color: %(ink)s;
-}
+    background-color: {bg};
+    color: {text};
+}}
 
-QLineEdit:focus {
-    border: 1px solid %(accent)s;
-}
+QLineEdit:focus {{
+    border: 1px solid {accent};
+}}
 
-QLineEdit::placeholder {
-    color: %(faint)s;
-}
+QLineEdit::placeholder {{
+    color: {text_faint};
+}}
 
 /* 全域 QPushButton */
-QPushButton {
+QPushButton {{
     padding: 8px 14px;
-    background-color: %(surface)s;
-    color: %(accent)s;
-    border: 1px solid %(border)s;
+    background-color: {surface_2};
+    color: {accent};
+    border: 1px solid {border};
     border-radius: 6px;
     font-weight: bold;
-}
+}}
 
-QPushButton:hover {
-    background-color: %(accentSoft)s;
-    border-color: %(accent)s;
-}
+QPushButton:hover {{
+    background-color: {accent_bg};
+    border-color: {accent_hover};
+}}
 
-QPushButton:disabled {
-    background-color: %(panel)s;
-    color: %(faint)s;
-    border-color: %(divider)s;
-}
+QPushButton:disabled {{
+    background-color: {surface};
+    color: {text_faint};
+    border-color: {surface_2};
+}}
 
 /* 側邊欄 */
-#sidebar {
-    background-color: %(panel)s;
-    border-right: 1px solid %(divider)s;
+#sidebar {{
+    background-color: {surface};
+    border-right: 1px solid {border};
     min-width: 160px;
     max-width: 450px;
-}
+}}
 
-#user-profile {
-    background-color: %(panel)s;
-    border-bottom: 1px solid %(divider)s;
-}
+#user-profile {{
+    background-color: {surface};
+    border-bottom: 1px solid {border};
+}}
 
 /* 對話清單 */
-QListWidget {
+QListWidget {{
     border: none;
     background-color: transparent;
     outline: none;
-}
+}}
 
-QListWidget::item {
+QListWidget::item {{
     border: none;
     padding: 0px;
     margin: 0px;
-}
+}}
 
-QListWidget::item:selected {
-    background-color: %(selection)s;
-}
+QListWidget::item:selected {{
+    background-color: {surface_2};
+}}
 
-QListWidget::item:hover:!selected {
-    background-color: %(surface2)s;
-}
+QListWidget::item:hover:!selected {{
+    background-color: {surface_hover};
+}}
 
 /* 搜尋/新增輸入框 */
-QLineEdit#new-chat-input {
-    background-color: %(bg)s;
-    border: 1px solid %(border)s;
+QLineEdit#new-chat-input {{
+    background-color: {bg};
+    border: 1px solid {border};
     border-radius: 6px;
     padding: 0 8px;
-    color: %(ink2)s;
+    color: {text};
     font-size: 13px;
-}
+}}
 
-QLineEdit#new-chat-input:focus {
-    border-color: %(accent)s;
-}
+QLineEdit#new-chat-input:focus {{
+    border-color: {accent};
+}}
 
 /* 聊天區域 */
-#chat-area {
-    background-color: %(bg)s;
-}
+#chat-area {{
+    background-color: {bg};
+}}
 
 /* 聊天標題列 */
-#chat-header {
-    background-color: %(panel)s;
-    border-bottom: 1px solid %(divider)s;
-}
+#chat-header {{
+    background-color: {surface};
+    border-bottom: 1px solid {border};
+}}
 
 /* 訊息捲動區 */
-#messages-scroll {
-    background-color: %(bg)s;
+#messages-scroll {{
+    background-color: {bg};
     border: none;
-}
+}}
 
-#messages-container {
-    background-color: %(bg)s;
-}
+#messages-container {{
+    background-color: {bg};
+}}
 
 /* 訊息輸入區 */
-#input-area {
-    background-color: %(panel)s;
-    border-top: 1px solid %(divider)s;
-}
+#input-area {{
+    background-color: {surface};
+    border-top: 1px solid {border};
+}}
 
-QPlainTextEdit#message-edit {
-    border: 1px solid %(border)s;
+QLineEdit#message-edit {{
+    border: 1px solid {border};
     border-radius: 8px;
-    background-color: %(bg)s;
-    color: %(ink)s;
-    padding: 6px 12px;
+    background-color: {bg};
+    color: {text};
+    padding: 8px 12px;
     font-size: 14px;
-}
+}}
 
-QPlainTextEdit#message-edit:focus {
-    border-color: %(accent)s;
-}
+QLineEdit#message-edit:focus {{
+    border-color: {accent};
+}}
 
 /* 回覆預覽條 */
-QWidget#reply-bar {
-    background-color: %(panel)s;
-    border-top: 1px solid %(divider)s;
-    border-left: 3px solid %(accent)s;
-}
+QWidget#reply-bar {{
+    background-color: {surface};
+    border-top: 1px solid {border};
+    border-left: 3px solid {accent};
+}}
 
 /* 捲軸 */
-QScrollArea {
+QScrollArea {{
     border: none;
     background-color: transparent;
-}
+}}
 
-QScrollBar:vertical {
+QScrollBar:vertical {{
     border: none;
     background: transparent;
     width: 5px;
     margin: 0;
-}
+}}
 
-QScrollBar::handle:vertical {
-    background: %(border)s;
+QScrollBar::handle:vertical {{
+    background: {border_strong};
     border-radius: 2px;
     min-height: 24px;
-}
+}}
 
-QScrollBar::handle:vertical:hover {
-    background: %(muted)s;
-}
+QScrollBar::handle:vertical:hover {{
+    background: {text_faint};
+}}
 
 QScrollBar::add-line:vertical,
-QScrollBar::sub-line:vertical {
+QScrollBar::sub-line:vertical {{
     height: 0px;
-}
+}}
 
 QScrollBar::add-page:vertical,
-QScrollBar::sub-page:vertical {
+QScrollBar::sub-page:vertical {{
     background: transparent;
-}
+}}
 
-/* 右鍵選單 */
-QMenu {
-    background-color: %(panel)s;
-    border: 1px solid %(border)s;
-    border-radius: 6px;
+/* 右鍵選單（訊息／聯絡人／tray 共用同一套外觀）。
+   註：danger 色（如刪除項）目前無法靠 QSS 屬性選取器（QMenu::item[prop="x"]）
+   套用到單一 QAction ——實測 Qt 不會依 QAction 的 dynamic property 分別上色
+   選單項。真的要做 per-item 上色，改用 QWidgetAction 包一個自訂上色的 QLabel。*/
+QMenu {{
+    background-color: {surface};
+    border: 1px solid {border};
+    border-radius: 8px;
     padding: 4px;
-    color: %(ink)s;
-}
+    color: {text};
+}}
 
-QMenu::item {
+QMenu::item {{
     padding: 6px 16px;
     border-radius: 4px;
-}
+}}
 
-QMenu::item:selected {
-    background-color: %(selection)s;
-    color: %(accent)s;
-}
+QMenu::item:selected {{
+    background-color: {accent};
+    color: {bg};
+}}
 
-QMenu::separator {
+QMenu::item:disabled {{
+    color: {text_faint};
+}}
+
+QMenu::separator {{
     height: 1px;
-    background: %(divider)s;
-    margin: 4px 0;
-}
+    background: {border};
+    margin: 4px 4px;
+}}
 """
 
 
-# 水球氣泡的 inline 樣式（is_me 目前共用同一組 waterball/waterballInk token，
-# 僅靠上方 main_layout 的左右對齊與尾角方向區分自己/對方）
+# 水球氣泡的 inline 樣式：置中細 pill，低調表層。水球是即時提示而非左右對話
+# 氣泡，設計稿不分本人/對方一律置中同款，故 is_me 保留參數（呼叫端仍傳入）但
+# 不影響外觀，避免跟主要訊息氣泡的方向語意混淆。
 def get_waterball_bubble_style(is_me: bool) -> str:
-    t = theme()
-    if is_me:
-        return f"""
-            background-color: {t['waterball']};
-            color: {t['waterballInk']};
-            border-radius: 14px;
-            border-top-right-radius: 3px;
-            border: 1px solid {t['border']};
-        """
-    else:
-        return f"""
-            background-color: {t['waterball']};
-            color: {t['waterballInk']};
-            border-radius: 14px;
-            border-top-left-radius: 3px;
-            border: 1px solid {t['border']};
-        """
+    t = theme.active()
+    return f"""
+        background-color: {t["surface_2"]};
+        border: 1px solid {t["border"]};
+        border-radius: 12px;
+    """
 
 
-# 對話氣泡的 inline 樣式
+# 對話氣泡的 inline 樣式（本人＝實心 accent 綠底＋深色文字，靠右；對方＝中性
+# 表層底＋一般文字，靠左。兩者需一眼可辨，對齊設計稿）
 def get_bubble_style(is_me: bool) -> str:
-    t = theme()
+    t = theme.active()
     if is_me:
         return f"""
-            background-color: {t['own']};
-            color: {t['ownInk']};
+            background-color: {t["accent"]};
+            color: {t["bg"]};
             border-radius: 14px;
             border-top-right-radius: 3px;
         """
     else:
         return f"""
-            background-color: {t['other']};
-            color: {t['otherInk']};
+            background-color: {t["surface_2"]};
+            color: {t["text"]};
             border-radius: 14px;
             border-top-left-radius: 3px;
         """

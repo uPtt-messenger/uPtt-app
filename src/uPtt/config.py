@@ -24,7 +24,7 @@ SETTING_NOTIFY_ENABLED = 'setting_notify_enabled'
 SETTING_MAIL_INTERVAL = 'setting_mail_interval'
 SETTING_WATERBALL_INTERVAL = 'setting_waterball_interval'
 SETTING_ONLINE_INTERVAL = 'setting_online_interval'
-SETTING_THEME = 'setting_theme'  # 值為 styles.THEMES 的 key（預設 'graphite'）
+SETTING_THEME = 'setting_theme'  # 值為 uPtt.ui.theme.THEMES 的 key（預設 'graphite'）
 
 # 輪詢間隔下限（秒），避免過度頻繁請求導致 PTT 限流
 MAIL_INTERVAL_MIN = 3

@@ -21,8 +21,8 @@ class PTTWorker(QObject):
     PTT 背景工作者，負責所有非同步的 PTT I/O 操作。
     """
     # 訊號定義
-    login_result = Signal(bool, str, str)  # (成功與否, 訊息, kind: ''|'auth'|'network'|'unknown')
-    new_message_received = Signal(dict)  # {'sender': str, 'text': str, 'time': str, 'full_author': str}
+    login_result = Signal(bool, str)  # (成功與否, 訊息)
+    new_message_received = Signal(dict)  # {'sender': str, 'text': str, 'time': str, 'full_author': str, 'msg_id': Optional[int]}
     send_result = Signal(int, bool, str)  # (DB row id, 成功與否, 錯誤訊息)；msg_id=-1 代表無對應 DB row
     status_updated = Signal(str)
     connection_lost = Signal()       # 連線中斷
@@ -89,20 +89,20 @@ class PTTWorker(QObject):
                 is_first_time = self.last_poll_time is None
                 if is_first_time:
                     self.first_time_detected.emit()
-                self.login_result.emit(True, "登入成功", "")
+                self.login_result.emit(True, "登入成功")
                 if not is_first_time:
                     self.start_polling()
             else:
-                self.login_result.emit(False, "登入失敗", "unknown")
+                self.login_result.emit(False, "登入失敗")
         except PyPtt.WrongIDorPassword:
-            self.login_result.emit(False, "帳號或密碼錯誤，請重試", "auth")
-        except (PyPtt.ConnectError, PyPtt.ConnectionClosed):
-            self.login_result.emit(False, "無法連線至 PTT，請檢查網路", "network")
+            self.login_result.emit(False, "帳號或密碼錯誤")
+        except PyPtt.LoginTooOften:
+            self.login_result.emit(False, "登入太頻繁，請稍後再試")
         except Exception as e:
             # 防禦性遮罩：此例外來自 self.ptt.login()，其呼叫鏈把明文密碼傳給 PyPtt，
             # 若例外的 str() 意外帶出該引數，避免明文密碼落地到 uptt_error.log。
             logger.error(f"登入失敗: {utils.redact_secret(str(e), password)}")
-            self.login_result.emit(False, "登入失敗，請稍後再試", "unknown")
+            self.login_result.emit(False, "連線失敗，請檢查網路連線")
 
     def start_polling(self):
         """開始背景輪詢新信件"""
@@ -325,7 +325,8 @@ class PTTWorker(QObject):
                 'full_author': full_author,
                 'timestamp': msg_time,
                 'mail_type': 'uptt',
-                'subject': ''
+                'subject': '',
+                'msg_id': is_new,
             }
         return emit_dict, True, True
 
@@ -567,13 +568,11 @@ class PTTWorker(QObject):
             self.connection_restored.emit()
             self.status_updated.emit("已重新連線")
             logger.info("延遲重連成功，恢復輪詢")
-            # 恢復先前暫停的輪詢 timer
+            # 恢復先前暫停的輪詢 timer（沿用目前設定值：DB 設定 → config 預設）
             if self.polling_timer:
-                interval = getattr(config, 'CHECK_PTT_MAIL_INTERVAL', 10) * 1000
-                self.polling_timer.start(interval)
+                self.polling_timer.start(self._mail_interval_ms)
             if self._waterball_timer:
-                wb_interval = getattr(config, 'CHECK_WATERBALL_INTERVAL', 5) * 1000
-                self._waterball_timer.start(wb_interval)
+                self._waterball_timer.start(self._wb_interval_ms)
         else:
             logger.error("延遲重連失敗，稍後再次嘗試")
             # 已登出(手動關閉/帳密已清空)→ reconnect 恆 False,停止排程避免每 5s 無限空轉

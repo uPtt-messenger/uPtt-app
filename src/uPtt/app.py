@@ -12,7 +12,8 @@ from PySide6.QtGui import QFontDatabase
 from .ptt import UPttService
 from .db import DatabaseManager
 from .ui.screens import MainWindow
-from . import utils
+from .ui import theme
+from . import config, utils
 
 
 def setup_linux_im():
@@ -148,6 +149,11 @@ def main():
     db_dir = utils.get_app_data_dir()
     db_path = os.path.join(db_dir, "uptt_data.db")
     db = DatabaseManager(db_path)
+
+    # 啟動時套用使用者上次選擇的主題（須在建立任何畫面之前，否則初次繪製會用到預設主題）
+    saved_theme = db.get_config(config.SETTING_THEME, theme.current_theme())
+    if saved_theme in theme.THEMES:
+        theme.set_theme(saved_theme)
 
     # 初始化雙 PTT 服務實例:主 session 負責收送訊息,副 session 專職使用者狀態查詢
     # 副 session 重連時絕不可踢掉主 session,故 kick_on_reconnect=False

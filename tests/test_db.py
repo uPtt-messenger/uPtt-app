@@ -89,17 +89,17 @@ def test_save_and_get_messages(db_manager):
     
     now = datetime.now()
     # Save a message from me
-    success = db_manager.save_message(account_id, session_id, account_id, session_id, "Hello", now, True)
-    assert success is True
-    
+    msg_id = db_manager.save_message(account_id, session_id, account_id, session_id, "Hello", now, True)
+    assert isinstance(msg_id, int) and msg_id > 0
+
     messages = db_manager.get_messages(account_id, session_id)
     assert len(messages) == 1
     assert messages[0]['content'] == "Hello"
     assert messages[0]['is_me'] == 1
-    
-    # Save duplicate message (should fail/return False due to UNIQUE constraint)
-    success = db_manager.save_message(account_id, session_id, account_id, session_id, "Hello", now, True)
-    assert success is False
+
+    # Save duplicate message (should fail/return None due to UNIQUE constraint)
+    dup_id = db_manager.save_message(account_id, session_id, account_id, session_id, "Hello", now, True)
+    assert dup_id is None
     
     # Save a message from contact
     later = now + timedelta(seconds=1)
@@ -412,6 +412,115 @@ def test_get_messages_limit(db_manager):
     assert len(msgs) == 5
     assert msgs[0]['content'] == "msg5"
     assert msgs[-1]['content'] == "msg9"
+
+
+def test_delete_message_removes_row_and_recomputes_last_message(db_manager):
+    account_id = "alice"
+    session_id = "bob"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, session_id)
+
+    t1 = datetime(2026, 1, 1, 12, 0, 0)
+    t2 = datetime(2026, 1, 1, 12, 1, 0)
+    db_manager.save_message(account_id, session_id, session_id, account_id, "first", t1, False)
+    second_id = db_manager.save_message(account_id, session_id, session_id, account_id, "second", t2, False)
+
+    sessions = db_manager.get_all_sessions(account_id)
+    assert sessions[0]['last_message_text'] == "second"
+
+    affected = db_manager.delete_message(account_id, second_id)
+    assert affected == session_id
+
+    messages = db_manager.get_messages(account_id, session_id)
+    assert len(messages) == 1
+    assert messages[0]['content'] == "first"
+
+    sessions = db_manager.get_all_sessions(account_id)
+    assert sessions[0]['last_message_text'] == "first"
+
+
+def test_delete_message_last_one_clears_session_summary(db_manager):
+    account_id = "alice"
+    session_id = "bob"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, session_id)
+    only_id = db_manager.save_message(account_id, session_id, session_id, account_id, "only", datetime.now(), False)
+
+    affected = db_manager.delete_message(account_id, only_id)
+    assert affected == session_id
+
+    sessions = db_manager.get_all_sessions(account_id)
+    assert sessions[0]['last_message_text'] == ''
+    assert sessions[0]['last_message_time'] is None
+
+
+def test_delete_message_unknown_id_returns_none(db_manager):
+    account_id = "alice"
+    db_manager.upsert_account(account_id, account_id)
+    assert db_manager.delete_message(account_id, 999999) is None
+
+
+def test_set_custom_name_round_trip_and_clear(db_manager):
+    account_id = "alice"
+    session_id = "bob"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, session_id)
+
+    db_manager.set_custom_name(account_id, session_id, "老王")
+    sessions = db_manager.get_all_sessions(account_id)
+    assert sessions[0]['custom_name'] == "老王"
+
+    db_manager.set_custom_name(account_id, session_id, "")
+    sessions = db_manager.get_all_sessions(account_id)
+    assert sessions[0]['custom_name'] == ""
+
+
+def test_upsert_session_does_not_overwrite_custom_name(db_manager):
+    account_id = "alice"
+    session_id = "bob"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, session_id, nickname="OldNick")
+    db_manager.set_custom_name(account_id, session_id, "老王")
+
+    # 模擬下次 get_user_info 查詢再次 upsert（PTT 暱稱更新流程）
+    db_manager.upsert_session(account_id, session_id, nickname="NewNick")
+
+    sessions = db_manager.get_all_sessions(account_id)
+    assert sessions[0]['custom_name'] == "老王"
+    assert sessions[0]['nickname'] == "NewNick"
+
+
+def test_set_muted_round_trip(db_manager):
+    account_id = "alice"
+    session_id = "bob"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, session_id)
+
+    assert db_manager.is_session_muted(account_id, session_id) is False
+    db_manager.set_muted(account_id, session_id, True)
+    assert db_manager.is_session_muted(account_id, session_id) is True
+    db_manager.set_muted(account_id, session_id, False)
+    assert db_manager.is_session_muted(account_id, session_id) is False
+
+
+def test_get_messages_limit_none_returns_all(db_manager):
+    account_id = "alice"
+    session_id = "bob"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, session_id)
+    for i in range(60):
+        db_manager.save_message(
+            account_id, session_id, session_id, account_id,
+            f"msg{i}", datetime(2025, 1, 1, 12, 0, i), False
+        )
+
+    msgs = db_manager.get_messages(account_id, session_id, limit=None)
+    assert len(msgs) == 60
+    assert msgs[0]['content'] == "msg0"
+    assert msgs[-1]['content'] == "msg59"
+
+    msgs_default = db_manager.get_messages(account_id, session_id)
+    assert len(msgs_default) == 50
 
 
 def test_search_messages(db_manager):
