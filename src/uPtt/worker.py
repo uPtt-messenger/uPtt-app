@@ -874,6 +874,22 @@ class QueryWorker(QObject):
             'money': info.get('money', ''),
         })
 
+    @Slot()
+    def refresh_self_info(self):
+        """查詢並發射「登入者本人」的使用者資訊（供個人資料面板）。
+
+        刻意不呼叫 db.upsert_session：本人不得成為聯絡人（self-chat 禁止），
+        只透過既有的 user_info_result 訊號把資料送給 UI。"""
+        if not self.ptt.ptt_id:
+            logger.info("[Query] 副 session 尚未登入，略過本人資訊查詢")
+            return
+        try:
+            info = self.ptt.get_user_info(self.ptt.ptt_id)
+            self._mark_restored()
+            self._emit_user_info(info)
+        except Exception as e:
+            logger.warning(f"查詢本人資訊失敗: {e}")
+
     def _handle_no_such_user(self, ptt_id: str):
         """處理查無此人的情況：封存會話並通知 UI。"""
         if self.ptt.ptt_id:

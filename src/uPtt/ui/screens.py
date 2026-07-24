@@ -19,6 +19,7 @@ from uPtt.ui import theme
 from uPtt.ui.settings import SettingsWindow
 from uPtt.ui.search_palette import SearchPalette
 from uPtt.ui.new_chat_modal import NewChatModal
+from uPtt.ui.profile_panel import ProfilePanel
 from uPtt.ui.styles import build_main_style
 from .theme import FONT_STACK, ASSETS_DIR, render_svg
 from uPtt.ui.widgets import ChatBubble, WaterballBubble, MailCard, ContactItem, ContactListWidget
@@ -608,6 +609,7 @@ class MainWindow(QMainWindow):
     """主聊天畫面"""
     send_requested = Signal(str, str, object, int)  # (receiver_id, text, timestamp, db_msg_id)
     user_info_requested = Signal(str)
+    self_info_requested = Signal()  # 個人資料面板:請求查詢登入者本人資訊
     priority_online_requested = Signal(str)
     scan_requested = Signal(int)  # scan_days
     skip_scan_requested = Signal()
@@ -640,6 +642,7 @@ class MainWindow(QMainWindow):
         self._settings_window: Optional[SettingsWindow] = None  # 單例，重複開就 raise/activate
         self._search_palette: Optional[SearchPalette] = None  # ⌘K 搜尋面板，單例
         self._new_chat_modal: Optional[NewChatModal] = None  # ⌘N 新對話 modal，單例
+        self._profile_panel: Optional[ProfilePanel] = None  # 個人資料面板，單例
 
         # 初始化 UI 與背景執行緒
         self.init_ui()
@@ -725,6 +728,7 @@ class MainWindow(QMainWindow):
 
         # 連接查詢訊號到副 worker
         self.user_info_requested.connect(self.query_worker.get_user_info)
+        self.self_info_requested.connect(self.query_worker.refresh_self_info)
         self.priority_online_requested.connect(self.query_worker.check_online_priority)
         self.set_active_chat_requested.connect(self.query_worker.set_active_chat)
         self.query_login_requested.connect(self.query_worker.do_login)
@@ -1176,6 +1180,8 @@ class MainWindow(QMainWindow):
         show_action.triggered.connect(self.showNormal)
         settings_action = QAction("設定…", self)
         settings_action.triggered.connect(self.open_settings)
+        profile_action = QAction("個人資料…", self)
+        profile_action.triggered.connect(self.open_profile_panel)
         logout_action = QAction("登出", self)
         logout_action.triggered.connect(self.handle_logout)
         quit_action = QAction("關閉", self)
@@ -1186,6 +1192,7 @@ class MainWindow(QMainWindow):
 
         tray_menu.addAction(show_action)
         tray_menu.addAction(settings_action)
+        tray_menu.addAction(profile_action)
         tray_menu.addAction(rescan_action)
         tray_menu.addAction(logout_action)
         tray_menu.addSeparator()
@@ -1199,6 +1206,7 @@ class MainWindow(QMainWindow):
         """初始化快捷鍵"""
         QShortcut(QKeySequence("Ctrl+N"), self, self.open_new_chat_modal)
         QShortcut(QKeySequence("Ctrl+K"), self, self.open_search_palette)
+        QShortcut(QKeySequence("Ctrl+I"), self, self.open_profile_panel)
         QShortcut(QKeySequence("Ctrl+Q"), self, self.fully_quit)
         QShortcut(QKeySequence("Ctrl+W"), self, self.close_current_chat)
         QShortcut(QKeySequence("Ctrl+,"), self, self.open_settings)
@@ -1242,6 +1250,19 @@ class MainWindow(QMainWindow):
         self._new_chat_modal.account_id = self.ptt_service.ptt_id
         self._new_chat_modal.open_centered()
 
+    def open_profile_panel(self):
+        """開啟個人資料面板（單例）。顯示登入者本人的 get_user 資訊。"""
+        self_id = (self.ptt_service.ptt_id or "")
+        if self._profile_panel is None:
+            self._profile_panel = ProfilePanel(parent=self)
+        cached = self._user_info_cache.get(self_id.lower())
+        if cached:
+            self._profile_panel.set_info(cached)
+        else:
+            self._profile_panel.set_loading()
+            self.self_info_requested.emit()  # → query_worker.refresh_self_info（不落 session）
+        self._profile_panel.open_centered()
+
     def eventFilter(self, obj, event):
         """過濾按鍵/尺寸事件：處理發送邏輯，並在尺寸變動時重新定位覆蓋層元件。"""
         # new_chat_input / contact_list 的覆蓋層在 init_ui 中先於 message_edit 建立，
@@ -1278,6 +1299,10 @@ class MainWindow(QMainWindow):
 
         # 快取使用者詳細資訊（用於 tooltip 顯示）
         self._user_info_cache[ptt_id.lower()] = data
+
+        # 若為登入者本人且個人資料面板開著，即時填入
+        if self._profile_panel is not None and ptt_id.lower() == (self.ptt_service.ptt_id or "").lower():
+            self._profile_panel.set_info(data)
 
         # 更新清單中的資訊 (包含正確大小寫的 ID 與在線狀態)
         found = False
