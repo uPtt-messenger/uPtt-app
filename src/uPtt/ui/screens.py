@@ -356,7 +356,12 @@ class LoginWindow(QWidget):
         self.update_label.show()
 
 class ScanSetupScreen(QWidget):
-    """首次登入信箱掃描設定畫面"""
+    """首次登入信箱掃描設定畫面。
+
+    內含兩步 onboarding：歡迎（首登入才顯示）→ 掃描設定。歡迎步為附加層，
+    對外介面（scan_days_selected / scan_skipped / show_progress / update_progress
+    / reset）完全不變；reset() 一律回到掃描設定步，故重新掃描流程不受影響。
+    完成步（進入 App）沿用既有 scan_complete → 聊天畫面切換，不另設畫面。"""
     scan_days_selected = Signal(int)
     scan_skipped = Signal()
 
@@ -368,7 +373,47 @@ class ScanSetupScreen(QWidget):
         theme.register_restyle(self, lambda w: w._apply_theme())
 
     def init_ui(self):
-        main_layout = QVBoxLayout(self)
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        self._steps = QStackedWidget()
+        root_layout.addWidget(self._steps)
+
+        self._steps.addWidget(self._build_welcome_page())  # index 0：歡迎
+        self._steps.addWidget(self._build_scan_page())      # index 1：掃描設定
+        self._steps.setCurrentIndex(1)
+
+    def _build_welcome_page(self) -> QWidget:
+        page = QWidget()
+        page.setStyleSheet("background: transparent;")
+        outer = QVBoxLayout(page)
+        outer.setAlignment(Qt.AlignCenter)
+        box = QWidget()
+        box.setFixedWidth(360)
+        box.setStyleSheet("background: transparent;")
+        v = QVBoxLayout(box)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(0)
+
+        self.welcome_title = QLabel("歡迎使用 uPtt")
+        self.welcome_title.setAlignment(Qt.AlignCenter)
+        self.welcome_desc = QLabel("把 PTT 站內信變成現代即時通。\n連線成功，準備好載入你的對話了。")
+        self.welcome_desc.setAlignment(Qt.AlignCenter)
+        self.welcome_desc.setWordWrap(True)
+        self.welcome_btn = QPushButton("開始設定  →")
+        self.welcome_btn.setFixedHeight(44)
+        self.welcome_btn.setCursor(Qt.PointingHandCursor)
+        self.welcome_btn.clicked.connect(lambda: self._steps.setCurrentIndex(1))
+
+        v.addWidget(self.welcome_title)
+        v.addSpacing(10)
+        v.addWidget(self.welcome_desc)
+        v.addSpacing(28)
+        v.addWidget(self.welcome_btn)
+        outer.addWidget(box)
+        return page
+
+    def _build_scan_page(self) -> QWidget:
+        main_layout = QVBoxLayout()
         main_layout.setAlignment(Qt.AlignCenter)
 
         container = QWidget()
@@ -494,11 +539,31 @@ class ScanSetupScreen(QWidget):
         layout.addWidget(self.progress_widget)
 
         main_layout.addWidget(container)
+        scan_page = QWidget()
+        scan_page.setStyleSheet("background: transparent;")
+        scan_page.setLayout(main_layout)
+        return scan_page
+
+    def show_welcome(self):
+        """切到歡迎步（首登入 onboarding 起點）。"""
+        self._steps.setCurrentIndex(0)
 
     def _apply_theme(self):
         """重新套用當前主題色票到本畫面所有元件（供 theme.register_restyle 即時切換用）。"""
         c = theme.active()
         self.setStyleSheet(f"background-color: {c['bg']};")
+
+        # 歡迎步
+        self.welcome_title.setStyleSheet(f"color: {c['text']}; font-size: 22px; font-weight: bold; background: transparent;")
+        self.welcome_desc.setStyleSheet(f"color: {c['text_muted']}; font-size: 13px; background: transparent; line-height: 1.5;")
+        self.welcome_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c['accent']}; color: {c['bg']};
+                border: none; border-radius: 8px;
+                font-weight: bold; font-size: 15px; padding: 11px 22px;
+            }}
+            QPushButton:hover {{ background-color: {c['accent_hover']}; }}
+        """)
 
         self.title_label.setStyleSheet(f"color: {c['text']}; font-size: 18px; font-weight: bold; background: transparent;")
         self.desc_label.setStyleSheet(f"color: {c['text_muted']}; font-size: 13px; background: transparent; line-height: 1.5;")
@@ -566,6 +631,7 @@ class ScanSetupScreen(QWidget):
         self.progress_title.setText(display_title)
 
     def reset(self):
+        self._steps.setCurrentIndex(1)  # 一律回到掃描設定步（重新掃描不顯示歡迎）
         self.options_widget.show()
         self.progress_widget.hide()
         self.custom_input.clear()
@@ -1445,8 +1511,9 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(10000, self._trigger_query_login)
 
             if getattr(self, '_is_first_time_login', False):
-                # 首次登入：顯示掃描設定畫面
+                # 首次登入：onboarding 歡迎步 → 掃描設定
                 self._is_first_time_login = False
+                self.scan_setup_screen.show_welcome()
                 self.central_stack.setCurrentIndex(2)
             else:
                 # 回訪使用者：直接進入聊天畫面

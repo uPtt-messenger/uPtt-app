@@ -73,8 +73,8 @@
 - [x] **新對話 modal（⌘N）** — artboard 23。即時格式查驗（PTT ID 規則＋擋自我）；真存在性沿用 add→archived 流程。`ui/new_chat_modal.py`
 - [x] **個人資料面板** — artboard 31。本人 `get_user`；QueryWorker.refresh_self_info（不落 session）；tray「個人資料…」+ ⌘I。`ui/profile_panel.py`
 - [x] **偏好設定視窗** 分頁化 — 外觀/通知/連線·同步/快捷鍵/關於 五頁（承接 Phase 2 控制項）。帳號/資料·儲存/進階三頁待新 config 欄位。artboard 33-38, 45
-- [ ] **寫站內信 compose**（給非 uPtt 用戶）— artboard 29。需新增 worker plain-mail 送信路徑（不套 uPtt 殼）
-- [ ] **首次連線 onboarding 三步**（歡迎→連線→完成）— artboard 20-22。取代/包住現有 ScanSetupScreen（動到首登入 stack，需謹慎）
+- [x] **寫站內信 compose**（給非 uPtt 用戶）— artboard 29。worker plain-mail 路徑（不套殼）+ ComposeDialog；tray「寫站內信…」。`ui/compose_dialog.py`
+- [x] **首次連線 onboarding** — artboard 20-22。ScanSetupScreen 內建「歡迎→掃描設定」兩步 wizard（首登入才顯示歡迎；reset/重掃不受影響，對外介面不變）。「完成」步沿用既有 scan_complete→聊天畫面切換，未另設畫面
 - [ ] ~~**送水球 overlay**~~（artboard 30）— **不做**：只需接收水球（已具備），不需主動送。
 
 ### 3C 次要/邊角畫面（可選，優先度低）
