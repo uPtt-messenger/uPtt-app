@@ -773,3 +773,135 @@ def test_handle_delete_message_cancelled_keeps_history(mock_qthread, mock_worker
 
         db_mock.delete_message.assert_not_called()
         assert len(window.chat_histories['bob']) == 1
+
+
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.QueryWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_rename_contact_writes_custom_name_and_updates_label(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock, monkeypatch):
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        window.add_or_select_contact("Bob")
+
+        monkeypatch.setattr(
+            'src.uPtt.ui.screens.QInputDialog.getText',
+            lambda *a, **k: ("MyAlias", True)
+        )
+        window.rename_contact("Bob")
+
+        db_mock.set_custom_name.assert_called_once_with("MyID", "bob", "MyAlias")
+        widget = window.contact_list.itemWidget(window.contact_list.item(0))
+        assert "(MyAlias)" in widget.nickname_label.text()
+
+
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.QueryWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_rename_contact_empty_string_clears_custom_name(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock, monkeypatch):
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        window.add_or_select_contact("Bob")
+        widget = window.contact_list.itemWidget(window.contact_list.item(0))
+        widget.set_custom_name("OldAlias")
+
+        monkeypatch.setattr(
+            'src.uPtt.ui.screens.QInputDialog.getText',
+            lambda *a, **k: ("", True)
+        )
+        window.rename_contact("Bob")
+
+        db_mock.set_custom_name.assert_called_once_with("MyID", "bob", "")
+        assert widget._custom_name == ""
+
+
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.QueryWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_toggle_mute_writes_db_and_updates_widget(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        window.add_or_select_contact("Bob")
+        widget = window.contact_list.itemWidget(window.contact_list.item(0))
+        assert widget._is_muted is False
+
+        window.toggle_mute("Bob")
+        db_mock.set_muted.assert_called_once_with("MyID", "bob", True)
+        assert widget._is_muted is True
+
+        window.toggle_mute("Bob")
+        db_mock.set_muted.assert_called_with("MyID", "bob", False)
+        assert widget._is_muted is False
+
+
+@patch('src.uPtt.ui.screens.QFileDialog')
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.QueryWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_export_chat_history_writes_txt_file(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, mock_file_dialog, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock, tmp_path):
+    out_path = str(tmp_path / "export.txt")
+    mock_file_dialog.getSaveFileName.return_value = (out_path, "文字檔 (*.txt)")
+    db_mock.get_messages.return_value = [
+        {'content': 'Hello', 'timestamp': '2026-01-01 12:00:00', 'is_me': 0},
+        {'content': 'Hi back', 'timestamp': '2026-01-01 12:01:00', 'is_me': 1},
+    ]
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        window.add_or_select_contact("Bob")
+
+        window.export_chat_history("Bob")
+
+        db_mock.get_messages.assert_called_with("MyID", "bob", limit=None)
+        content = open(out_path, encoding="utf-8").read()
+        assert "[2026-01-01 12:00:00] Bob: Hello" in content
+        assert "[2026-01-01 12:01:00] MyID: Hi back" in content
+
+
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.QueryWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_on_new_message_skips_notification_when_session_muted(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
+    """靜音的聯絡人來訊時不應觸發桌面通知（screens.py:2059 通知 gate 加 mute 判斷）。"""
+    db_mock.is_session_muted.return_value = True
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        window.tray_icon = MagicMock()
+
+        now = datetime.now()
+        window.on_new_message({
+            'sender': 'Bob', 'text': 'Hi', 'time': now.strftime("%H:%M"),
+            'full_author': 'Bob', 'timestamp': now, 'mail_type': 'uptt',
+        })
+
+        window.tray_icon.showMessage.assert_not_called()
+        db_mock.is_session_muted.assert_called_with("MyID", "bob")
+
+
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.QueryWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_on_new_message_notifies_when_not_muted(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
+    """未靜音的聯絡人來訊時應維持原本的桌面通知行為（回歸測試）。"""
+    db_mock.is_session_muted.return_value = False
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        window.tray_icon = MagicMock()
+
+        now = datetime.now()
+        window.on_new_message({
+            'sender': 'Bob', 'text': 'Hi', 'time': now.strftime("%H:%M"),
+            'full_author': 'Bob', 'timestamp': now, 'mail_type': 'uptt',
+        })
+
+        window.tray_icon.showMessage.assert_called_once()

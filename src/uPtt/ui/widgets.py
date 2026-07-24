@@ -428,6 +428,7 @@ class ContactItem(QWidget):
         self._is_archived = False
         self._nickname = nickname
         self._custom_name = custom_name
+        self._is_muted = False
 
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setStyleSheet("background: transparent;")
@@ -554,6 +555,10 @@ class ContactItem(QWidget):
         """設定本機自訂顯示名稱（空字串 = 清除，還原為讀 PTT 暱稱）。"""
         self._custom_name = custom_name
         self._refresh_secondary_label()
+
+    def set_muted(self, muted: bool):
+        # ponytail: 最小占位，僅供 Task 4 呼叫；圖示與完整邏輯留給 Task 5。
+        self._is_muted = muted
 
     def _update_online_dot_style(self):
         t = theme.active()

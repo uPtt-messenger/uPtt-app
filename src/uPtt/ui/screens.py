@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QStackedWidget, QListWidget, QListWidgetItem, QSplitter,
     QScrollArea, QTextEdit, QSystemTrayIcon, QMenu, QMessageBox, QInputDialog,
-    QCheckBox
+    QCheckBox, QFileDialog
 )
 from PySide6.QtCore import Qt, Signal, Slot, QThread, QSize, QEvent, QUrl, QTimer, QSettings
 from PySide6.QtGui import QIcon, QAction, QShortcut, QKeySequence, QPixmap, QPainter, QFontMetrics, QDesktopServices, QIntValidator
@@ -2087,9 +2087,10 @@ class MainWindow(QMainWindow):
 
         self._move_contact_to_top(sender)
 
-        # 桌面通知 (僅限收到的訊息，排除自己發出的，且使用者未關閉桌面通知)
+        # 桌面通知 (僅限收到的訊息，排除自己發出的，使用者未關閉桌面通知，且該聯絡人未被靜音)
         if (not self.isActiveWindow() and not data.get('is_me', False)
-                and self.db.get_config(config.SETTING_NOTIFY_ENABLED, True)):
+                and self.db.get_config(config.SETTING_NOTIFY_ENABLED, True)
+                and not self.db.is_session_muted(self.ptt_service.ptt_id, sender)):
             _, notify_text = decode_reply(data['text'])
             self.tray_icon.showMessage(
                 f"新訊息: {sender_id_display}",
@@ -2260,6 +2261,77 @@ class MainWindow(QMainWindow):
         # 故顯式呼叫一次確保釘選/取消釘選後標頭文字與中段留白位置都正確。
         self._refresh_group_headers()
 
+    def _find_contact_widget(self, ptt_id_lower: str) -> Optional[ContactItem]:
+        """依小寫 ptt_id 找出側邊欄對應的 ContactItem，找不到回傳 None。"""
+        for i in range(self.contact_list.count()):
+            widget = self.contact_list.itemWidget(self.contact_list.item(i))
+            if widget and widget.ptt_id == ptt_id_lower:
+                return widget
+        return None
+
+    def rename_contact(self, ptt_id: str):
+        """重新命名聯絡人（本機 alias）。輸入空字串 = 清除自訂名稱，還原為 PTT 暱稱。"""
+        ptt_id_lower = ptt_id.lower()
+        widget = self._find_contact_widget(ptt_id_lower)
+        if not widget:
+            return
+        current_acc = self.ptt_service.ptt_id
+        current_name = resolve_display_name(widget.ptt_id_display, widget._nickname, widget._custom_name)
+        text, ok = QInputDialog.getText(
+            self, "重新命名聯絡人", "顯示名稱（留空還原為 PTT 暱稱）：",
+            QLineEdit.Normal, current_name
+        )
+        if not ok:
+            return
+        new_name = text.strip()
+        self.db.set_custom_name(current_acc, ptt_id_lower, new_name)
+        widget.set_custom_name(new_name)
+        if self.current_chat_id == ptt_id_lower:
+            resolved_secondary = resolve_display_name(widget.ptt_id_display, widget._nickname, widget._custom_name)
+            nickname = resolved_secondary if resolved_secondary != widget.ptt_id_display else ""
+            self._update_chat_header(widget.ptt_id_display, nickname, widget._is_online)
+
+    def toggle_mute(self, ptt_id: str):
+        """切換聯絡人的靜音通知狀態。"""
+        ptt_id_lower = ptt_id.lower()
+        widget = self._find_contact_widget(ptt_id_lower)
+        if not widget:
+            return
+        current_acc = self.ptt_service.ptt_id
+        new_state = not widget._is_muted
+        self.db.set_muted(current_acc, ptt_id_lower, new_state)
+        widget.set_muted(new_state)
+
+    def export_chat_history(self, ptt_id: str):
+        """匯出與該聯絡人的完整對話紀錄為純文字檔。"""
+        ptt_id_lower = ptt_id.lower()
+        current_acc = self.ptt_service.ptt_id
+        widget = self._find_contact_widget(ptt_id_lower)
+        display_name = (
+            resolve_display_name(widget.ptt_id_display, widget._nickname, widget._custom_name)
+            if widget else ptt_id
+        )
+        default_name = f"對話_{display_name}_{datetime.now().strftime('%Y%m%d')}.txt"
+        path, _ = QFileDialog.getSaveFileName(self, "匯出對話紀錄", default_name, "文字檔 (*.txt)")
+        if not path:
+            return
+
+        messages = self.db.get_messages(current_acc, ptt_id_lower, limit=None)
+        lines = []
+        for m in messages:
+            ts = m['timestamp']
+            ts_dt = datetime.fromisoformat(ts) if isinstance(ts, str) else ts
+            ts_str = ts_dt.strftime('%Y-%m-%d %H:%M:%S')
+            sender = current_acc if m['is_me'] else display_name
+            _, text = decode_reply(m['content'])
+            lines.append(f"[{ts_str}] {sender}: {text}")
+
+        try:
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(lines))
+        except OSError as e:
+            QMessageBox.warning(self, "匯出失敗", f"無法寫入檔案：{e}")
+
     def _move_to_pinned_area(self, ptt_id_lower: str):
         """將項目移至釘選區末尾並標記為釘選。"""
         insert_pos = self.contact_list._pinned_count()
@@ -2305,17 +2377,27 @@ class MainWindow(QMainWindow):
             self.db.update_pin_orders(current_acc, pinned_in_order)
             logger.info(f"已更新釘選排序: {pinned_in_order}")
 
-    def _build_contact_context_menu(self, ptt_id: str, is_pinned: bool) -> QMenu:
-        """建立聯絡人右鍵選單（依設計稿排序：釘選 → 靜音/匯出 → destructive 群）。"""
+    def _build_contact_context_menu(self, ptt_id: str, is_pinned: bool, is_muted: bool) -> QMenu:
+        """建立聯絡人右鍵選單（依設計稿排序：釘選 → 改名/靜音/匯出 → destructive 群）。"""
         menu = QMenu(self)
 
         pin_action = QAction("取消釘選" if is_pinned else "釘選對話\t⌘D", self)
         pin_action.triggered.connect(lambda: self.toggle_pin(ptt_id))
         menu.addAction(pin_action)
 
-        # ponytail: 設計稿另有「標記為未讀 ⌘U」「重新命名…」「靜音通知」「匯出對話紀錄…」，
-        # 分別需要未讀旗標（目前 unread_count 只能清零，無法手動標記非零）、本機暱稱覆寫欄位、
-        # 靜音欄位、對話紀錄匯出功能等新後端。Phase 1 不做，延後至 Phase 3。
+        rename_action = QAction("重新命名…", self)
+        rename_action.triggered.connect(lambda: self.rename_contact(ptt_id))
+        menu.addAction(rename_action)
+
+        mute_action = QAction("取消靜音" if is_muted else "靜音通知", self)
+        mute_action.triggered.connect(lambda: self.toggle_mute(ptt_id))
+        menu.addAction(mute_action)
+
+        export_action = QAction("匯出對話紀錄…", self)
+        export_action.triggered.connect(lambda: self.export_chat_history(ptt_id))
+        menu.addAction(export_action)
+
+        # ponytail: 設計稿另有「標記為未讀 ⌘U」，需要可手動設非零的未讀旗標新後端，本輪不做。
 
         menu.addSeparator()
 
@@ -2345,7 +2427,7 @@ class MainWindow(QMainWindow):
 
         widget = self.contact_list.itemWidget(item)
         is_pinned = widget.ptt_id in self.pinned_ids
-        menu = self._build_contact_context_menu(widget.ptt_id, is_pinned)
+        menu = self._build_contact_context_menu(widget.ptt_id, is_pinned, widget._is_muted)
         menu.exec(self.contact_list.mapToGlobal(pos))
 
     def _stop_all_threads(self):
