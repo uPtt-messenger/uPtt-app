@@ -17,6 +17,7 @@ from PySide6.QtSvg import QSvgRenderer
 from uPtt import __version__, config, contant
 from uPtt.ui import theme
 from uPtt.ui.settings import SettingsWindow
+from uPtt.ui.search_palette import SearchPalette
 from uPtt.ui.styles import build_main_style
 from .theme import FONT_STACK, ASSETS_DIR, render_svg
 from uPtt.ui.widgets import ChatBubble, WaterballBubble, MailCard, ContactItem, ContactListWidget
@@ -636,6 +637,7 @@ class MainWindow(QMainWindow):
         self.session_drafts: Dict[str, str] = {}  # ptt_id_lower -> draft text
         self._quitting = False  # 退出程序旗標，防止遞迴
         self._settings_window: Optional[SettingsWindow] = None  # 單例，重複開就 raise/activate
+        self._search_palette: Optional[SearchPalette] = None  # ⌘K 搜尋面板，單例
 
         # 初始化 UI 與背景執行緒
         self.init_ui()
@@ -1194,6 +1196,7 @@ class MainWindow(QMainWindow):
     def init_shortcuts(self):
         """初始化快捷鍵"""
         QShortcut(QKeySequence("Ctrl+N"), self, self.new_chat_input.setFocus)
+        QShortcut(QKeySequence("Ctrl+K"), self, self.open_search_palette)
         QShortcut(QKeySequence("Ctrl+Q"), self, self.fully_quit)
         QShortcut(QKeySequence("Ctrl+W"), self, self.close_current_chat)
         QShortcut(QKeySequence("Ctrl+,"), self, self.open_settings)
@@ -1207,6 +1210,26 @@ class MainWindow(QMainWindow):
         self._settings_window.show()
         self._settings_window.raise_()
         self._settings_window.activateWindow()
+
+    def _current_contacts(self) -> List[Dict]:
+        """供搜尋面板取當前聯絡人清單（每筆含 ptt_id/ptt_id_display/nickname/custom_name）。"""
+        out = []
+        for i in range(self.contact_list.count()):
+            widget = self.contact_list.itemWidget(self.contact_list.item(i))
+            if widget:
+                out.append(widget.get_data())
+        return out
+
+    def open_search_palette(self):
+        """開啟 ⌘K 搜尋面板（單例）。選取結果後開啟該對話。"""
+        if self._search_palette is None:
+            self._search_palette = SearchPalette(
+                self.db, self.ptt_service.ptt_id, self._current_contacts, parent=self
+            )
+            self._search_palette.session_selected.connect(self.add_or_select_contact)
+        # 帳號可能於登入後才確定，開窗時同步一次
+        self._search_palette.account_id = self.ptt_service.ptt_id
+        self._search_palette.open_centered()
 
     def eventFilter(self, obj, event):
         """過濾按鍵/尺寸事件：處理發送邏輯，並在尺寸變動時重新定位覆蓋層元件。"""
