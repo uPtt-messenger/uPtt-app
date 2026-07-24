@@ -44,14 +44,17 @@ class ChatBubble(QWidget):
     自訂對話氣泡元件 (極致緊湊與貼合版)。
     """
     reply_requested = Signal(str, bool)  # (message_text, is_me)
+    delete_requested = Signal(int)  # message_id
 
     def __init__(self, text: str, time_str: str, is_me: bool = False,
-                 reply_info: Optional[dict] = None, send_status: Optional[str] = None, parent=None):
+                 reply_info: Optional[dict] = None, send_status: Optional[str] = None,
+                 message_id: Optional[int] = None, parent=None):
         super().__init__(parent)
         self.is_me = is_me
         self._text = text
         self._reply_info = reply_info
         self._send_status = send_status
+        self.message_id = message_id
 
         self.main_layout = QHBoxLayout(self)
         self.main_layout.setContentsMargins(0, 1, 0, 1)
@@ -183,10 +186,14 @@ class ChatBubble(QWidget):
         reply_action.triggered.connect(lambda: self.reply_requested.emit(self._text, self.is_me))
         menu.addAction(reply_action)
 
-        # ponytail: 設計稿另有「轉寄給…」「釘選訊息」「刪除（僅本機）」，但轉寄/釘選需要
-        # 新後端（選對象 UI、pin 欄位），單則刪除目前 DB 也無對應 API（僅有整個 session
-        # 的 delete_session）。三者延後至 Phase 3 再接。站內信舉報項在 PTT 情境沒有對應
-        # 功能，不放。
+        if self.message_id is not None:
+            menu.addSeparator()
+            delete_action = QAction("刪除（僅本機）", self)
+            delete_action.triggered.connect(lambda: self.delete_requested.emit(self.message_id))
+            menu.addAction(delete_action)
+
+        # ponytail: 設計稿另有「轉寄給…」「釘選訊息」，轉寄需要新聯絡人選擇 UI、
+        # 釘選需要 message 級新欄位 + 釘選面板，兩者都延後至下一輪 Phase 3。
         return menu
 
     def _show_context_menu(self, global_pos):

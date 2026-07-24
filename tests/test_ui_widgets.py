@@ -89,3 +89,24 @@ def test_contact_item_get_data_includes_custom_name(qtbot):
     qtbot.addWidget(item)
     data = item.get_data()
     assert data['custom_name'] == "Alias"
+
+
+def test_chat_bubble_stores_message_id(qtbot):
+    bubble = ChatBubble("Hello", "10:00", is_me=True, message_id=42)
+    qtbot.addWidget(bubble)
+    assert bubble.message_id == 42
+
+def test_chat_bubble_delete_action_emits_message_id(qtbot):
+    bubble = ChatBubble("Hello", "10:00", is_me=True, message_id=42)
+    qtbot.addWidget(bubble)
+    menu = bubble._build_context_menu()
+    delete_action = next(a for a in menu.actions() if a.text().startswith("刪除"))
+    with qtbot.waitSignal(bubble.delete_requested, timeout=1000) as blocker:
+        delete_action.trigger()
+    assert blocker.args == [42]
+
+def test_chat_bubble_no_delete_action_without_message_id(qtbot):
+    bubble = ChatBubble("Hello", "10:00", is_me=True)
+    qtbot.addWidget(bubble)
+    menu = bubble._build_context_menu()
+    assert not any(a.text().startswith("刪除") for a in menu.actions())
