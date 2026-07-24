@@ -18,7 +18,7 @@ from uPtt import __version__, config, contant
 from uPtt.ui import theme
 from uPtt.ui.settings import SettingsWindow
 from uPtt.ui.styles import build_main_style
-from uPtt.ui.theme import FONT_STACK
+from .theme import FONT_STACK, ASSETS_DIR, render_svg
 from uPtt.ui.widgets import ChatBubble, WaterballBubble, MailCard, ContactItem, ContactListWidget
 from uPtt.utils import encode_reply, decode_reply, VersionCheckWorker, resolve_display_name
 from uPtt.worker import PTTWorker, QueryWorker
@@ -48,39 +48,6 @@ def _format_contact_time(time_str: str) -> str:
     except (ValueError, TypeError):
         return ""
 
-# 資源目錄定義 (相容 PyInstaller 與 Nuitka)
-if hasattr(sys, '_MEIPASS'):
-    # PyInstaller 執行環境
-    ASSETS_DIR = os.path.join(sys._MEIPASS, "uPtt", "ui", "assets")
-elif 'nuitka' in sys.modules:
-    # Nuitka 執行環境 (通常 __file__ 會指向 .app 內部的正確位置)
-    # 這裡使用 os.path.dirname(__file__) 通常就能在 Nuitka 編譯後找到 assets
-    ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
-else:
-    # 一般開發環境
-    ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
-
-
-def render_svg(path: str, width: int, height: int, dpr: float = 1.0) -> QPixmap:
-    """高畫質渲染 SVG 檔案到 QPixmap (支援 High-DPI)"""
-    renderer = QSvgRenderer(path)
-    if not renderer.isValid():
-        return QPixmap()
-    
-    # 根據 DPR 放大實際像素大小
-    pixmap = QPixmap(int(width * dpr), int(height * dpr))
-    pixmap.fill(Qt.transparent)
-    
-    painter = QPainter(pixmap)
-    # 開啟抗鋸齒與高品質渲染
-    painter.setRenderHint(QPainter.Antialiasing)
-    painter.setRenderHint(QPainter.SmoothPixmapTransform)
-    renderer.render(painter)
-    painter.end()
-    
-    # 設定邏輯大小，以便在 Qt 佈局中正確顯示
-    pixmap.setDevicePixelRatio(dpr)
-    return pixmap
 
 class LoginWindow(QWidget):
     """登入畫面"""

@@ -3,7 +3,39 @@
 # 三組主題 Graphite / Bone / Mono，key 完全一致。所有畫面的顏色都應該從
 # `active()` 取值，不要在各處硬寫 hex。
 
+import os
+import sys
 import weakref
+
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QPainter, QPixmap
+from PySide6.QtSvg import QSvgRenderer
+
+
+# 資源目錄定義（相容 PyInstaller 與 Nuitka；ui/ 目錄下與 screens.py 同層，故路徑計算一致）
+if hasattr(sys, '_MEIPASS'):
+    ASSETS_DIR = os.path.join(sys._MEIPASS, "uPtt", "ui", "assets")
+else:
+    ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
+
+
+def render_svg(path: str, width: int, height: int, dpr: float = 1.0) -> QPixmap:
+    """高畫質渲染 SVG 檔案到 QPixmap (支援 High-DPI)"""
+    renderer = QSvgRenderer(path)
+    if not renderer.isValid():
+        return QPixmap()
+
+    pixmap = QPixmap(int(width * dpr), int(height * dpr))
+    pixmap.fill(Qt.transparent)
+
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setRenderHint(QPainter.SmoothPixmapTransform)
+    renderer.render(painter)
+    painter.end()
+
+    pixmap.setDevicePixelRatio(dpr)
+    return pixmap
 
 
 # 字型堆疊（等寬 + CJK fallback）。styles.py 全域與 widgets.py 的 MailCard 都引用這一份。
