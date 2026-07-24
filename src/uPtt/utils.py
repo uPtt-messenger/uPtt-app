@@ -82,6 +82,15 @@ def decode_reply(content: str):
     return None, content
 
 
+def resolve_display_name(display_id: str, nickname: str, custom_name: str) -> str:
+    """本機顯示名優先序：custom_name（非空）> nickname（PTT）> display_id。"""
+    if custom_name:
+        return custom_name
+    if nickname:
+        return nickname
+    return display_id
+
+
 def strip_ansi(text: str) -> str:
     """移除 ANSI 跳脫序列（PTT 色碼）。"""
     return _ANSI_RE.sub('', text)

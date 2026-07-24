@@ -11,7 +11,7 @@ from src.uPtt.utils import (
     gen_random_string, msg_to_mail,
     get_latest_github_release_version,
     is_update_available, get_app_data_dir,
-    VersionCheckWorker,
+    VersionCheckWorker, resolve_display_name,
 )
 from src.uPtt import contant
 
@@ -271,3 +271,15 @@ def test_unwrap_ptt_lines_mixed():
     long_line = "X" * 80
     text = f"short\n{long_line}\ncontinued\nlast"
     assert unwrap_ptt_lines(text) == f"short\n{long_line}continued\nlast"
+
+
+def test_resolve_display_name_prefers_custom_name():
+    assert resolve_display_name("alice", "PTTNick", "MyAlias") == "MyAlias"
+
+
+def test_resolve_display_name_falls_back_to_nickname():
+    assert resolve_display_name("alice", "PTTNick", "") == "PTTNick"
+
+
+def test_resolve_display_name_falls_back_to_display_id():
+    assert resolve_display_name("alice", "", "") == "alice"
