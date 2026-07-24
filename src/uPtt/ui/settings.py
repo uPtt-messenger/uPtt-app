@@ -9,10 +9,11 @@ import logging
 from PySide6.QtCore import Qt, QMetaObject, Signal
 from PySide6.QtGui import QFont, QColor, QPainter, QPen
 from PySide6.QtWidgets import (
-    QCheckBox, QFrame, QHBoxLayout, QLabel, QSpinBox, QVBoxLayout, QWidget,
+    QCheckBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QSpinBox, QTabWidget,
+    QVBoxLayout, QWidget,
 )
 
-from uPtt import config
+from uPtt import __version__, config, contant
 from uPtt.ui import theme
 from uPtt.ui.styles import build_main_style
 
@@ -247,6 +248,57 @@ def _add_row(card_layout: QVBoxLayout, label_text: str, control, hint_text: str 
     return row
 
 
+# 快捷鍵分頁的靜態對照表（與 screens.py MainWindow 綁定的 QShortcut 一致）。
+_SHORTCUTS = [
+    ("⌘K / Ctrl+K", "搜尋訊息 · 聯絡人"),
+    ("⌘N / Ctrl+N", "新對話"),
+    ("⌘I / Ctrl+I", "個人資料"),
+    ("⌘, / Ctrl+,", "開啟設定"),
+    ("⌘W / Ctrl+W", "關閉目前對話"),
+    ("⌘Q / Ctrl+Q", "結束 uPtt"),
+]
+
+
+def _make_tab_page():
+    """建立一個分頁內容 QWidget，回傳 (page, 內容 VBox)。"""
+    page = QWidget()
+    page.setAttribute(Qt.WA_StyledBackground, True)
+    page.setStyleSheet("background: transparent;")
+    layout = QVBoxLayout(page)
+    layout.setContentsMargins(20, 18, 24, 18)
+    layout.setSpacing(12)
+    return page, layout
+
+
+def _restyle_tabs(w):
+    t = theme.active()
+    w.setStyleSheet(
+        f"QTabWidget::pane {{ border: none; background: transparent; }}"
+        f"QTabBar::tab {{ background: transparent; color: {t['text_muted']}; "
+        f"padding: 8px 14px; margin-right: 2px; border: none; "
+        f"border-bottom: 2px solid transparent; }}"
+        f"QTabBar::tab:selected {{ color: {t['text']}; "
+        f"border-bottom: 2px solid {t['accent']}; }}"
+        f"QTabBar::tab:hover {{ color: {t['text']}; }}"
+    )
+
+
+def _restyle_shortcut_key(w):
+    t = theme.active()
+    w.setStyleSheet(
+        f"color: {t['accent']}; font-size: 12px; font-weight: 600; "
+        f"background: transparent;"
+    )
+
+
+def _restyle_about_title(w):
+    t = theme.active()
+    w.setStyleSheet(
+        f"color: {t['text']}; font-size: 18px; font-weight: 700; "
+        f"background: transparent;"
+    )
+
+
 class SettingsWindow(QWidget):
     """偏好設定視窗：分區卡片版面（外觀 / 通知與輪詢）。
     無 OK/取消，每個控制項變更即存即套：
@@ -266,14 +318,28 @@ class SettingsWindow(QWidget):
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setMinimumWidth(440)
 
+        self.setMinimumSize(480, 440)
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(24, 20, 32, 20)
-        outer.setSpacing(14)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
-        # ── 外觀 ──
-        outer.addWidget(_make_section_title("外觀"))
-        appearance_card, appearance_layout = _make_section_card()
-        outer.addWidget(appearance_card)
+        self.tabs = QTabWidget()
+        theme.register_restyle(self.tabs, _restyle_tabs)
+        outer.addWidget(self.tabs)
+
+        self.tabs.addTab(self._build_appearance_tab(db), "外觀")
+        self.tabs.addTab(self._build_notify_tab(db), "通知")
+        self.tabs.addTab(self._build_sync_tab(db), "連線 · 同步")
+        self.tabs.addTab(self._build_shortcuts_tab(), "快捷鍵")
+        self.tabs.addTab(self._build_about_tab(), "關於")
+
+        theme.register_restyle(self, lambda w: w.setStyleSheet(build_main_style()))
+
+    # ── 分頁建構 ──
+
+    def _build_appearance_tab(self, db) -> QWidget:
+        page, layout = _make_tab_page()
+        card, card_layout = _make_section_card()
 
         current_theme = db.get_config(config.SETTING_THEME, theme.current_theme())
         self._selected_theme = current_theme if current_theme in theme.THEMES else theme.current_theme()
@@ -292,49 +358,104 @@ class SettingsWindow(QWidget):
         cards_layout = QHBoxLayout()
         cards_layout.setSpacing(10)
         for theme_id, theme_dict in theme.THEMES.items():
-            card = ThemeCard(theme_id, theme_dict)
-            card.set_selected(theme_id == self._selected_theme)
-            card.clicked.connect(self._on_theme_card_clicked)
-            self._theme_cards[theme_id] = card
-            cards_layout.addWidget(card)
+            tcard = ThemeCard(theme_id, theme_dict)
+            tcard.set_selected(theme_id == self._selected_theme)
+            tcard.clicked.connect(self._on_theme_card_clicked)
+            self._theme_cards[theme_id] = tcard
+            cards_layout.addWidget(tcard)
         cards_layout.addStretch(1)
         theme_row_layout.addLayout(cards_layout)
 
-        appearance_layout.addWidget(theme_row)
+        card_layout.addWidget(theme_row)
+        layout.addWidget(card)
+        layout.addStretch(1)
+        return page
 
-        # ── 通知與輪詢 ──
-        outer.addWidget(_make_section_title("通知與輪詢"))
-        poll_card, poll_layout = _make_section_card()
-        outer.addWidget(poll_card)
+    def _build_notify_tab(self, db) -> QWidget:
+        page, layout = _make_tab_page()
+        card, card_layout = _make_section_card()
 
         self.notify_toggle = ToggleSwitch()
         self.notify_toggle.setChecked(bool(db.get_config(config.SETTING_NOTIFY_ENABLED, True)))
         self.notify_toggle.toggled.connect(self._on_notify_toggled)
-        _add_row(poll_layout, "桌面通知", self.notify_toggle, "有新訊息時彈出系統通知")
+        _add_row(card_layout, "桌面通知", self.notify_toggle, "有新訊息時彈出系統通知")
+
+        layout.addWidget(card)
+        layout.addStretch(1)
+        return page
+
+    def _build_sync_tab(self, db) -> QWidget:
+        page, layout = _make_tab_page()
+        card, card_layout = _make_section_card()
 
         self.mail_spin = self._make_spin(
             config.SETTING_MAIL_INTERVAL, config.CHECK_PTT_MAIL_INTERVAL, config.MAIL_INTERVAL_MIN)
         self.mail_spin.valueChanged.connect(self._on_mail_interval_changed)
-        _add_row(poll_layout, "信件輪詢間隔", self.mail_spin, "秒，數值越小越即時")
+        _add_row(card_layout, "信件輪詢間隔", self.mail_spin, "秒，數值越小越即時")
 
         self.waterball_spin = self._make_spin(
             config.SETTING_WATERBALL_INTERVAL, config.CHECK_WATERBALL_INTERVAL, config.WATERBALL_INTERVAL_MIN)
         self.waterball_spin.valueChanged.connect(self._on_waterball_interval_changed)
-        _add_row(poll_layout, "水球輪詢間隔", self.waterball_spin, "秒")
+        _add_row(card_layout, "水球輪詢間隔", self.waterball_spin, "秒")
 
         self.online_spin = self._make_spin(
             config.SETTING_ONLINE_INTERVAL, config.CHECK_ONLINE_STATUS_INTERVAL, config.ONLINE_INTERVAL_MIN)
         self.online_spin.valueChanged.connect(self._on_online_interval_changed)
-        _add_row(poll_layout, "在線狀態輪詢間隔", self.online_spin, "秒")
+        _add_row(card_layout, "在線狀態輪詢間隔", self.online_spin, "秒")
 
+        layout.addWidget(card)
         note = QLabel("輪詢間隔越短越即時，但過於頻繁可能被 PTT 限流。變更後立即套用，免重啟。")
         note.setWordWrap(True)
         theme.register_restyle(note, _restyle_note)
-        outer.addWidget(note)
+        layout.addWidget(note)
+        layout.addStretch(1)
+        return page
 
-        outer.addStretch(1)
+    def _build_shortcuts_tab(self) -> QWidget:
+        page, layout = _make_tab_page()
+        card, card_layout = _make_section_card()
 
-        theme.register_restyle(self, lambda w: w.setStyleSheet(build_main_style()))
+        grid = QGridLayout()
+        grid.setContentsMargins(14, 12, 14, 12)
+        grid.setHorizontalSpacing(20)
+        grid.setVerticalSpacing(9)
+        grid.setColumnStretch(1, 1)
+        for r, (keys, action) in enumerate(_SHORTCUTS):
+            key_label = QLabel(keys)
+            theme.register_restyle(key_label, _restyle_shortcut_key)
+            act_label = QLabel(action)
+            theme.register_restyle(act_label, _restyle_row_label)
+            grid.addWidget(key_label, r, 0, Qt.AlignLeft)
+            grid.addWidget(act_label, r, 1)
+        card_layout.addLayout(grid)
+
+        layout.addWidget(card)
+        layout.addStretch(1)
+        return page
+
+    def _build_about_tab(self) -> QWidget:
+        page, layout = _make_tab_page()
+        card, card_layout = _make_section_card()
+
+        inner = QVBoxLayout()
+        inner.setContentsMargins(14, 14, 14, 14)
+        inner.setSpacing(6)
+        name = QLabel(contant.pkg_name)
+        theme.register_restyle(name, _restyle_about_title)
+        ver = QLabel(f"版本 {__version__}")
+        theme.register_restyle(ver, _restyle_row_label)
+        lic = QLabel("授權：GPL-3.0 · 儲存：SQLite")
+        theme.register_restyle(lic, _restyle_note)
+        link = QLabel(f'<a href="{contant.DOWNLOAD_URL}">{contant.DOWNLOAD_URL}</a>')
+        link.setOpenExternalLinks(True)
+        theme.register_restyle(link, _restyle_row_label)
+        for w in (name, ver, lic, link):
+            inner.addWidget(w)
+        card_layout.addLayout(inner)
+
+        layout.addWidget(card)
+        layout.addStretch(1)
+        return page
 
     # ── 主題 ──
 

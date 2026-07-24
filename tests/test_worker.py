@@ -1261,3 +1261,33 @@ def test_query_apply_poll_intervals_noop_when_timer_not_started(query_worker, db
     db_mock.get_config.return_value = 90
     query_worker.apply_poll_intervals()  # 不應丟例外
     assert query_worker._online_check_timer is None
+
+
+def test_refresh_self_info_emits_without_persisting_session(qtbot, query_worker, ptt_service_mock, db_mock):
+    """個人資料面板:refresh_self_info 應發射 user_info_result,但絕不 upsert_session
+    （本人不得成為聯絡人,self-chat 禁止）。"""
+    ptt_service_mock.get_user_info.return_value = {
+        'ptt_id': 'TestUser',
+        'nickname': 'MyNick',
+        'is_online': True,
+        'login_count': '42',
+        'money': '999',
+    }
+    with qtbot.waitSignal(query_worker.user_info_result) as blocker:
+        query_worker.refresh_self_info()
+
+    result = blocker.args[0]
+    assert result['ptt_id'] == 'TestUser'
+    assert result['login_count'] == '42'
+    db_mock.upsert_session.assert_not_called()  # 關鍵:不得建立本人 session
+
+
+def test_refresh_self_info_noop_when_not_logged_in(qtbot, db_mock):
+    """副 session 尚未登入(ptt_id 為空)時不查詢、不發射。"""
+    from unittest.mock import MagicMock
+    from src.uPtt.worker import QueryWorker
+    svc = MagicMock()
+    svc.ptt_id = ""
+    qw = QueryWorker(svc, db_mock)
+    qw.refresh_self_info()
+    svc.get_user_info.assert_not_called()

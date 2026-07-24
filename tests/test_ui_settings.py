@@ -176,3 +176,30 @@ def test_mail_interval_change_applies_to_running_worker(qtbot, db_manager):
 
     qtbot.waitUntil(lambda: worker.polling_timer.interval() == 33000, timeout=2000)
     assert db_manager.get_config(config.SETTING_MAIL_INTERVAL) == 33
+
+
+# --- 分頁化(Phase 3B)---
+
+def test_settings_window_has_expected_tabs(qtbot, db_mock):
+    win = SettingsWindow(db_mock)
+    qtbot.addWidget(win)
+    labels = [win.tabs.tabText(i) for i in range(win.tabs.count())]
+    assert labels == ["外觀", "通知", "連線 · 同步", "快捷鍵", "關於"]
+
+
+def test_settings_controls_survive_tabbification(qtbot, db_mock):
+    """分頁化後既有控制項仍存在且可用(回歸)。"""
+    win = SettingsWindow(db_mock)
+    qtbot.addWidget(win)
+    assert win.notify_toggle is not None
+    assert win.mail_spin is not None
+    assert win.waterball_spin is not None
+    assert win.online_spin is not None
+    assert set(win._theme_cards.keys()) == set(theme.THEMES.keys())
+
+
+def test_shortcuts_tab_table_covers_added_shortcuts(qtbot, db_mock):
+    from src.uPtt.ui.settings import _SHORTCUTS
+    keys = " ".join(k for k, _ in _SHORTCUTS)
+    for combo in ("Ctrl+K", "Ctrl+N", "Ctrl+I", "Ctrl+,", "Ctrl+W", "Ctrl+Q"):
+        assert combo in keys
