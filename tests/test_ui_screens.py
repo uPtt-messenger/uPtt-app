@@ -434,7 +434,9 @@ def test_send_result_updates_status_when_user_switched_chat(mock_qthread, mock_w
 
         # The pending bubble in A must now be 'failed', not lost
         assert window.chat_histories['contacta'][-1]['send_status'] == 'failed'
-        mock_msgbox.warning.assert_called_once()
+        # 失敗改為非阻斷狀態列提示（不再彈 QMessageBox）
+        mock_msgbox.warning.assert_not_called()
+        assert "發送失敗" in window._status_left.text()
 
 
 @patch('src.uPtt.ui.screens.VersionCheckWorker')
@@ -932,3 +934,46 @@ def test_load_sessions_shows_mute_icon_for_muted_session(mock_qthread, mock_work
         widget = window.contact_list.itemWidget(window.contact_list.item(0))
         assert widget._is_muted is True
         assert widget.mute_icon_label.isVisible() is True
+
+
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.QueryWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_handle_retry_message_reenqueues_same_id(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
+    """重新傳送:狀態 failed→pending,以同 msg_id re-enqueue,內容取自 get_message_content。"""
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        window.add_or_select_contact("ContactA")
+        window.message_edit.setText("hi")
+        with patch.object(window, 'send_requested'):
+            window.handle_send()
+        msg_id = window.chat_histories['contacta'][-1]['msg_id']
+
+        # 送失敗 → failed
+        window.on_send_result(msg_id, False, "boom")
+        assert window.chat_histories['contacta'][-1]['send_status'] == 'failed'
+
+        # 重試
+        db_mock.get_message_content.return_value = "encoded-content"
+        with patch.object(window, 'send_requested'):
+            window.handle_retry_message(msg_id)
+
+        assert window.chat_histories['contacta'][-1]['send_status'] == 'pending'
+        db_mock.update_message_status.assert_any_call(msg_id, 'pending')
+        db_mock.get_message_content.assert_called_with("MyID", msg_id)
+        window.worker.enqueue_send.assert_called_with('contacta', 'encoded-content', ANY, msg_id)
+
+
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.QueryWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_handle_retry_message_noop_when_content_missing(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        db_mock.get_message_content.return_value = None
+        window.handle_retry_message(123)
+        window.worker.enqueue_send.assert_not_called()

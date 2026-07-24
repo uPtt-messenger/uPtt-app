@@ -132,3 +132,38 @@ def test_contact_item_get_data_includes_is_muted(qtbot):
     item.set_muted(True)
     data = item.get_data()
     assert data['is_muted'] is True
+
+
+def test_chat_bubble_retry_action_shown_when_failed(qtbot):
+    bubble = ChatBubble("msg", "10:00", is_me=True, send_status='failed', message_id=7)
+    qtbot.addWidget(bubble)
+    menu = bubble._build_context_menu()
+    labels = [a.text() for a in menu.actions()]
+    assert any("重新傳送" in t for t in labels)
+
+
+def test_chat_bubble_retry_action_absent_when_not_failed(qtbot):
+    for status in ('sent', 'pending'):
+        bubble = ChatBubble("msg", "10:00", is_me=True, send_status=status, message_id=7)
+        qtbot.addWidget(bubble)
+        labels = [a.text() for a in bubble._build_context_menu().actions()]
+        assert not any("重新傳送" in t for t in labels), status
+
+
+def test_chat_bubble_retry_absent_for_received(qtbot):
+    bubble = ChatBubble("msg", "10:00", is_me=False, send_status='failed', message_id=7)
+    qtbot.addWidget(bubble)
+    labels = [a.text() for a in bubble._build_context_menu().actions()]
+    assert not any("重新傳送" in t for t in labels)
+
+
+def test_chat_bubble_retry_emits_message_id(qtbot):
+    bubble = ChatBubble("msg", "10:00", is_me=True, send_status='failed', message_id=42)
+    qtbot.addWidget(bubble)
+    with qtbot.waitSignal(bubble.retry_requested) as blocker:
+        # 取重新傳送 action 並觸發
+        for a in bubble._build_context_menu().actions():
+            if a.text() == "重新傳送":
+                a.trigger()
+                break
+    assert blocker.args == [42]

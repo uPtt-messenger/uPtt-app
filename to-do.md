@@ -80,7 +80,7 @@
 ### 3C 次要/邊角畫面（可選，優先度低）
 - [ ] 連線狀態 banner（重連中/失敗）— artboard 24-25（部分已有）
 - [ ] 空狀態（全新使用者）— artboard 26
-- [ ] 送訊息失敗 + 重試 — artboard 28
+- [x] 送訊息失敗 + 重試 — artboard 28。`db.get_message_content` 取回編碼內容；ChatBubble `retry_requested`（is_me+failed 才顯示「重新傳送」）；`handle_retry_message` 翻 pending + 同 msg_id re-enqueue（走既有 `_do_send`，不動 worker）；失敗回饋改狀態列非阻斷提示（不再彈 QMessageBox）。@ `feature/app-msg-retry`
 - [ ] 系統通知 / App toast — artboard 39-40（現有 tray）
 - [ ] 登入錯誤三分態（密碼錯/踢線/維護）— artboard 41-43 · **受限**：PyPtt 無法可靠區分維護/踢線（見 memory `project_pyptt_login_errors`），只能做可分辨的
 - [ ] 初次同步 loading/skeleton — artboard 44
