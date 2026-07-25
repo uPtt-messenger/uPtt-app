@@ -131,6 +131,39 @@ def test_mark_as_read(db_manager):
     messages = db_manager.get_messages(account_id, session_id)
     assert all(m['is_read'] == 1 for m in messages)
 
+
+def test_save_message_default_mark_read_false(db_manager):
+    """save_message 不傳 mark_read（預設 False）時，收到的訊息維持既有的未讀行為。"""
+    account_id = "testuser"
+    session_id = "contacta"
+    db_manager.upsert_session(account_id, session_id)
+
+    db_manager.save_message(account_id, session_id, session_id, account_id,
+                             "Incoming", datetime.now(), is_me=False)
+
+    messages = db_manager.get_messages(account_id, session_id)
+    assert messages[0]['is_read'] == 0
+
+    sessions = db_manager.get_all_sessions(account_id)
+    assert sessions[0]['unread_count'] == 1
+
+
+def test_save_message_mark_read_true(db_manager):
+    """save_message(mark_read=True) 用於掃描回補的歷史舊信：入庫即已讀，不計入未讀數。"""
+    account_id = "testuser"
+    session_id = "contacta"
+    db_manager.upsert_session(account_id, session_id)
+
+    db_manager.save_message(account_id, session_id, session_id, account_id,
+                             "Historical", datetime.now(), is_me=False, mark_read=True)
+
+    messages = db_manager.get_messages(account_id, session_id)
+    assert messages[0]['is_read'] == 1
+
+    sessions = db_manager.get_all_sessions(account_id)
+    assert sessions[0]['unread_count'] == 0
+
+
 def test_config(db_manager):
     db_manager.set_config("theme", "dark")
     assert db_manager.get_config("theme") == "dark"

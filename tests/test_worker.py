@@ -155,6 +155,57 @@ def test_do_initial_scan_emits_progress(qtbot, ptt_service_mock, db_mock):
     assert w.polling_timer is not None  # polling started after scan
 
 
+def test_do_initial_scan_marks_only_historical_mail_read(qtbot, tmp_path, ptt_service_mock):
+    """重新掃描信箱時：早於掃描前水位(prev_poll_time)的舊信入庫應為已讀，
+    晚於水位的信（離線期間真正送達的新信）必須維持未讀。用真實 DatabaseManager
+    read-back 驗證，而非只斷言 mock 呼叫參數。"""
+    from src.uPtt.db import DatabaseManager
+
+    db = DatabaseManager(str(tmp_path / "scan_test.db"))
+    ptt_service_mock.ptt_id = "TestUser"
+
+    prev_poll_time = datetime(2026, 1, 1, 12, 0, 0)
+    older_time = datetime(2025, 12, 1, 10, 0, 0)   # 早於水位 → 應標已讀
+    newer_time = datetime(2026, 1, 2, 10, 0, 0)    # 晚於水位 → 必須維持未讀
+
+    def call_side_effect(api, args=None):
+        if api == 'get_newest_index':
+            return 2
+        if api == 'get_mail':
+            idx = args['index']
+            if idx == 2:
+                return {
+                    PyPtt.MailField.title: "一般站內信-新",
+                    PyPtt.MailField.author: "Sender (Nick)",
+                    PyPtt.MailField.date: newer_time.strftime('%a %b %d %H:%M:%S %Y'),
+                    PyPtt.MailField.content: "New mail since last poll",
+                }
+            if idx == 1:
+                return {
+                    PyPtt.MailField.title: "一般站內信-舊",
+                    PyPtt.MailField.author: "Sender (Nick)",
+                    PyPtt.MailField.date: older_time.strftime('%a %b %d %H:%M:%S %Y'),
+                    PyPtt.MailField.content: "Historical mail before last poll",
+                }
+        return None
+
+    ptt_service_mock.call.side_effect = call_side_effect
+
+    w = PTTWorker(ptt_service_mock, db)
+    w.last_poll_time = prev_poll_time  # 掃描前的水位（繞過 do_login，直接設定）
+
+    with qtbot.waitSignal(w.scan_complete):
+        w.do_initial_scan(0)  # scan_days=0 → 全部掃描，避免 stop_time 提早結束
+
+    messages = db.get_messages("TestUser", "sender")
+    by_content = {m['content']: m for m in messages}
+    assert by_content["Historical mail before last poll"]['is_read'] == 1
+    assert by_content["New mail since last poll"]['is_read'] == 0
+
+    sessions = db.get_all_sessions("TestUser")
+    assert sessions[0]['unread_count'] == 1  # 只有新信計入未讀
+
+
 def test_do_login_failure(qtbot, worker, ptt_service_mock):
     ptt_service_mock.login.return_value = False
     

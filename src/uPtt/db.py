@@ -375,9 +375,11 @@ class DatabaseManager:
 
     def save_message(self, account_id: str, session_id: str, sender_id: str,
                      receiver_id: str, content: str, timestamp: datetime, is_me: bool,
-                     mail_type: str = 'uptt', subject: str = '') -> Optional[int]:
+                     mail_type: str = 'uptt', subject: str = '', mark_read: bool = False) -> Optional[int]:
         acc_id_lower = account_id.lower()
         session_id_lower = session_id.lower()
+        # 掃描回補的歷史舊信（mark_read=True）視同已讀入庫，不灌爆未讀數
+        read_on_insert = is_me or mark_read
         try:
             with self._get_connection() as conn:
                 # 1. 插入訊息 (使用 INSERT OR IGNORE 防止重複)
@@ -385,8 +387,8 @@ class DatabaseManager:
                     INSERT OR IGNORE INTO messages (account_id, session_id, sender_id, receiver_id, content, timestamp, is_me, is_read, mail_type, subject)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (acc_id_lower, session_id_lower, sender_id.lower(), receiver_id.lower(),
-                      content, timestamp, 1 if is_me else 0, 1 if is_me else 0, mail_type, subject))
-                
+                      content, timestamp, 1 if is_me else 0, 1 if read_on_insert else 0, mail_type, subject))
+
                 # 如果沒有新資料插入 (rows_affected == 0), 代表是重複訊息
                 if cursor.rowcount == 0:
                     return None
@@ -396,7 +398,7 @@ class DatabaseManager:
                 summary = content
                 summary = _strip_reply_prefix(summary)
 
-                if is_me:
+                if read_on_insert:
                     conn.execute("""
                         UPDATE sessions SET
                             last_message_text = CASE

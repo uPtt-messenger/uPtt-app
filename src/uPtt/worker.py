@@ -159,11 +159,14 @@ class PTTWorker(QObject):
         self.scan_complete.emit()
         self.start_polling()
 
-    def _process_single_mail(self, mail, mail_idx: int):
+    def _process_single_mail(self, mail, mail_idx: int, mark_read: bool = False):
         """處理單一信件，回傳 (emit_dict_or_None, is_uptt, should_delete)。
 
         將 do_initial_scan 與 _poll_new_mails 共用的信件處理邏輯抽出，
         避免兩處重複維護。
+
+        mark_read: 供 do_initial_scan 回補歷史舊信時標記為已讀，避免灌爆未讀數；
+        _poll_new_mails 的常態輪詢維持預設 False（保持未讀）。
         """
         current_user = self.ptt.ptt_id
 
@@ -203,7 +206,8 @@ class PTTWorker(QObject):
                 timestamp=mail_time,
                 is_me=False,
                 mail_type='mail',
-                subject=title
+                subject=title,
+                mark_read=mark_read
             )
             emit_dict = None
             if is_new:
@@ -256,7 +260,8 @@ class PTTWorker(QObject):
                 timestamp=mail_time,
                 is_me=False,
                 mail_type='mail',
-                subject=title
+                subject=title,
+                mark_read=mark_read
             )
             emit_dict = None
             if is_new:
@@ -307,7 +312,8 @@ class PTTWorker(QObject):
                 content=text,
                 timestamp=msg_time,
                 is_me=False,
-                mail_type='uptt'
+                mail_type='uptt',
+                mark_read=mark_read
             )
         except Exception as e:
             logger.error(
@@ -337,6 +343,10 @@ class PTTWorker(QObject):
         mails_to_emit = []
         try:
             current_poll_start = datetime.now()
+            # 掃描前的水位；用來判斷回補的信是「本來就在 PTT 上的歷史舊信」(標已讀)
+            # 還是「離線期間真正送達的新信」(維持未讀)。切勿在迴圈開始前改成
+            # current_poll_start，否則每封信都會被誤判成舊信而全部標已讀。
+            prev_poll_time = self.last_poll_time
             total_newest = self.ptt.call('get_newest_index', {'index_type': PyPtt.NewIndex.MAIL})
 
             if not total_newest or total_newest == 0:
@@ -390,8 +400,10 @@ class PTTWorker(QObject):
                     else:
                         break
 
-                # 使用共用方法處理信件
-                emit_dict, is_uptt, should_delete = self._process_single_mail(mail, mail_idx)
+                # 使用共用方法處理信件；掃描前不存在水位(首次登入)或本信早於水位
+                # 者視為歷史舊信，入庫即標已讀，避免灌爆未讀數
+                mark_read = (prev_poll_time is None) or (mail_time < prev_poll_time)
+                emit_dict, is_uptt, should_delete = self._process_single_mail(mail, mail_idx, mark_read=mark_read)
                 if emit_dict:
                     mails_to_emit.append(emit_dict)
                 if should_delete:
