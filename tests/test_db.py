@@ -132,6 +132,34 @@ def test_mark_as_read(db_manager):
     assert all(m['is_read'] == 1 for m in messages)
 
 
+def test_mark_all_read(db_manager):
+    account_id = "testuser"
+    other_account_id = "otheruser"
+    session_a = "contacta"
+    session_b = "contactb"
+
+    db_manager.upsert_session(account_id, session_a)
+    db_manager.save_message(account_id, session_a, session_a, account_id, "Unread A", datetime.now(), False)
+    db_manager.upsert_session(account_id, session_b)
+    db_manager.save_message(account_id, session_b, session_b, account_id, "Unread B", datetime.now(), False)
+
+    # 其他帳號的未讀不應被影響
+    db_manager.upsert_session(other_account_id, session_a)
+    db_manager.save_message(other_account_id, session_a, session_a, other_account_id, "Unread Other", datetime.now(), False)
+
+    db_manager.mark_all_read(account_id)
+
+    sessions = db_manager.get_all_sessions(account_id)
+    assert all(s['unread_count'] == 0 for s in sessions)
+    messages_a = db_manager.get_messages(account_id, session_a)
+    messages_b = db_manager.get_messages(account_id, session_b)
+    assert all(m['is_read'] == 1 for m in messages_a)
+    assert all(m['is_read'] == 1 for m in messages_b)
+
+    other_sessions = db_manager.get_all_sessions(other_account_id)
+    assert other_sessions[0]['unread_count'] == 1
+
+
 def test_save_message_default_mark_read_false(db_manager):
     """save_message 不傳 mark_read（預設 False）時，收到的訊息維持既有的未讀行為。"""
     account_id = "testuser"

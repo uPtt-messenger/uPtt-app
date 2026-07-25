@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QTextEdit, QSystemTrayIcon, QMenu, QMessageBox, QInputDialog,
     QCheckBox, QFileDialog
 )
-from PySide6.QtCore import Qt, Signal, Slot, QThread, QSize, QEvent, QUrl, QTimer, QSettings
+from PySide6.QtCore import Qt, Signal, Slot, QThread, QSize, QEvent, QUrl, QTimer, QSettings, QPoint
 from PySide6.QtGui import QIcon, QAction, QShortcut, QKeySequence, QPixmap, QPainter, QFontMetrics, QDesktopServices, QIntValidator
 from PySide6.QtSvg import QSvgRenderer
 
@@ -30,9 +30,6 @@ from uPtt.worker import PTTWorker, QueryWorker
 from uPtt.ptt import UPttService
 
 logger = logging.getLogger("uPtt.ui.screens")
-
-# config 目前無「訊息字數上限」常數（MAX_MESSAGES 是記憶體訊息筆數），沿用設計稿的顯示上限
-INPUT_CHAR_LIMIT = 2000
 
 # 聯絡人清單 item 的一般 sizeHint 高度，需與 widgets.py 建立 item 時的 QSize(0, 70) 一致
 CONTACT_ROW_HEIGHT = 70
@@ -916,13 +913,13 @@ class MainWindow(QMainWindow):
         user_layout.addWidget(self.user_id_label)
         user_layout.addStretch()
 
-        # 登出按鈕
-        self.logout_btn = QPushButton("↪")
-        self.logout_btn.setFixedSize(28, 28)
-        self.logout_btn.setToolTip("登出")
-        self.logout_btn.hide()
-        self.logout_btn.clicked.connect(self.handle_logout)
-        theme.register_restyle(self.logout_btn, lambda w: w.setStyleSheet(f"""
+        # 選單按鈕（全部標為已讀 / 登出）
+        self.menu_btn = QPushButton("☰")
+        self.menu_btn.setFixedSize(28, 28)
+        self.menu_btn.setToolTip("選單")
+        self.menu_btn.hide()
+        self.menu_btn.clicked.connect(self.show_main_menu)
+        theme.register_restyle(self.menu_btn, lambda w: w.setStyleSheet(f"""
             QPushButton {{
                 background: transparent;
                 border: none;
@@ -931,10 +928,10 @@ class MainWindow(QMainWindow):
                 padding: 0;
             }}
             QPushButton:hover {{
-                color: {theme.active()['danger']};
+                color: {theme.active()['accent']};
             }}
         """))
-        user_layout.addWidget(self.logout_btn)
+        user_layout.addWidget(self.menu_btn)
         
         sidebar_vbox.addWidget(self.user_profile)
         
@@ -1093,16 +1090,11 @@ class MainWindow(QMainWindow):
         self.message_edit.setPlaceholderText("輸入訊息並按下 Enter 發送...")
         self.message_edit.returnPressed.connect(self.handle_send)
 
-        # 輸入列：輸入框（伸展佔滿）+ 字數計數 + 送出鈕同列排列，精簡版面高度
+        # 輸入列：輸入框（伸展佔滿）+ 送出鈕同列排列，精簡版面高度
         input_row = QHBoxLayout()
         input_row.setContentsMargins(0, 6, 0, 0)
         input_row.setSpacing(8)
 
-        self.char_count_label = QLabel(f"0 / {INPUT_CHAR_LIMIT}")
-        theme.register_restyle(
-            self.char_count_label,
-            lambda w: w.setStyleSheet(f"color: {theme.active()['text_faint']}; font-size: 11px; background: transparent;"),
-        )
         self.send_button = QPushButton("送出")
         self.send_button.setCursor(Qt.PointingHandCursor)
         self.send_button.setFixedHeight(26)
@@ -1119,10 +1111,8 @@ class MainWindow(QMainWindow):
             QPushButton:disabled {{ color: {theme.active()['text_faint']}; background-color: {theme.active()['surface_2']}; }}
         """))
         self.send_button.clicked.connect(self.handle_send)
-        self.message_edit.textChanged.connect(self._update_char_count)
 
         input_row.addWidget(self.message_edit, 1, Qt.AlignVCenter)
-        input_row.addWidget(self.char_count_label, 0, Qt.AlignVCenter)
         input_row.addWidget(self.send_button, 0, Qt.AlignVCenter)
 
         input_vbox.addWidget(self.reply_bar)
@@ -1475,7 +1465,7 @@ class MainWindow(QMainWindow):
             self.setWindowTitle(f"uPtt - {corrected_id}")
             self.user_id_label.setText(corrected_id)
             self._status_dot.show()
-            self.logout_btn.show()
+            self.menu_btn.show()
 
             # 上次執行若崩潰／強制結束，pending 訊息可能沒被更新狀態；登入後立刻
             # 標記為 failed，避免 ⏳ bubble 永久殘留。
@@ -1719,11 +1709,6 @@ class MainWindow(QMainWindow):
         self._search_hint.adjustSize()
         self._search_hint.move(w - self._search_hint.width() - 8,
                                (h - self._search_hint.height()) // 2)
-
-    def _update_char_count(self, _text: str = ""):
-        """更新輸入框字數計數（顯示層，不改資料流）。"""
-        n = len(self.message_edit.text())
-        self.char_count_label.setText(f"{n} / {INPUT_CHAR_LIMIT}")
 
     def _update_status_bar(self):
         """更新底部狀態列左側的對話/未讀計數（用既有資料計算）。"""
@@ -2612,6 +2597,35 @@ class MainWindow(QMainWindow):
         menu = self._build_contact_context_menu(widget.ptt_id, is_pinned, widget._is_muted)
         menu.exec(self.contact_list.mapToGlobal(pos))
 
+    def show_main_menu(self):
+        """顯示側欄選單按鈕（☰）的選單：全部標為已讀 / 登出。"""
+        menu = QMenu(self)
+
+        mark_all_read_action = QAction("全部標為已讀", self)
+        mark_all_read_action.triggered.connect(self.handle_mark_all_read)
+        menu.addAction(mark_all_read_action)
+
+        menu.addSeparator()
+
+        logout_action = QAction("登出", self)
+        logout_action.triggered.connect(self.handle_logout)
+        menu.addAction(logout_action)
+
+        menu.exec(self.menu_btn.mapToGlobal(QPoint(0, self.menu_btn.height())))
+
+    def handle_mark_all_read(self):
+        """把所有會話的未讀數一次歸零。"""
+        current_acc = self.ptt_service.ptt_id
+        self.db.mark_all_read(current_acc)
+        for ptt_id in self.unread_counts:
+            self.unread_counts[ptt_id] = 0
+        for i in range(self.contact_list.count()):
+            item = self.contact_list.item(i)
+            widget = self.contact_list.itemWidget(item)
+            if widget:
+                widget.set_unread(0)
+        self._update_status_bar()
+
     def _stop_all_threads(self):
         """停止所有背景執行緒 (query worker → main worker → version check)。"""
         from PySide6.QtCore import QMetaObject
@@ -2680,7 +2694,7 @@ class MainWindow(QMainWindow):
             self.refresh_chat_display()
             self.user_id_label.setText("uPtt")
             self._status_dot.hide()
-            self.logout_btn.hide()
+            self.menu_btn.hide()
             self.chat_header.hide()
             self.setWindowTitle("uPtt")
 

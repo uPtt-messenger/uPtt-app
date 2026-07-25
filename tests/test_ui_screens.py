@@ -302,6 +302,30 @@ def test_handle_logout(mock_qthread, mock_worker, mock_query_worker, mock_ver_wo
         window.handle_logout()
         assert window.central_stack.currentIndex() == 0
 
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.QueryWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_handle_mark_all_read(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
+    with patch('os.path.exists', return_value=True):
+        db_mock.get_all_sessions.return_value = [
+            {'id': 'u1', 'display_id': 'U1', 'nickname': 'N1', 'unread_count': 3},
+            {'id': 'u2', 'display_id': 'U2', 'nickname': 'N2', 'unread_count': 5},
+        ]
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        window.load_sessions_from_db()
+        assert sum(window.unread_counts.values()) > 0
+
+        window.handle_mark_all_read()
+
+        db_mock.mark_all_read.assert_called_once_with(ptt_service_mock.ptt_id)
+        assert all(count == 0 for count in window.unread_counts.values())
+        for i in range(window.contact_list.count()):
+            item = window.contact_list.item(i)
+            widget = window.contact_list.itemWidget(item)
+            assert widget.unread_count == 0
+
 @patch('PySide6.QtCore.QMetaObject.invokeMethod')
 @patch('src.uPtt.ui.screens.VersionCheckWorker')
 @patch('src.uPtt.ui.screens.QueryWorker')

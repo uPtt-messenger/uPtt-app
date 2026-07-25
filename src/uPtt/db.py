@@ -578,6 +578,18 @@ class DatabaseManager:
         except sqlite3.Error as e:
             logger.error(f"標記已讀失敗：{e}")
 
+    def mark_all_read(self, account_id: str):
+        acc_id_lower = account_id.lower()
+        try:
+            with self._get_connection() as conn:
+                conn.execute("UPDATE messages SET is_read = 1 WHERE account_id = ?",
+                             (acc_id_lower,))
+                conn.execute("UPDATE sessions SET unread_count = 0 WHERE account_id = ?",
+                             (acc_id_lower,))
+                conn.commit()
+        except sqlite3.Error as e:
+            logger.error(f"標記全部已讀失敗：{e}")
+
     # --- 設定 ---
     def set_config(self, key: str, value: Any):
         try:
