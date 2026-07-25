@@ -1013,6 +1013,34 @@ def test_connection_lost_signal(qtbot, worker, ptt_service_mock, db_mock):
         worker._poll_new_mails()
 
 
+def test_poll_half_dead_session_triggers_reconnect(qtbot, worker, ptt_service_mock, db_mock):
+    """連線半死時 PyPtt 只會逾時回 None，不丟 ConnectionClosed。
+
+    迴歸測試：曾把它當成「信箱是空的」靜靜 return，導致輪詢永久停擺
+    （收不到信、也不會重連）。掃到過信就不可能真的空 → 必須判定為斷線。
+    """
+    ptt_service_mock.ptt_id = "TestUser"
+    worker._was_connected = True
+    worker.last_poll_time = datetime.now()
+    worker._last_newest_index = 200          # 上次掃到 200 封，信箱不可能突然變空
+    ptt_service_mock.call.return_value = None
+
+    with qtbot.waitSignal(worker.connection_lost):
+        worker._poll_new_mails()
+
+
+def test_poll_genuinely_empty_mailbox_is_not_disconnect(qtbot, worker, ptt_service_mock, db_mock):
+    """真的空信箱（從未掃到過信）不該被誤判為斷線。"""
+    ptt_service_mock.ptt_id = "TestUser"
+    worker._was_connected = True
+    worker.last_poll_time = datetime.now()
+    worker._last_newest_index = None
+    ptt_service_mock.call.return_value = 0
+
+    with qtbot.assertNotEmitted(worker.connection_lost):
+        worker._poll_new_mails()
+
+
 def test_query_worker_queues_requests_before_login(query_worker, ptt_service_mock):
     """副 session 登入前的 user_info 請求應被暫存。"""
     ptt_service_mock.ptt_id = None

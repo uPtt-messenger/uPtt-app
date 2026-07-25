@@ -446,16 +446,26 @@ class PTTWorker(QObject):
 
             total_newest = self.ptt.call('get_newest_index', {'index_type': PyPtt.NewIndex.MAIL})
 
+            # 讀不到信箱編號代表連線已半死：PyPtt 逾時不丟 ConnectionClosed，只回 None，
+            # 原本會被當成「信箱是空的」靜靜跳過，輪詢就此永久停擺（收不到信也不會重連）。
+            # 之前掃到過信就不可能真的空 → 當成斷線，交給既有的重連路徑處理。
+            if not total_newest or total_newest == 0:
+                if self._last_newest_index:
+                    logger.warning(
+                        f"get_newest_index 回 {total_newest!r}（上次為 {self._last_newest_index}），"
+                        f"判定連線已中斷"
+                    )
+                    raise PyPtt.ConnectionClosed()
+                self.last_poll_time = current_poll_start
+                return
+
             # 如果之前是斷線狀態，現在成功了，代表已恢復
+            # （必須在上面的有效性檢查之後，否則半死連線會被誤報為「已重新連線」）
             if not self._was_connected:
                 self._was_connected = True
                 self.connection_restored.emit()
                 self.status_updated.emit("已重新連線")
                 logger.info("連線已恢復")
-
-            if not total_newest or total_newest == 0:
-                self.last_poll_time = current_poll_start
-                return
 
             # 快速跳過：信箱最新索引沒有變化
             if not self.is_first_polling and self._last_newest_index is not None:
