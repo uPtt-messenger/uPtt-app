@@ -1,0 +1,95 @@
+import logging
+import os
+import sys
+from unittest.mock import patch, MagicMock
+from uPtt.app import setup_logging, main
+
+def test_setup_logging_basic():
+    # Clear existing handlers to test fresh setup
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+        
+    setup_logging(debug_mode=False)
+    
+    assert root_logger.level == logging.INFO
+    # Should have at least one handler (console)
+    assert len(root_logger.handlers) >= 1
+
+def test_setup_logging_debug():
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+
+    from uPtt.utils import get_app_data_dir
+    debug_log_path = os.path.join(get_app_data_dir(), "uptt_debug.log")
+
+    try:
+        setup_logging(debug_mode=True)
+        assert root_logger.level == logging.DEBUG
+        # Debug log should be written to the app data directory, not CWD
+        assert os.path.exists(debug_log_path)
+    finally:
+        if os.path.exists(debug_log_path):
+            os.remove(debug_log_path)
+
+@patch('uPtt.app.QApplication')
+@patch('uPtt.app.QFontDatabase')
+@patch('uPtt.app.MainWindow')
+@patch('uPtt.app.DatabaseManager')
+@patch('uPtt.app.UPttService')
+@patch('uPtt.app.QLocalServer')
+@patch('uPtt.app.QLocalSocket')
+@patch('uPtt.utils.get_app_data_dir', return_value="/tmp/test_uptt")
+@patch('sys.exit')
+def test_main_debug_mode(mock_exit, mock_dir, mock_socket, mock_server, mock_ptt, mock_db, mock_main_win, mock_fontdb, mock_qapp):
+    # Simulate debug mode
+    with patch('sys.argv', ['run_app.py', '--debug']):
+        main()
+        
+    mock_qapp.assert_called_once()
+    mock_main_win.assert_called_once()
+    mock_db.assert_called_once()
+    # 主 session + 副 session 各一次
+    assert mock_ptt.call_count == 2
+    # Debug mode skips QLocalServer logic
+    mock_server.assert_not_called()
+
+@patch('uPtt.app.QApplication')
+@patch('uPtt.app.QFontDatabase')
+@patch('uPtt.app.MainWindow')
+@patch('uPtt.app.DatabaseManager')
+@patch('uPtt.app.UPttService')
+@patch('uPtt.app.QLocalServer')
+@patch('uPtt.app.QLocalSocket')
+@patch('uPtt.utils.get_app_data_dir', return_value="/tmp/test_uptt")
+@patch('sys.exit')
+def test_main_single_instance_first(mock_exit, mock_dir, mock_socket, mock_server, mock_ptt, mock_db, mock_main_win, mock_fontdb, mock_qapp):
+    # Simulate normal mode, first instance
+    mock_socket_instance = mock_socket.return_value
+    mock_socket_instance.waitForConnected.return_value = False # No other instance
+    
+    mock_server_instance = mock_server.return_value
+    mock_server_instance.listen.return_value = True
+    
+    with patch('sys.argv', ['run_app.py']):
+        main()
+        
+    mock_server_instance.listen.assert_called_once()
+    mock_main_win.assert_called_once()
+
+@patch('uPtt.app.QApplication')
+@patch('uPtt.app.QFontDatabase')
+@patch('uPtt.app.MainWindow')
+@patch('uPtt.app.QLocalSocket')
+@patch('sys.exit')
+def test_main_single_instance_exists(mock_exit, mock_socket, mock_main_win, mock_fontdb, mock_qapp):
+    # Simulate normal mode, already running
+    mock_socket_instance = mock_socket.return_value
+    mock_socket_instance.waitForConnected.return_value = True # Another instance detected
+    
+    with patch('sys.argv', ['run_app.py']):
+        main()
+        
+    # Should not initialize main window or DB if another instance is running
+    mock_main_win.assert_not_called()

@@ -1,0 +1,50 @@
+try:
+    from . import __app_name__ as pkg_name
+except ImportError:
+    from __init__ import __app_name__ as pkg_name
+
+LOGO = '''
+██╗   ██╗██████╗ ████████╗████████╗ 
+██║   ██║██╔══██╗╚══██╔══╝╚══██╔══╝ 
+██║   ██║██████╔╝   ██║      ██║    
+██║   ██║██╔═══╝    ██║      ██║    
+╚██████╔╝██║        ██║      ██║    
+ ╚═════╝ ╚═╝        ╚═╝      ╚═╝    
+
+████████╗███████╗██████╗ ███╗   ███╗
+╚══██╔══╝██╔════╝██╔══██╗████╗ ████║
+   ██║   █████╗  ██████╔╝██╔████╔██║
+   ██║   ██╔══╝  ██╔══██╗██║╚██╔╝██║
+   ██║   ███████╗██║  ██║██║ ╚═╝ ██║
+   ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝'''
+
+
+# https://patorjk.com/software/taag/
+# DOS Rebel
+
+class MsgType:
+    SYSTEM = '[系統]'
+    USER = '[使用者]'
+    TARGET = '[目標]'
+
+
+DOWNLOAD_URL = "https://uptt.cc/"
+
+DIVISION_LINE = "__DIVISION_LINE__"
+DIVISION_TYPE = '='  # 用於分隔線的訊息類型
+
+# PTT 訊息標題
+PTT_MSG_TITLE = "你收到使用 uPtt 傳送的訊息"
+PTT_MSG_DIVISION_LINE = DIVISION_TYPE * 20
+PTT_MSG_TS_PREFIX = "[uPtt-ts:"
+PTT_MSG_TS_SUFFIX = "]"
+
+
+class CMD:
+    HELP = "/help"
+    CLEAR = "/clear"
+    EXIT = "/exit"
+    QUIT = "/quit"
+    LOGOUT = "/logout"
+    CLOSE = "/close"
+    BACK = "/back"

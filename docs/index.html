@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script>
+        // Set the theme before first paint to avoid a flash of the wrong theme.
+        (function () {
+            try {
+                var stored = localStorage.getItem('uptt-theme');
+                var theme = (stored === 'light' || stored === 'dark')
+                    ? stored
+                    : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+                document.documentElement.setAttribute('data-theme', theme);
+            } catch (e) {}
+        })();
+    </script>
+    <title>uPtt — 開源 PTT 即時通訊軟體</title>
+    <meta name="description" content="uPtt 是一款為批踢踢實業坊量身打造的現代化即時通訊桌面應用程式，將 PTT 站內信轉化為流暢的聊天體驗。">
+    <meta name="keywords" content="uPtt, PTT, 批踢踢, 即時通訊, 站內信, BBS, 開源, open source, messenger">
+    <meta property="og:title" content="uPtt — 開源 PTT 即時通訊軟體">
+    <meta property="og:description" content="讓 PTT 的溫柔，在現代桌面重新綻放。一個為批踢踢量身打造的現代化即時通訊軟體。">
+    <meta property="og:type" content="website">
+    <meta property="og:image" content="https://raw.githubusercontent.com/uPtt-messenger/uPtt-app/main/src/uPtt/ui/assets/logo_icon.svg">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg width='80' height='80' viewBox='0 0 80 80' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Crect x='2' y='2' width='76' height='76' rx='18' fill='%23161B22' stroke='%2330363D' stroke-width='2'/%3E%3Crect x='12' y='12' width='56' height='56' rx='12' fill='%230D1117' stroke='%2358A6FF' stroke-width='1.5' stroke-dasharray='2 2'/%3E%3Cpath d='M28 28V42C28 48.6274 33.3726 54 40 54C46.6274 54 52 48.6274 52 42V28' stroke='%23F0F6FC' stroke-width='6' stroke-linecap='round'/%3E%3Cpath d='M52 38V54' stroke='%23F0F6FC' stroke-width='6' stroke-linecap='round'/%3E%3Ccircle cx='28' cy='28' r='5' fill='%2358A6FF'/%3E%3Ccircle cx='52' cy='54' r='5' fill='%23E3B341'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Navigation -->
+<nav>
+    <div class="nav-inner">
+        <a href="#" class="nav-logo">
+            <svg width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="2" y="2" width="76" height="76" rx="18" fill="#161B22" stroke="#30363D" stroke-width="2"/>
+                <rect x="12" y="12" width="56" height="56" rx="12" fill="#0D1117" stroke="#58A6FF" stroke-width="1.5" stroke-dasharray="2 2"/>
+                <path d="M28 28V42C28 48.6274 33.3726 54 40 54C46.6274 54 52 48.6274 52 42V28" stroke="#F0F6FC" stroke-width="6" stroke-linecap="round"/>
+                <path d="M52 38V54" stroke="#F0F6FC" stroke-width="6" stroke-linecap="round"/>
+                <circle cx="28" cy="28" r="5" fill="#58A6FF"/>
+                <circle cx="52" cy="54" r="5" fill="#E3B341"/>
+            </svg>
+            <span>uPtt</span>
+        </a>
+        <div class="nav-right">
+            <ul class="nav-links">
+                <li><a href="#features">功能</a></li>
+                <li><a href="#how-it-works">運作原理</a></li>
+                <li><a href="#security">安全</a></li>
+                <li><a href="#developer">開發者</a></li>
+                <li><a href="https://github.com/uPtt-messenger/uPtt-app" target="_blank" rel="noopener">原始碼</a></li>
+                <li><a href="en.html">English</a></li>
+                <li><a href="#download" class="btn-nav">下載</a></li>
+            </ul>
+            <button class="theme-toggle" id="theme-toggle" type="button" aria-label="切換為深色主題" aria-pressed="false">
+                <svg class="theme-icon theme-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+                <svg class="theme-icon theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            </button>
+            <button class="nav-hamburger" aria-label="Toggle menu" onclick="document.querySelector('.nav-links').classList.toggle('open')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+            </button>
+        </div>
+    </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+    <div class="container">
+        <div class="hero-badge">
+            <span class="dot"></span>
+            🚧 封測中 &middot; <a href="https://github.com/uPtt-messenger/uPtt-app/issues" target="_blank" rel="noopener">歡迎回報問題</a>
+        </div>
+        <div class="hero-logo">
+            <svg width="240" height="80" viewBox="0 0 240 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="10" y="20" width="40" height="40" rx="8" stroke="#58A6FF" stroke-width="3"/>
+                <path d="M22 35V42C22 45 25 48 30 48C35 48 38 45 38 42V35" stroke="#F0F6FC" stroke-width="3" stroke-linecap="round"/>
+                <circle cx="38" cy="48" r="3" fill="#E3B341"/>
+                <text x="65" y="52" fill="#F0F6FC" font-family="ui-monospace, monospace" font-weight="bold" font-size="32">uPtt</text>
+                <text x="65" y="68" fill="#8B949E" font-family="ui-monospace, monospace" font-size="12">Open Source PTT Messenger</text>
+            </svg>
+        </div>
+        <h1 class="hero-tagline">
+            讓 PTT 的溫柔<br>在現代桌面<span class="highlight">重新綻放</span>
+        </h1>
+        <p class="hero-subtitle">
+            一個為「批踢踢實業坊」量身打造的即時通訊軟體。<br>
+            將 PTT 重塑為流暢的聊天體驗。
+        </p>
+        <div class="hero-buttons">
+            <a href="https://github.com/uPtt-messenger/uPtt-app/releases/latest" class="btn btn-primary" target="_blank" rel="noopener">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                下載最新版本
+            </a>
+            <a href="https://github.com/uPtt-messenger/uPtt-app" class="btn btn-secondary" target="_blank" rel="noopener">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+                原始碼
+            </a>
+        </div>
+        <div class="hero-preview fade-in">
+            <div class="app-window" aria-hidden="true">
+                <div class="app-window-bar">
+                    <span class="win-dot win-dot-red"></span>
+                    <span class="win-dot win-dot-yellow"></span>
+                    <span class="win-dot win-dot-green"></span>
+                    <span class="app-window-title">uPtt</span>
+                </div>
+                <div class="app-window-body">
+                    <aside class="mock-contacts">
+                        <div class="mock-contact active">
+                            <span class="mock-online" data-status="online"></span>
+                            <div class="mock-contact-info">
+                                <span class="mock-contact-name">貓村長</span>
+                                <span class="mock-contact-id">catmayor</span>
+                            </div>
+                        </div>
+                        <div class="mock-contact">
+                            <span class="mock-online" data-status="online"></span>
+                            <div class="mock-contact-info">
+                                <span class="mock-contact-name">深夜食堂</span>
+                                <span class="mock-contact-id">diner_kai</span>
+                            </div>
+                        </div>
+                        <div class="mock-contact">
+                            <span class="mock-online" data-status="offline"></span>
+                            <div class="mock-contact-info">
+                                <span class="mock-contact-name">板橋大魔王</span>
+                                <span class="mock-contact-id">bcboss</span>
+                            </div>
+                        </div>
+                        <div class="mock-contact">
+                            <span class="mock-online" data-status="unknown"></span>
+                            <div class="mock-contact-info">
+                                <span class="mock-contact-name">資工肥宅</span>
+                                <span class="mock-contact-id">csnerd87</span>
+                            </div>
+                        </div>
+                    </aside>
+                    <section class="mock-chat">
+                        <div class="mock-bubble mock-bubble-in">
+                            <p>在嗎？水球一直吃不到 QQ</p>
+                            <span class="mock-time">20:58</span>
+                        </div>
+                        <div class="mock-bubble mock-bubble-out">
+                            <p>查線那條在修了，等我一下</p>
+                            <span class="mock-time">20:59</span>
+                        </div>
+                        <div class="mock-bubble mock-bubble-in">
+                            <p>了解，辛苦了 m(_ _)m</p>
+                            <span class="mock-time">20:59</span>
+                        </div>
+                        <div class="mock-input">
+                            <span>輸入訊息…</span><span class="mock-caret"></span>
+                        </div>
+                    </section>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Features -->
+<section class="features" id="features">
+    <div class="container">
+        <div class="section-label">Features</div>
+        <h2 class="section-title">舊傳統與新科技的完美結合</h2>
+        <p class="section-desc">無需學習複雜的 Telnet 鍵盤指令，讓您在 PTT 上的對話如同呼吸般自然。</p>
+        <div class="features-grid">
+            <div class="feature-card fade-in">
+                <div class="feature-icon green">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                </div>
+                <h3>站內信變成對話</h3>
+                <p>自動將瑣碎的「站內信」轉換為直覺的「對話」，溝通不再斷斷續續。支援引用回覆，讓對話脈絡一目了然。</p>
+            </div>
+            <div class="feature-card fade-in">
+                <div class="feature-icon green">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                </div>
+                <h3>聯絡人管理</h3>
+                <p>釘選重要對話、拖放排序、封鎖或隱藏聯絡人。右鍵選單提供多層級操作，管理對話從未如此簡單。</p>
+            </div>
+            <div class="feature-card fade-in">
+                <div class="feature-icon gold">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+                </div>
+                <h3>水球訊息整合</h3>
+                <p>PTT 的即時水球訊息也能捕獲顯示。內建批次去重機制，確保訊息不重複、不遺漏。</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- How it works -->
+<section class="how-it-works" id="how-it-works">
+    <div class="container">
+        <div class="section-label">How It Works</div>
+        <h2 class="section-title">運作原理</h2>
+        <p class="section-desc">uPtt 直接連接 PTT 官方伺服器，以站內信作為訊息傳輸層，無需第三方中繼。</p>
+        
+        <div class="alert alert-danger fade-in">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M12 7a.75.75 0 0 1 .75.75v4.5a.75.75 0 0 1-1.5 0v-4.5A.75.75 0 0 1 12 7Zm0 9a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path><path d="M1 12C1 5.925 5.925 1 12 1s11 4.925 11 11-4.925 11-11 11S1 18.075 1 12Zm11-9.5A8.5 8.5 0 0 0 3.5 12c0 4.694 3.806 8.5 8.5 8.5s8.5-3.806 8.5-8.5A8.5 8.5 0 0 0 12 2.5Z"></path></svg>
+            <strong>重要警告：</strong> 使用 uPtt 時請勿手動操作刪除信箱內容，以免造成程式誤刪。
+        </div>
+
+        <div class="flow-diagram">
+            <div class="flow-step fade-in">
+                <div class="flow-number">1</div>
+                <h3>發送訊息</h3>
+                <p>您在 uPtt 輸入的訊息經過格式封裝，透過 PyPtt 以站內信形式送至 PTT 伺服器，同時儲存到本地資料庫。</p>
+            </div>
+            <div class="flow-step fade-in">
+                <div class="flow-number">2</div>
+                <h3>背景輪詢</h3>
+                <p>Worker 執行緒每 5 秒輪詢一次站內信，識別 uPtt 格式訊息並解析內容。內建時間戳同步機制確保訊息順序一致。</p>
+            </div>
+            <div class="flow-step fade-in">
+                <div class="flow-number">3</div>
+                <h3>即時呈現</h3>
+                <p>解析後的訊息存入 SQLite 資料庫，透過 Qt Signal 通知 UI 執行緒即時更新畫面，呈現為熟悉的聊天氣泡。</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Message Types -->
+<section class="msg-types" id="message-types">
+    <div class="container">
+        <div class="section-label">Message Types</div>
+        <h2 class="section-title">三種訊息類型，統一管理</h2>
+        <p class="section-desc">uPtt 能智慧辨識並處理不同類型的 PTT 訊息。</p>
+        <div class="msg-grid">
+            <div class="msg-card type-uptt fade-in">
+                <span class="msg-tag">uPtt</span>
+                <h3>uPtt 訊息</h3>
+                <p>uPtt 專屬格式訊息，解析後存入本地資料庫並自動從 PTT 信箱刪除，維持信箱整潔。</p>
+            </div>
+            <div class="msg-card type-mail fade-in">
+                <span class="msg-tag">Mail</span>
+                <h3>一般站內信</h3>
+                <p>來自其他使用者的普通站內信，以信件卡片形式顯示在對話中，原始信件保留在 PTT 信箱不刪除。</p>
+            </div>
+            <div class="msg-card type-waterball fade-in">
+                <span class="msg-tag">Waterball</span>
+                <h3>水球訊息</h3>
+                <p>PTT 的即時彈出訊息（水球），被捕獲後以行內氣泡形式顯示，並透過批次指紋雜湊機制去重。</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- App Showcase -->
+<section class="showcase" id="showcase">
+    <div class="container">
+        <div class="section-label">App Preview</div>
+        <h2 class="section-title">App 畫面一覽</h2>
+        <p class="section-desc">從登入到雙連線就緒，每個畫面都維持一致的終端機質感。</p>
+        <div class="showcase-grid">
+            <div class="showcase-card fade-in">
+                <div class="app-window" aria-hidden="true">
+                    <div class="app-window-bar">
+                        <span class="win-dot win-dot-red"></span>
+                        <span class="win-dot win-dot-yellow"></span>
+                        <span class="win-dot win-dot-green"></span>
+                        <span class="app-window-title">登入</span>
+                    </div>
+                    <div class="app-window-body app-window-body-solo">
+                        <div class="mock-login">
+                            <label>PTT ID</label>
+                            <div class="mock-field">wonderslab<span class="mock-caret"></span></div>
+                            <label>密碼</label>
+                            <div class="mock-field">••••••••</div>
+                            <div class="mock-btn">登入</div>
+                        </div>
+                    </div>
+                </div>
+                <p class="showcase-caption">帳號密碼只用來連線 PTT，不會外傳到任何第三方伺服器。</p>
+            </div>
+            <div class="showcase-card fade-in">
+                <div class="app-window" aria-hidden="true">
+                    <div class="app-window-bar">
+                        <span class="win-dot win-dot-red"></span>
+                        <span class="win-dot win-dot-yellow"></span>
+                        <span class="win-dot win-dot-green"></span>
+                        <span class="app-window-title">連線中</span>
+                    </div>
+                    <div class="app-window-body app-window-body-solo">
+                        <div class="mock-onboarding">
+                            <p class="mock-step done">✓ 主連線登入成功</p>
+                            <p class="mock-step active">… 建立查詢連線<span class="mock-caret"></span></p>
+                            <p class="mock-step">　同步歷史訊息</p>
+                        </div>
+                    </div>
+                </div>
+                <p class="showcase-caption">雙連線架構：主線負責收發訊息，查線專注線上狀態查詢，兩者互不阻塞。</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Security -->
+<section class="security" id="security">
+    <div class="container">
+        <div class="section-label">Security &amp; Privacy</div>
+        <h2 class="section-title">安全與隱私優先</h2>
+        <p class="section-desc">您的資料只屬於您。uPtt 不收集任何個人資訊，不連接任何第三方伺服器。</p>
+        <div class="security-grid">
+            <div class="security-item fade-in">
+                <div class="security-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                </div>
+                <div>
+                    <h4>本地加密存儲</h4>
+                    <p>所有對話紀錄與帳號資訊僅保存在您的電腦本地 SQLite 資料庫中，絕不上傳第三方。</p>
+                </div>
+            </div>
+            <div class="security-item fade-in">
+                <div class="security-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                </div>
+                <div>
+                    <h4>原生通訊協議</h4>
+                    <p>直接連接 PTT 官方伺服器（ptt.cc），僅額外連線 GitHub API 檢查更新版本，純淨安全。</p>
+                </div>
+            </div>
+            <div class="security-item fade-in">
+                <div class="security-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                </div>
+                <div>
+                    <h4>自動化防洩漏</h4>
+                    <p>CI 整合 TruffleHog 掃描、Bandit 靜態分析與動態密碼攔截測試，確保敏感資訊絕不外洩。</p>
+                </div>
+            </div>
+            <div class="security-item fade-in">
+                <div class="security-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+                </div>
+                <div>
+                    <h4>程式碼簽章</h4>
+                    <p>發行版由 <a href="https://signpath.io" target="_blank" rel="noopener" style="color: var(--accent);">SignPath.io</a> 簽署並經 SignPath Foundation 驗證，確保下載的程式未被篡改。</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Download -->
+<section class="download" id="download">
+    <div class="container">
+        <div class="section-label">Download</div>
+        <h2 class="section-title">立即下載</h2>
+        <p class="section-desc" style="margin: 0 auto;">無需安裝繁瑣的程式碼環境，下載即用。</p>
+        <div class="download-cards">
+            <a href="https://github.com/uPtt-messenger/uPtt-app/releases/latest" class="download-card fade-in" target="_blank" rel="noopener">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5C17.88 20.74 17 21.95 15.66 21.97C14.32 22 13.89 21.18 12.37 21.18C10.84 21.18 10.37 21.95 9.1 22C7.79 22.05 6.8 20.68 5.96 19.47C4.25 17 2.94 12.45 4.7 9.39C5.57 7.87 7.13 6.91 8.82 6.88C10.1 6.86 11.32 7.75 12.11 7.75C12.89 7.75 14.37 6.68 15.92 6.84C16.57 6.87 18.39 7.1 19.56 8.82C19.47 8.88 17.39 10.1 17.41 12.63C17.44 15.65 20.06 16.66 20.09 16.67C20.06 16.74 19.67 18.11 18.71 19.5ZM13 3.5C13.73 2.67 14.94 2.04 15.94 2C16.07 3.17 15.6 4.35 14.9 5.19C14.21 6.04 13.07 6.7 11.95 6.61C11.8 5.46 12.36 4.26 13 3.5Z"/></svg>
+                <h3>macOS</h3>
+                <p>.dmg 映像檔</p>
+            </a>
+            <a href="https://github.com/uPtt-messenger/uPtt-app/releases/latest" class="download-card fade-in" target="_blank" rel="noopener">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 12V6.75L9 5.43V11.91L3 12M20 3V11.75L10 11.9V5.21L20 3M3 13L9 13.09V19.9L3 18.75V13M10 13.15L20 13V22L10 20.09V13.15Z"/></svg>
+                <h3>Windows</h3>
+                <p>.exe 執行檔</p>
+            </a>
+        </div>
+
+        <h3 style="font-family: var(--font-mono); margin-top: 56px; margin-bottom: 12px; font-size: 1.1rem;">或透過 pip 安裝（Python 3.12+）</h3>
+        <p class="section-desc" style="margin: 0 auto 20px;">
+            正式版發佈於 <a href="https://pypi.org/project/uPtt/" target="_blank" rel="noopener" style="color: var(--accent);">PyPI</a>，
+            預覽版（Beta / RC）亦同步自動更新。
+        </p>
+        <div class="code-block fade-in" style="max-width: 720px; margin: 0 auto; text-align: left;">
+            <code>
+                <span class="comment"># 正式版</span><br>
+                <span class="prompt">$ </span><span class="cmd">pip install uPtt</span><br>
+                <span class="prompt">$ </span><span class="cmd">uptt</span><br>
+                <br>
+                <span class="comment"># 預覽版（Beta / RC）</span><br>
+                <span class="prompt">$ </span><span class="cmd">pip install --pre uPtt</span><br>
+                <span class="prompt">$ </span><span class="cmd">uptt</span>
+            </code>
+        </div>
+    </div>
+</section>
+
+<!-- Developer -->
+<section class="developer" id="developer">
+    <div class="container">
+        <div class="section-label">Developer</div>
+        <h2 class="section-title">開發者快速入門</h2>
+        <p class="section-desc">uPtt 使用 Python 3.12 與 PySide6 開發，歡迎貢獻。</p>
+        <div class="code-block fade-in">
+            <code>
+                <span class="comment"># 複製專案</span><br>
+                <span class="prompt">$ </span><span class="cmd">git clone git@github.com:uPtt-messenger/uPtt-app.git</span><br>
+                <span class="prompt">$ </span><span class="cmd">cd uPtt-app</span><br>
+                <br>
+                <span class="comment"># 安裝依賴</span><br>
+                <span class="prompt">$ </span><span class="cmd">pip install -r requirements.txt</span><br>
+                <br>
+                <span class="comment"># 執行</span><br>
+                <span class="prompt">$ </span><span class="cmd">python src/run_app.py</span><br>
+                <br>
+                <span class="comment"># 測試</span><br>
+                <span class="prompt">$ </span><span class="cmd">pytest --cov=src/uPtt tests/</span>
+            </code>
+        </div>
+        <div class="dev-links">
+            <a href="https://github.com/uPtt-messenger/uPtt-app" class="btn btn-secondary" target="_blank" rel="noopener">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
+                GitHub Repository
+            </a>
+            <a href="https://github.com/uPtt-messenger/uPtt-app/issues" class="btn btn-secondary" target="_blank" rel="noopener">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                回報問題
+            </a>
+        </div>
+
+        <h3 style="font-family: var(--font-mono); margin-top: 48px; margin-bottom: 12px; font-size: 1.1rem;">快捷鍵</h3>
+        <table class="shortcuts-table">
+            <thead>
+                <tr><th>按鍵</th><th>功能</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><kbd>Ctrl+N</kbd></td><td>聚焦新增對話輸入框</td></tr>
+                <tr><td><kbd>Ctrl+W</kbd></td><td>關閉目前對話</td></tr>
+                <tr><td><kbd>Ctrl+Q</kbd></td><td>完全退出程式</td></tr>
+                <tr><td><kbd>Enter</kbd></td><td>發送訊息</td></tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<!-- Footer -->
+<footer>
+    <div class="footer-inner">
+        <div class="footer-links">
+            <a href="https://github.com/uPtt-messenger/uPtt-app" target="_blank" rel="noopener">GitHub</a>
+            <a href="https://github.com/uPtt-messenger/uPtt-app/releases" target="_blank" rel="noopener">Releases</a>
+            <a href="https://github.com/uPtt-messenger/uPtt-app/issues" target="_blank" rel="noopener">Issues</a>
+            <a href="https://github.com/uPtt-messenger/uPtt-app/blob/main/LICENSE" target="_blank" rel="noopener">License</a>
+            <a href="https://github.com/uPtt-messenger/uPtt-app/blob/main/CODE_SIGNING_POLICY.md" target="_blank" rel="noopener">Code Signing</a>
+        </div>
+        <p class="footer-copy">
+            &copy; 2024&ndash;2026 uPtt Project &middot; 以 <a href="https://github.com/uPtt-messenger/uPtt-app/blob/main/LICENSE" target="_blank" rel="noopener">GPL-3.0</a> 授權釋出<br>
+            特別感謝 <a href="https://github.com/PyPtt/PyPtt" target="_blank" rel="noopener">PyPtt</a> 提供強大的 PTT 操作支援<br>
+            程式碼簽章由 <a href="https://signpath.io" target="_blank" rel="noopener">SignPath.io</a> 提供，<a href="https://signpath.org" target="_blank" rel="noopener">SignPath Foundation</a> 驗證
+        </p>
+    </div>
+</footer>
+
+<script>
+    // Intersection Observer for fade-in animations
+    if ('IntersectionObserver' in window) {
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                    observer.unobserve(entry.target);
+                }
+            });
+        }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+
+        document.querySelectorAll('.fade-in').forEach(el => observer.observe(el));
+    } else {
+        document.querySelectorAll('.fade-in').forEach(el => el.classList.add('visible'));
+    }
+
+    // Close mobile menu on link click
+    document.querySelectorAll('.nav-links a').forEach(link => {
+        link.addEventListener('click', () => {
+            document.querySelector('.nav-links').classList.remove('open');
+        });
+    });
+
+    // Theme toggle
+    (function () {
+        const toggle = document.getElementById('theme-toggle');
+        if (!toggle) return;
+
+        function currentTheme() {
+            return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+        }
+
+        function updateLabel() {
+            const isDark = currentTheme() === 'dark';
+            toggle.setAttribute('aria-pressed', String(isDark));
+            toggle.setAttribute('aria-label', isDark ? '切換為淺色主題' : '切換為深色主題');
+        }
+
+        updateLabel();
+
+        toggle.addEventListener('click', () => {
+            const next = currentTheme() === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', next);
+            try { localStorage.setItem('uptt-theme', next); } catch (e) {}
+            updateLabel();
+        });
+    })();
+</script>
+
+</body>
+</html>

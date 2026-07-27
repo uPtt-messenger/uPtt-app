@@ -1,0 +1,692 @@
+import pytest
+import os
+import sqlite3
+from datetime import datetime, timedelta
+from uPtt.db import DatabaseManager
+
+@pytest.fixture
+def db_manager(tmp_path):
+    db_file = tmp_path / "test_uptt.db"
+    manager = DatabaseManager(str(db_file))
+    return manager
+
+def test_db_init(tmp_path):
+    db_file = tmp_path / "init_test.db"
+    manager = DatabaseManager(str(db_file))
+    assert db_file.exists()
+    
+    # Check if tables are created
+    with sqlite3.connect(str(db_file)) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='accounts'")
+        assert cursor.fetchone() is not None
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sessions'")
+        assert cursor.fetchone() is not None
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='messages'")
+        assert cursor.fetchone() is not None
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='settings'")
+        assert cursor.fetchone() is not None
+
+def test_upsert_account(db_manager):
+    db_manager.upsert_account("TestUser", "DisplayUser", "MyNickname")
+    
+    with db_manager._get_connection() as conn:
+        row = conn.execute("SELECT * FROM accounts WHERE id = 'testuser'").fetchone()
+        assert row is not None
+        assert row['display_id'] == "DisplayUser"
+        assert row['nickname'] == "MyNickname"
+        assert row['is_active'] == 1
+
+    # Update account
+    db_manager.upsert_account("TestUser", "NewDisplay", "NewNickname")
+    with db_manager._get_connection() as conn:
+        row = conn.execute("SELECT * FROM accounts WHERE id = 'testuser'").fetchone()
+        assert row['display_id'] == "NewDisplay"
+        assert row['nickname'] == "NewNickname"
+
+    # Multiple accounts, only one active
+    db_manager.upsert_account("OtherUser", "OtherDisplay")
+    with db_manager._get_connection() as conn:
+        row1 = conn.execute("SELECT is_active FROM accounts WHERE id = 'testuser'").fetchone()
+        row2 = conn.execute("SELECT is_active FROM accounts WHERE id = 'otheruser'").fetchone()
+        assert row1['is_active'] == 0
+        assert row2['is_active'] == 1
+
+def test_upsert_session(db_manager):
+    account_id = "testuser"
+    db_manager.upsert_account(account_id, account_id)
+    
+    db_manager.upsert_session(account_id, "ContactA", "NicknameA")
+    sessions = db_manager.get_all_sessions(account_id)
+    assert len(sessions) == 1
+    assert sessions[0]['id'] == "contacta"
+    assert sessions[0]['display_id'] == "ContactA"
+    assert sessions[0]['nickname'] == "NicknameA"
+    assert sessions[0]['is_visible'] == 1
+
+    # Update session nickname
+    db_manager.upsert_session(account_id, "ContactA", "NewNicknameA")
+    sessions = db_manager.get_all_sessions(account_id)
+    assert sessions[0]['nickname'] == "NewNicknameA"
+
+    # Empty nickname should not overwrite
+    db_manager.upsert_session(account_id, "ContactA", "")
+    sessions = db_manager.get_all_sessions(account_id)
+    assert sessions[0]['nickname'] == "NewNicknameA"
+
+def test_hide_session(db_manager):
+    account_id = "testuser"
+    db_manager.upsert_session(account_id, "ContactA")
+    
+    assert len(db_manager.get_all_sessions(account_id)) == 1
+    db_manager.hide_session(account_id, "ContactA")
+    assert len(db_manager.get_all_sessions(account_id)) == 0
+
+def test_save_and_get_messages(db_manager):
+    account_id = "testuser"
+    session_id = "contacta"
+    db_manager.upsert_session(account_id, session_id)
+    
+    now = datetime.now()
+    # Save a message from me
+    msg_id = db_manager.save_message(account_id, session_id, account_id, session_id, "Hello", now, True)
+    assert isinstance(msg_id, int) and msg_id > 0
+
+    messages = db_manager.get_messages(account_id, session_id)
+    assert len(messages) == 1
+    assert messages[0]['content'] == "Hello"
+    assert messages[0]['is_me'] == 1
+
+    # Save duplicate message (should fail/return None due to UNIQUE constraint)
+    dup_id = db_manager.save_message(account_id, session_id, account_id, session_id, "Hello", now, True)
+    assert dup_id is None
+    
+    # Save a message from contact
+    later = now + timedelta(seconds=1)
+    db_manager.save_message(account_id, session_id, session_id, account_id, "Hi there", later, False)
+    
+    messages = db_manager.get_messages(account_id, session_id)
+    assert len(messages) == 2
+    assert messages[1]['content'] == "Hi there"
+    assert messages[1]['is_me'] == 0
+    
+    # Check session unread count
+    sessions = db_manager.get_all_sessions(account_id)
+    assert sessions[0]['unread_count'] == 1
+    assert sessions[0]['last_message_text'] == "Hi there"
+
+def test_mark_as_read(db_manager):
+    account_id = "testuser"
+    session_id = "contacta"
+    db_manager.upsert_session(account_id, session_id)
+    db_manager.save_message(account_id, session_id, session_id, account_id, "Unread", datetime.now(), False)
+    
+    sessions = db_manager.get_all_sessions(account_id)
+    assert sessions[0]['unread_count'] == 1
+    
+    db_manager.mark_as_read(account_id, session_id)
+    sessions = db_manager.get_all_sessions(account_id)
+    assert sessions[0]['unread_count'] == 0
+    
+    messages = db_manager.get_messages(account_id, session_id)
+    assert all(m['is_read'] == 1 for m in messages)
+
+
+def test_mark_all_read(db_manager):
+    account_id = "testuser"
+    other_account_id = "otheruser"
+    session_a = "contacta"
+    session_b = "contactb"
+
+    db_manager.upsert_session(account_id, session_a)
+    db_manager.save_message(account_id, session_a, session_a, account_id, "Unread A", datetime.now(), False)
+    db_manager.upsert_session(account_id, session_b)
+    db_manager.save_message(account_id, session_b, session_b, account_id, "Unread B", datetime.now(), False)
+
+    # 其他帳號的未讀不應被影響
+    db_manager.upsert_session(other_account_id, session_a)
+    db_manager.save_message(other_account_id, session_a, session_a, other_account_id, "Unread Other", datetime.now(), False)
+
+    db_manager.mark_all_read(account_id)
+
+    sessions = db_manager.get_all_sessions(account_id)
+    assert all(s['unread_count'] == 0 for s in sessions)
+    messages_a = db_manager.get_messages(account_id, session_a)
+    messages_b = db_manager.get_messages(account_id, session_b)
+    assert all(m['is_read'] == 1 for m in messages_a)
+    assert all(m['is_read'] == 1 for m in messages_b)
+
+    other_sessions = db_manager.get_all_sessions(other_account_id)
+    assert other_sessions[0]['unread_count'] == 1
+
+
+def test_save_message_default_mark_read_false(db_manager):
+    """save_message 不傳 mark_read（預設 False）時，收到的訊息維持既有的未讀行為。"""
+    account_id = "testuser"
+    session_id = "contacta"
+    db_manager.upsert_session(account_id, session_id)
+
+    db_manager.save_message(account_id, session_id, session_id, account_id,
+                             "Incoming", datetime.now(), is_me=False)
+
+    messages = db_manager.get_messages(account_id, session_id)
+    assert messages[0]['is_read'] == 0
+
+    sessions = db_manager.get_all_sessions(account_id)
+    assert sessions[0]['unread_count'] == 1
+
+
+def test_save_message_mark_read_true(db_manager):
+    """save_message(mark_read=True) 用於掃描回補的歷史舊信：入庫即已讀，不計入未讀數。"""
+    account_id = "testuser"
+    session_id = "contacta"
+    db_manager.upsert_session(account_id, session_id)
+
+    db_manager.save_message(account_id, session_id, session_id, account_id,
+                             "Historical", datetime.now(), is_me=False, mark_read=True)
+
+    messages = db_manager.get_messages(account_id, session_id)
+    assert messages[0]['is_read'] == 1
+
+    sessions = db_manager.get_all_sessions(account_id)
+    assert sessions[0]['unread_count'] == 0
+
+
+def test_config(db_manager):
+    db_manager.set_config("theme", "dark")
+    assert db_manager.get_config("theme") == "dark"
+    
+    db_manager.set_config("count", 42)
+    assert db_manager.get_config("count") == 42
+    
+    db_manager.set_config("complex", {"a": 1, "b": [2, 3]})
+    assert db_manager.get_config("complex") == {"a": 1, "b": [2, 3]}
+    
+    assert db_manager.get_config("nonexistent", "default") == "default"
+
+def test_error_handling(db_manager, monkeypatch):
+    # Mock _get_connection to raise an error
+    def mock_conn_error(*args, **kwargs):
+        raise sqlite3.Error("Mock error")
+    
+    monkeypatch.setattr(db_manager, "_get_connection", mock_conn_error)
+    
+    # These should not raise exceptions but log errors and return gracefully
+    db_manager.upsert_account("user", "display")
+    db_manager.upsert_session("user", "contact")
+    db_manager.hide_session("user", "contact")
+    assert db_manager.get_all_sessions("user") == []
+    with pytest.raises(sqlite3.Error):
+        db_manager.save_message("user", "session", "s", "r", "c", datetime.now(), True)
+    assert db_manager.get_messages("user", "session") == []
+    db_manager.mark_as_read("user", "session")
+    db_manager.set_config("k", "v")
+    assert db_manager.get_config("k", "default") == "default"
+
+
+def test_last_message_time_never_goes_backwards(db_manager):
+    """Fix #4: save_message should not let last_message_time regress to an older timestamp."""
+    account_id = "testuser"
+    session_id = "contacta"
+    db_manager.upsert_session(account_id, session_id)
+
+    newer = datetime(2025, 6, 1, 12, 0, 0)
+    older = datetime(2025, 5, 1, 12, 0, 0)
+
+    # Save newer message first
+    db_manager.save_message(account_id, session_id, session_id, account_id, "New msg", newer, False)
+    sessions = db_manager.get_all_sessions(account_id)
+    assert sessions[0]['last_message_text'] == "New msg"
+
+    # Save older message — last_message_time and text should NOT regress
+    db_manager.save_message(account_id, session_id, session_id, account_id, "Old msg", older, False)
+    sessions = db_manager.get_all_sessions(account_id)
+    assert sessions[0]['last_message_text'] == "New msg"
+
+
+# ── 新增測試：archive / pin / delete ──────────────────────────
+
+def test_archive_session(db_manager):
+    account_id = "testuser"
+    session_id = "friend1"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, session_id)
+
+    assert db_manager.is_session_archived(account_id, session_id) is False
+    db_manager.archive_session(account_id, session_id)
+    assert db_manager.is_session_archived(account_id, session_id) is True
+
+    # 封存的 session 仍然可見
+    sessions = db_manager.get_all_sessions(account_id)
+    assert len(sessions) == 1
+    assert sessions[0]['is_archived'] == 1
+
+
+def test_delete_session(db_manager):
+    account_id = "testuser"
+    session_id = "todelete"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, session_id)
+    db_manager.save_message(account_id, session_id, session_id, account_id, "msg", datetime.now(), False)
+
+    assert len(db_manager.get_messages(account_id, session_id)) == 1
+
+    db_manager.delete_session(account_id, session_id)
+
+    # session 與 messages 都應該被刪除
+    assert len(db_manager.get_all_sessions(account_id)) == 0
+    assert len(db_manager.get_messages(account_id, session_id)) == 0
+
+
+def test_pin_session(db_manager):
+    account_id = "testuser"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, "aaa")
+    db_manager.upsert_session(account_id, "bbb")
+
+    db_manager.set_pin_session(account_id, "bbb", True, 0)
+    sessions = db_manager.get_all_sessions(account_id)
+    # 釘選的 bbb 應排在前面
+    assert sessions[0]['id'] == "bbb"
+    assert sessions[0]['is_pinned'] == 1
+
+
+def test_update_pin_orders(db_manager):
+    account_id = "testuser"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, "aaa")
+    db_manager.upsert_session(account_id, "bbb")
+    db_manager.set_pin_session(account_id, "aaa", True, 0)
+    db_manager.set_pin_session(account_id, "bbb", True, 1)
+
+    # 交換順序
+    db_manager.update_pin_orders(account_id, ["bbb", "aaa"])
+    sessions = db_manager.get_all_sessions(account_id)
+    assert sessions[0]['id'] == "bbb"
+    assert sessions[1]['id'] == "aaa"
+
+
+def test_migration_adds_send_status_to_old_db(tmp_path):
+    """A pre-existing DB lacking send_status should gain the column on next init,
+    with existing self-sent rows defaulting to 'sent'."""
+    db_path = tmp_path / "legacy.db"
+    # Build a legacy schema without send_status
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("""
+            CREATE TABLE messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                sender_id TEXT NOT NULL,
+                receiver_id TEXT NOT NULL,
+                content TEXT NOT NULL,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                is_read BOOLEAN DEFAULT 0,
+                is_me BOOLEAN NOT NULL,
+                UNIQUE(account_id, session_id, sender_id, content, timestamp)
+            )
+        """)
+        conn.execute("""
+            INSERT INTO messages (account_id, session_id, sender_id, receiver_id, content, is_me)
+            VALUES ('alice', 'bob', 'alice', 'bob', 'old', 1)
+        """)
+        conn.commit()
+
+    # Re-opening through DatabaseManager triggers the migration
+    DatabaseManager(str(db_path))
+
+    with sqlite3.connect(str(db_path)) as conn:
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(messages)").fetchall()]
+        assert 'send_status' in cols
+        # Existing row defaults to 'sent'
+        row = conn.execute("SELECT send_status FROM messages WHERE content = 'old'").fetchone()
+        assert row[0] == 'sent'
+
+
+def test_send_status_column_exists_with_default_sent(db_manager):
+    """Migration: messages table must have send_status column defaulting to 'sent'."""
+    with db_manager._get_connection() as conn:
+        cols = {row['name']: row for row in conn.execute("PRAGMA table_info(messages)").fetchall()}
+        assert 'send_status' in cols
+        assert cols['send_status']['dflt_value'] in ("'sent'", '"sent"')
+
+
+def test_save_pending_then_update_status(db_manager):
+    """Round trip: save_pending_message → update_message_status drives send_status."""
+    account_id = "alice"
+    session_id = "bob"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, session_id)
+
+    ts = datetime(2026, 4, 24, 12, 0, 0)
+    msg_id = db_manager.save_pending_message(account_id, session_id, account_id, session_id, "ping", ts)
+    assert isinstance(msg_id, int) and msg_id > 0
+
+    msgs = db_manager.get_messages(account_id, session_id)
+    assert len(msgs) == 1
+    assert msgs[0]['send_status'] == 'pending'
+    assert msgs[0]['is_me'] == 1
+
+    assert db_manager.update_message_status(msg_id, 'sent') is True
+    msgs = db_manager.get_messages(account_id, session_id)
+    assert msgs[0]['send_status'] == 'sent'
+
+    assert db_manager.update_message_status(msg_id, 'failed') is True
+    msgs = db_manager.get_messages(account_id, session_id)
+    assert msgs[0]['send_status'] == 'failed'
+
+
+def test_save_pending_returns_none_on_duplicate(db_manager):
+    """UNIQUE constraint: same (account, session, sender, content, timestamp) twice → None."""
+    account_id = "alice"
+    session_id = "bob"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, session_id)
+
+    ts = datetime(2026, 4, 24, 12, 0, 0)
+    first = db_manager.save_pending_message(account_id, session_id, account_id, session_id, "dup", ts)
+    second = db_manager.save_pending_message(account_id, session_id, account_id, session_id, "dup", ts)
+    assert first is not None
+    assert second is None
+
+
+def test_save_pending_updates_session_summary(db_manager):
+    """Pending messages should also surface in the contact list (last_message_text)."""
+    account_id = "alice"
+    session_id = "bob"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, session_id)
+
+    ts = datetime(2026, 4, 24, 12, 0, 0)
+    db_manager.save_pending_message(account_id, session_id, account_id, session_id, "summary check", ts)
+    sessions = db_manager.get_all_sessions(account_id)
+    assert sessions[0]['last_message_text'] == "summary check"
+
+
+def test_update_message_status_rejects_unknown_value(db_manager):
+    account_id = "alice"
+    session_id = "bob"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, session_id)
+    msg_id = db_manager.save_pending_message(
+        account_id, session_id, account_id, session_id, "x", datetime.now()
+    )
+    with pytest.raises(ValueError):
+        db_manager.update_message_status(msg_id, "delivered")
+
+
+def test_fail_dangling_pending_marks_only_account_rows(db_manager):
+    """殘留 pending 訊息只清理目標帳號，不影響其他帳號或非 pending 狀態。"""
+    db_manager.upsert_account("alice", "alice")
+    db_manager.upsert_account("bob", "bob")
+    db_manager.upsert_session("alice", "carol")
+    db_manager.upsert_session("bob", "dave")
+
+    pending_id = db_manager.save_pending_message(
+        "alice", "carol", "alice", "carol", "stuck", datetime(2026, 1, 1, 8, 0, 0)
+    )
+    sent_id = db_manager.save_pending_message(
+        "alice", "carol", "alice", "carol", "ok", datetime(2026, 1, 1, 9, 0, 0)
+    )
+    db_manager.update_message_status(sent_id, 'sent')
+    other_pending_id = db_manager.save_pending_message(
+        "bob", "dave", "bob", "dave", "stuck-other", datetime(2026, 1, 1, 10, 0, 0)
+    )
+
+    reaped = db_manager.fail_dangling_pending("alice")
+    assert reaped == 1
+
+    with db_manager._get_connection() as conn:
+        rows = {r['id']: r['send_status'] for r in conn.execute("SELECT id, send_status FROM messages").fetchall()}
+        assert rows[pending_id] == 'failed'
+        assert rows[sent_id] == 'sent'
+        assert rows[other_pending_id] == 'pending'
+
+
+def test_save_message_default_send_status(db_manager):
+    """Existing save_message path (incoming + own backups) must default to 'sent'
+    so historical messages still render ✓."""
+    account_id = "alice"
+    session_id = "bob"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, session_id)
+
+    ts = datetime(2026, 4, 24, 12, 0, 0)
+    db_manager.save_message(account_id, session_id, session_id, account_id, "incoming", ts, False)
+    msgs = db_manager.get_messages(account_id, session_id)
+    assert msgs[0]['send_status'] == 'sent'
+
+
+def test_get_messages_limit(db_manager):
+    account_id = "testuser"
+    session_id = "friend"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, session_id)
+    for i in range(10):
+        db_manager.save_message(
+            account_id, session_id, session_id, account_id,
+            f"msg{i}", datetime(2025, 1, 1, 12, i, 0), False
+        )
+
+    # limit=5 should return the 5 newest
+    msgs = db_manager.get_messages(account_id, session_id, limit=5)
+    assert len(msgs) == 5
+    assert msgs[0]['content'] == "msg5"
+    assert msgs[-1]['content'] == "msg9"
+
+
+def test_delete_message_removes_row_and_recomputes_last_message(db_manager):
+    account_id = "alice"
+    session_id = "bob"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, session_id)
+
+    t1 = datetime(2026, 1, 1, 12, 0, 0)
+    t2 = datetime(2026, 1, 1, 12, 1, 0)
+    db_manager.save_message(account_id, session_id, session_id, account_id, "first", t1, False)
+    second_id = db_manager.save_message(account_id, session_id, session_id, account_id, "second", t2, False)
+
+    sessions = db_manager.get_all_sessions(account_id)
+    assert sessions[0]['last_message_text'] == "second"
+
+    affected = db_manager.delete_message(account_id, second_id)
+    assert affected == session_id
+
+    messages = db_manager.get_messages(account_id, session_id)
+    assert len(messages) == 1
+    assert messages[0]['content'] == "first"
+
+    sessions = db_manager.get_all_sessions(account_id)
+    assert sessions[0]['last_message_text'] == "first"
+
+
+def test_delete_message_last_one_clears_session_summary(db_manager):
+    account_id = "alice"
+    session_id = "bob"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, session_id)
+    only_id = db_manager.save_message(account_id, session_id, session_id, account_id, "only", datetime.now(), False)
+
+    affected = db_manager.delete_message(account_id, only_id)
+    assert affected == session_id
+
+    sessions = db_manager.get_all_sessions(account_id)
+    assert sessions[0]['last_message_text'] == ''
+    assert sessions[0]['last_message_time'] is None
+
+
+def test_delete_message_unknown_id_returns_none(db_manager):
+    account_id = "alice"
+    db_manager.upsert_account(account_id, account_id)
+    assert db_manager.delete_message(account_id, 999999) is None
+
+
+def test_set_custom_name_round_trip_and_clear(db_manager):
+    account_id = "alice"
+    session_id = "bob"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, session_id)
+
+    db_manager.set_custom_name(account_id, session_id, "老王")
+    sessions = db_manager.get_all_sessions(account_id)
+    assert sessions[0]['custom_name'] == "老王"
+
+    db_manager.set_custom_name(account_id, session_id, "")
+    sessions = db_manager.get_all_sessions(account_id)
+    assert sessions[0]['custom_name'] == ""
+
+
+def test_upsert_session_does_not_overwrite_custom_name(db_manager):
+    account_id = "alice"
+    session_id = "bob"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, session_id, nickname="OldNick")
+    db_manager.set_custom_name(account_id, session_id, "老王")
+
+    # 模擬下次 get_user_info 查詢再次 upsert（PTT 暱稱更新流程）
+    db_manager.upsert_session(account_id, session_id, nickname="NewNick")
+
+    sessions = db_manager.get_all_sessions(account_id)
+    assert sessions[0]['custom_name'] == "老王"
+    assert sessions[0]['nickname'] == "NewNick"
+
+
+def test_set_muted_round_trip(db_manager):
+    account_id = "alice"
+    session_id = "bob"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, session_id)
+
+    assert db_manager.is_session_muted(account_id, session_id) is False
+    db_manager.set_muted(account_id, session_id, True)
+    assert db_manager.is_session_muted(account_id, session_id) is True
+    db_manager.set_muted(account_id, session_id, False)
+    assert db_manager.is_session_muted(account_id, session_id) is False
+
+
+def test_get_messages_limit_none_returns_all(db_manager):
+    account_id = "alice"
+    session_id = "bob"
+    db_manager.upsert_account(account_id, account_id)
+    db_manager.upsert_session(account_id, session_id)
+    for i in range(60):
+        db_manager.save_message(
+            account_id, session_id, session_id, account_id,
+            f"msg{i}", datetime(2025, 1, 1, 12, 0, i), False
+        )
+
+    msgs = db_manager.get_messages(account_id, session_id, limit=None)
+    assert len(msgs) == 60
+    assert msgs[0]['content'] == "msg0"
+    assert msgs[-1]['content'] == "msg59"
+
+    msgs_default = db_manager.get_messages(account_id, session_id)
+    assert len(msgs_default) == 50
+
+
+def test_search_messages(db_manager):
+    """search_messages：跨 session 命中、英文大小寫不敏感、帳號隔離、時間新→舊。"""
+    acc = "alice"
+    other_acc = "bob"
+    db_manager.upsert_account(acc, acc)
+    db_manager.upsert_account(other_acc, other_acc)
+    db_manager.upsert_session(acc, "carol")
+    db_manager.upsert_session(acc, "dave")
+    db_manager.upsert_session(other_acc, "carol")
+
+    base = datetime(2026, 1, 1, 12, 0, 0)
+    db_manager.save_message(acc, "carol", "carol", acc, "Hello World from carol", base, False)
+    db_manager.save_message(acc, "dave", acc, "dave", "another hello here", base + timedelta(minutes=1), True)
+    db_manager.save_message(acc, "carol", acc, "carol", "unrelated message", base + timedelta(minutes=2), True)
+    # 他帳號的訊息（不得外洩）
+    db_manager.save_message(other_acc, "carol", "carol", other_acc, "secret hello for bob", base, False)
+
+    # ① 跨多 session 命中 + ② 英文大小寫不敏感（查 HELLO 命中 hello/Hello）
+    results = db_manager.search_messages(acc, "HELLO")
+    contents = [r['content'] for r in results]
+    assert "Hello World from carol" in contents      # session carol
+    assert "another hello here" in contents          # session dave
+    assert "unrelated message" not in contents
+    # ③ 只回當前帳號，他帳號訊息不外洩
+    assert "secret hello for bob" not in contents
+    assert all(r['session_id'] in ("carol", "dave") for r in results)
+
+    # 依 timestamp 新→舊排序
+    times = [r['timestamp'] for r in db_manager.search_messages(acc, "hello")]
+    assert times == sorted(times, reverse=True)
+
+    # 空查詢回傳空清單
+    assert db_manager.search_messages(acc, "") == []
+
+
+def test_search_messages_escapes_wildcards(db_manager):
+    """search_messages：% _ 視為字面、單引號不注入。"""
+    acc = "alice"
+    db_manager.upsert_account(acc, acc)
+    db_manager.upsert_session(acc, "carol")
+    base = datetime(2026, 1, 1, 12, 0, 0)
+    db_manager.save_message(acc, "carol", acc, "carol", "50% off today", base, True)
+    db_manager.save_message(acc, "carol", acc, "carol", "50X off tomorrow", base + timedelta(minutes=1), True)
+    db_manager.save_message(acc, "carol", "carol", acc, "path a_b value", base + timedelta(minutes=2), False)
+    db_manager.save_message(acc, "carol", "carol", acc, "path aXb value", base + timedelta(minutes=3), False)
+    db_manager.save_message(acc, "carol", "carol", acc, "O'Brien said hi", base + timedelta(minutes=4), False)
+
+    # % 應被視為字面，不當萬用字元
+    pct = [r['content'] for r in db_manager.search_messages(acc, "50%")]
+    assert "50% off today" in pct
+    assert "50X off tomorrow" not in pct
+
+    # _ 應被視為字面，不當單字元萬用字元
+    us = [r['content'] for r in db_manager.search_messages(acc, "a_b")]
+    assert "path a_b value" in us
+    assert "path aXb value" not in us
+
+    # 單引號不造成 SQL 注入或錯誤
+    assert any("O'Brien" in r['content'] for r in db_manager.search_messages(acc, "O'Brien"))
+
+    # 經典注入字串應查無資料且不刪表
+    assert db_manager.search_messages(acc, "'; DROP TABLE messages;--") == []
+    assert db_manager.search_messages(acc, "50%")  # messages 表仍在
+
+
+def test_strip_reply_prefix():
+    from uPtt.db import _strip_reply_prefix
+    # 有回覆包裝 → 只留實際內容
+    assert _strip_reply_prefix("[re:@bob|原文預覽]\n實際內容") == "實際內容"
+    # 無包裝 → 原樣
+    assert _strip_reply_prefix("一般訊息") == "一般訊息"
+    # 有前綴樣但無換行分隔 → 不誤剝
+    assert _strip_reply_prefix("[re:@bob|x] 沒換行") == "[re:@bob|x] 沒換行"
+
+
+def test_get_account_display_id(db_manager):
+    db_manager.upsert_account("TestUser", "TestUser", "Nick")
+    # 以小寫 key 查得正確大小寫顯示 ID
+    assert db_manager.get_account_display_id("testuser") == "TestUser"
+    assert db_manager.get_account_display_id("TestUser") == "TestUser"
+    # 查無帳號 → 回傳傳入值本身
+    assert db_manager.get_account_display_id("ghost") == "ghost"
+
+
+def test_session_summary_strips_reply_wrapper(db_manager):
+    """save_message 後,session 摘要應剝掉回覆包裝(驗證 _strip_reply_prefix 接線)。"""
+    acc, sid = "alice", "bob"
+    db_manager.upsert_account(acc, acc)
+    db_manager.upsert_session(acc, sid)
+    db_manager.save_message(acc, sid, sid, acc, "[re:@alice|你說的]\n這是回覆", datetime.now(), False)
+    sessions = db_manager.get_all_sessions(acc)
+    assert sessions[0]['last_message_text'] == "這是回覆"
+
+def test_get_message_content_returns_stored_content(db_manager):
+    acc, sid = "alice", "bob"
+    db_manager.upsert_account(acc, acc)
+    db_manager.upsert_session(acc, sid)
+    mid = db_manager.save_message(acc, sid, acc, sid, "[re:@bob|x]\n編碼內容", datetime.now(), True)
+    assert db_manager.get_message_content(acc, mid) == "[re:@bob|x]\n編碼內容"
+    # 大小寫不敏感的 account key
+    assert db_manager.get_message_content("ALICE", mid) == "[re:@bob|x]\n編碼內容"
+
+
+def test_get_message_content_unknown_returns_none(db_manager):
+    db_manager.upsert_account("alice", "alice")
+    assert db_manager.get_message_content("alice", 999999) is None

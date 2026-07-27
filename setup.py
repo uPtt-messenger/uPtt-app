@@ -4,7 +4,7 @@ import os
 # Read metadata from __init__.py
 about = {}
 here = os.path.abspath(os.path.dirname(__file__))
-with open(os.path.join(here, 'src', 'uPttTerm', '__init__.py'), 'r', encoding='utf-8') as f:
+with open(os.path.join(here, 'src', 'uPtt', '__init__.py'), 'r', encoding='utf-8') as f:
     exec(f.read(), about)
 
 
@@ -15,27 +15,31 @@ with open("requirements.txt", "r", encoding="utf-8") as f:
     requirements = f.read().splitlines()
 
 setuptools.setup(
-    name=about['__name__'],
+    name=about['__app_name__'],
     version=about['__version__'],
     author=about['__author__'],
-    author_email="pttcodingman@gmail.com",
-    description="A TUI application for real-time chat on PTT via its built-in private message system.",
+    author_email=about['__author_email__'],
+    description=about['__description__'],
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/uPtt-messenger/uPttTerm",  # Replace with your repository URL
+    url=about['__url__'],
+    license=about['__license__'],
     package_dir={"": "src"},
     packages=setuptools.find_packages(where="src"),
+    package_data={
+        "uPtt.ui": ["assets/*"],
+    },
+    include_package_data=True,
     install_requires=requirements,
     entry_points={
         "console_scripts": [
-            "uptt=uPttTerm.app:main",
+            "uptt=uPtt.app:main",
         ]
     },
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Environment :: Console",
         "Intended Audience :: End Users/Desktop",
-        "License :: OSI Approved :: MIT License", # You can change this to your license
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",

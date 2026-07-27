@@ -1,5 +1,15 @@
-__pycache__
+__pycache__/
 .idea/
 build/
 dist/
+dist_local/
 .DS_Store
+*venv*/
+coverage.xml
+.coverage
+*.log
+*.db
+.claude/
+*.egg-info/
+.pytest_cache/
+*.pyc
