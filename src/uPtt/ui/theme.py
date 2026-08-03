@@ -1,6 +1,6 @@
 # --- uPtt UI 色票 / 字型 token（單一色源）+ 主題切換引擎 ---
 #
-# 三組主題 Graphite / Bone / Mono，key 完全一致。所有畫面的顏色都應該從
+# 三組主題 Graphite / Bone / Kraft，key 完全一致。所有畫面的顏色都應該從
 # `active()` 取值，不要在各處硬寫 hex。
 
 import os
@@ -80,6 +80,7 @@ GRAPHITE = {
     "status_connecting": "#D29922",
     "msg_pending": "#5C6773",
     "archived_text": "#6E4040",
+    "paper_texture": "",  # 只有 kraft 有紙纖維貼圖，其餘 theme 維持純色
 }
 
 
@@ -112,44 +113,47 @@ BONE = {
     "status_connecting": "#9A6700",  # beta 分支 warn 權威值（淺底暖金）
     "msg_pending": "#5C6470",  # canvas：送出中 == muted
     "archived_text": "#9E5C4C",  # 推導：淺底暗紅（封存/不存在）
+    "paper_texture": "",  # 只有 kraft 有紙纖維貼圖，其餘 theme 維持純色
 }
 
 
-# Mono：純灰階淺色主題（白底、黑字、近黑 accent）。base 取自畫布 ground-truth；
-# 缺的 token 依 base 推導。★標記處為刻意偏離畫布的判斷，可依喜好改。
-MONO = {
-    "bg": "#F7F7F7",           # canvas
-    "surface": "#EFEFEF",      # canvas
-    "surface_hover": "#E7E7E7",  # 推導
-    "surface_2": "#FFFFFF",    # canvas
+# Kraft：暖色系再生紙筆記本主題（暖燕麥紙底、石墨褐字、赭黃 accent）。
+# 取代舊版 Mono（純灰階去彩度，跟 Bone 太像），色值為手動指定的暖色票。
+KRAFT = {
+    "bg": "#E9E3D6",
+    "surface": "#E0D9CA",
+    "surface_hover": "#D7CFBD",
+    "surface_2": "#F4F0E6",
 
-    "border": "rgba(0, 0, 0, 0.16)",         # canvas
-    "border_strong": "rgba(0, 0, 0, 0.20)",  # canvas
+    "border": "rgba(58, 46, 30, 0.16)",
+    "border_strong": "rgba(58, 46, 30, 0.24)",
 
-    "text": "#0A0A0A",         # canvas
-    "text_muted": "#6A6A6A",   # canvas
-    "text_faint": "#A8A8A8",   # canvas
+    "text": "#33291E",
+    "text_muted": "#6E6152",
+    "text_faint": "#A2957F",
 
-    "accent": "#0A0A0A",       # canvas（近黑，零彩度）
-    "accent_hover": "#2E2E2E",   # 推導
-    "accent_bg": "#E4E4E4",    # canvas
-    "accent_bg_hover": "#D7D7D7",  # 推導
-    "accent_tint_hover": "#DEDEDE",  # 推導
+    "accent": "#8C5E1C",
+    "accent_hover": "#6F4913",
+    "accent_bg": "#E3D4B4",
+    "accent_bg_hover": "#D8C6A0",
+    "accent_tint_hover": "#EFE6D0",
 
-    "danger": "#B33A20",       # canvas（唯一暖色）★純黑白可改灰
-    "danger_strong": "#8C2C16",  # 推導
+    "danger": "#9E3428",
+    "danger_strong": "#7A2419",
 
-    "status_online": "#0A0A0A",   # canvas：online == accent == 黑
-    "status_unknown": "#A8A8A8",  # 推導：灰
-    "status_connecting": "#8A8A8A",  # beta 分支 warn 權威值（灰階）
-    "msg_pending": "#6A6A6A",  # canvas：送出中 == muted
-    "archived_text": "#8A8A8A",  # 推導：灰階
+    "status_online": "#5F7A3C",
+    "status_unknown": "#B3A894",
+    "status_connecting": "#8A7A55",
+    "msg_pending": "#8A7E6C",
+    "archived_text": "#8F6550",
+    # 紙纖維雜點貼圖：極淡、可平鋪的 64x64 PNG，僅套在訊息區內容 widget（單一表面，無接縫問題）
+    "paper_texture": os.path.join(ASSETS_DIR, "paper_fiber_kraft.png").replace("\\", "/"),
 }
 
 
 # --- 主題切換引擎 ---
 
-THEMES = {"graphite": GRAPHITE, "bone": BONE, "mono": MONO}
+THEMES = {"graphite": GRAPHITE, "bone": BONE, "kraft": KRAFT}
 
 _current = "graphite"
 
@@ -217,7 +221,7 @@ if __name__ == "__main__":
     set_theme("graphite")
     assert active() is GRAPHITE, "set_theme('graphite') 應復原"
 
-    assert set(GRAPHITE.keys()) == set(BONE.keys()) == set(MONO.keys()), (
+    assert set(GRAPHITE.keys()) == set(BONE.keys()) == set(KRAFT.keys()), (
         "三個 palette 的 key 必須完全一致"
     )
 
@@ -232,7 +236,7 @@ if __name__ == "__main__":
     before = len(_restyles)
     # 手動替換成會炸的 fn，模擬 apply_theme 走到它時 widget 已被刪
     _restyles[-1] = (weakref.ref(fake), _boom)
-    apply_theme("mono")
+    apply_theme("kraft")
     assert len(_restyles) == before - 1, "fn 丟 RuntimeError 的項目應被剪除"
 
     set_theme("graphite")
