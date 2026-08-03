@@ -1461,6 +1461,11 @@ class MainWindow(QMainWindow):
             self.setMaximumSize(16777215, 16777215)
             self.resize(800, 600)
 
+            # 設定已切到本帳號作用域（worker.do_login 設的），套用該帳號的主題
+            account_theme = self.db.get_config(config.SETTING_THEME, theme.current_theme())
+            if account_theme in theme.THEMES and account_theme != theme.current_theme():
+                theme.apply_theme(account_theme)
+
             corrected_id = self.ptt_service.ptt_id
             self.setWindowTitle(f"uPtt - {corrected_id}")
             self.user_id_label.setText(corrected_id)
@@ -2668,6 +2673,17 @@ class MainWindow(QMainWindow):
         """執行登出清理流程（停止 Worker、重設 PTT、清除 UI、切回登入畫面）"""
         logger.info("執行登出程序...")
         outgoing_acc = self.ptt_service.ptt_id
+
+        # 綁帳號的狀態先清，不能等後面的執行緒收尾（那段拋例外的話就漏到下個帳號了）
+        self.db.current_account = ""  # 設定作用域退回全域，下次 do_login 再切
+        self.session_drafts.clear()   # 草稿以 ptt_id 為 key
+        self._user_info_cache.clear()
+        if self._settings_window is not None:
+            # 這個單例綁著舊的 worker（init_worker 會換新的），留著會改不到新 worker
+            self._settings_window.close()
+            self._settings_window.deleteLater()
+            self._settings_window = None
+
         try:
             try:
                 self._stop_all_threads()

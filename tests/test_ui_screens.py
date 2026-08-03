@@ -1055,3 +1055,28 @@ def test_handle_retry_message_noop_when_content_missing(mock_qthread, mock_worke
         db_mock.get_message_content.return_value = None
         window.handle_retry_message(123)
         window.worker.enqueue_send.assert_not_called()
+
+
+@patch('src.uPtt.ui.screens.QMessageBox')
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.QueryWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_logout_clears_per_account_state(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, mock_msg, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
+    """登出必須清掉綁帳號的狀態，否則會漏到下一個登入的帳號。"""
+    with patch('os.path.exists', return_value=True):
+        mock_msg.question.return_value = mock_msg.Yes
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+
+        window.session_drafts['bob'] = '打到一半的草稿'
+        window._user_info_cache['bob'] = {'ptt_id': 'bob'}
+        window.open_settings()
+        assert window._settings_window is not None
+
+        window.handle_logout()
+
+        assert window.session_drafts == {}
+        assert window._user_info_cache == {}
+        assert window._settings_window is None      # 舊 worker 已被 init_worker 換掉
+        assert db_mock.current_account == ""        # 設定作用域退回全域

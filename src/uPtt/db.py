@@ -25,6 +25,9 @@ class DatabaseManager:
 
     def __init__(self, db_path: str = "uptt_data.db"):
         self.db_path = Path(db_path)
+        # 設定表以此隔離帳號（登入時由 worker.do_login 設定）。登入前為空字串，
+        # 讀寫落在不帶前綴的「全域鍵」上，供登入畫面取得上次使用的設定。
+        self.current_account = ""
         self._init_db()
 
     # 合法的 send_status 值。新增狀態時務必同步更新 ChatBubble (widgets.py) 的渲染分支。
@@ -592,19 +595,27 @@ class DatabaseManager:
 
     # --- 設定 ---
     def set_config(self, key: str, value: Any):
+        # 同時寫全域鍵：登入前（current_account 為空）沒有帳號可查，靠它取得
+        # 上次使用的設定；也讓新帳號首次讀取時繼承目前設定，不用另做搬遷。
+        keys = [key] if not self.current_account else [f"{self.current_account}:{key}", key]
         try:
             with self._get_connection() as conn:
-                conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", 
-                             (key, json.dumps(value)))
+                for k in keys:
+                    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                                 (k, json.dumps(value)))
                 conn.commit()
         except sqlite3.Error as e:
             logger.error(f"儲存設定失敗：{e}")
 
     def get_config(self, key: str, default: Any = None) -> Any:
+        keys = [key] if not self.current_account else [f"{self.current_account}:{key}", key]
         try:
             with self._get_connection() as conn:
-                row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
-                return json.loads(row['value']) if row else default
+                for k in keys:
+                    row = conn.execute("SELECT value FROM settings WHERE key = ?", (k,)).fetchone()
+                    if row:
+                        return json.loads(row['value'])
+                return default
         except (sqlite3.Error, json.JSONDecodeError, ValueError) as e:
             logger.error(f"讀取設定失敗 (key={key})：{e}")
             return default

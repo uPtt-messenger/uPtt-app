@@ -690,3 +690,21 @@ def test_get_message_content_returns_stored_content(db_manager):
 def test_get_message_content_unknown_returns_none(db_manager):
     db_manager.upsert_account("alice", "alice")
     assert db_manager.get_message_content("alice", 999999) is None
+
+
+def test_config_is_isolated_per_account(db_manager):
+    """設定應依帳號隔離：切帳號後讀回自己的值，不被另一帳號蓋掉。"""
+    db_manager.current_account = "alice"
+    db_manager.set_config("setting_theme", "kraft")
+    db_manager.current_account = "bob"
+    db_manager.set_config("setting_theme", "bone")
+
+    assert db_manager.get_config("setting_theme") == "bone"
+    db_manager.current_account = "alice"
+    assert db_manager.get_config("setting_theme") == "kraft"
+
+    # 登入前（無帳號）讀到最後寫入的值，新帳號首次讀取也繼承它
+    db_manager.current_account = ""
+    assert db_manager.get_config("setting_theme") == "bone"
+    db_manager.current_account = "carol"
+    assert db_manager.get_config("setting_theme") == "bone"

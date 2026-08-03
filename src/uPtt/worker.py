@@ -58,6 +58,9 @@ class PTTWorker(QObject):
         try:
             success = self.ptt.login(username, password)
             if success:
+                # 切換設定作用域到本帳號，須在任何 get_config 之前
+                self.db.current_account = (self.ptt.ptt_id or username).lower()
+
                 # 取得登入者的資訊並存入資料庫
                 try:
                     user_info = self.ptt.get_user_info(username)
