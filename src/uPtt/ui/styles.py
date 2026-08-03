@@ -23,6 +23,25 @@ def build_main_style() -> str:
     accent_bg = t["accent_bg"]
     accent_bg_hover = t["accent_bg_hover"]
     danger = t["danger"]
+    paper_texture = t["paper_texture"]
+
+    # 紙纖維貼圖只精準命中訊息內容 widget 這個單一表面（避免全域規則在每個
+    # 子 widget 各自重新平鋪造成接縫）；token 為空字串時（graphite/bone）整條不輸出。
+    #
+    # 注意：Qt QSS 的 `background-image` + `background-repeat` 這兩個 longhand
+    # 屬性組合實測不會平鋪，只會在原點畫一次。要平鋪必須走 `background` shorthand
+    # （background: url(...) repeat;），但 shorthand 會把 background-color 重置掉，
+    # 所以下面在同一個規則區塊裡，於 shorthand 之後再補一次 background-color 覆蓋回來。
+    paper_texture_rule = (
+        f"""
+#messages-container {{
+    background: url({paper_texture}) repeat;
+    background-color: {bg};
+}}
+"""
+        if paper_texture
+        else ""
+    )
 
     return f"""
 /* 全域字體與背景 */
@@ -187,7 +206,7 @@ QLineEdit#new-chat-input:focus {{
 #messages-container {{
     background-color: {bg};
 }}
-
+{paper_texture_rule}
 /* 訊息輸入區 */
 #input-area {{
     background-color: {surface};

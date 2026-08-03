@@ -68,7 +68,7 @@ def test_theme_card_click_emits_theme_id(qtbot):
 
 
 def test_theme_card_set_selected_updates_flag(qtbot):
-    card = ThemeCard("mono", theme.THEMES["mono"])
+    card = ThemeCard("kraft", theme.THEMES["kraft"])
     qtbot.addWidget(card)
     assert card._selected is False
     card.set_selected(True)
@@ -101,11 +101,11 @@ def test_click_theme_card_applies_and_persists_theme(qtbot, db_mock):
     win = SettingsWindow(db_mock)
     qtbot.addWidget(win)
 
-    qtbot.mouseClick(win._theme_cards["mono"], Qt.LeftButton)
+    qtbot.mouseClick(win._theme_cards["kraft"], Qt.LeftButton)
 
-    assert theme.current_theme() == "mono"
-    db_mock.set_config.assert_any_call(config.SETTING_THEME, "mono")
-    assert win._theme_cards["mono"]._selected is True
+    assert theme.current_theme() == "kraft"
+    db_mock.set_config.assert_any_call(config.SETTING_THEME, "kraft")
+    assert win._theme_cards["kraft"]._selected is True
     assert win._theme_cards["graphite"]._selected is False
 
 

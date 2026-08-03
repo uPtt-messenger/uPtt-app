@@ -25,7 +25,7 @@ logger = logging.getLogger("uPtt.settings")
 _THEME_META = {
     'graphite': {'name': 'Graphite', 'tag': '深色 · 冷灰中性 + 鼠尾草綠'},
     'bone': {'name': 'Bone', 'tag': '淺色 · 冷灰白'},
-    'mono': {'name': 'Mono', 'tag': '純黑白 · 排版至上'},
+    'kraft': {'name': '再生紙', 'tag': '暖色 · 再生紙感'},
 }
 
 
@@ -140,7 +140,7 @@ class ThemeCard(QFrame):
         self.theme_id = theme_id
         self._selected = False
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedSize(116, 116)  # tag 最長兩行需要的高度（如 mono 的「純黑白‧排版至上」）
+        self.setFixedSize(116, 116)  # tag 最長兩行需要的高度（如 graphite 的「深色‧冷灰中性 + 鼠尾草綠」）
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 8)
