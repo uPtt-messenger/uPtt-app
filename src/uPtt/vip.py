@@ -7,7 +7,8 @@
 import hashlib
 
 _VIP_ID_HASHES = {
-    # sha256(ptt_id.lower())
+    "6fbc54708c7fcf16ef15511919f203186bfb22bb53b6ad631796d0373a86f400",
+    "7d3850c0f2cdac6cf799a8a5b5f80c803ee250a5cf7f947337e11463661d3999",
 }
 
 
