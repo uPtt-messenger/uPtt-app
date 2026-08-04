@@ -16,7 +16,7 @@ from PySide6.QtSvg import QSvgRenderer
 
 # 同套件（uPtt.ui.*）一律相對匯入、跨套件用絕對匯入。相對匯入亦確保
 # render_svg 等 re-export 在專案 src.uPtt/uPtt 雙重載入下維持同一模組物件。
-from uPtt import __version__, config, contant
+from uPtt import __version__, config, contant, vip
 from . import theme
 from .settings import SettingsWindow
 from .search_palette import SearchPalette
@@ -704,6 +704,7 @@ class MainWindow(QMainWindow):
         self._user_info_cache: Dict[str, Dict] = {}  # ptt_id_lower -> user info dict
         self.session_drafts: Dict[str, str] = {}  # ptt_id_lower -> draft text
         self._quitting = False  # 退出程序旗標，防止遞迴
+        self._is_vip = False  # 登入成功後由 on_login_result 依 vip.is_vip_account() 判定
         self._settings_window: Optional[SettingsWindow] = None  # 單例，重複開就 raise/activate
         self._search_palette: Optional[SearchPalette] = None  # ⌘K 搜尋面板，單例
         self._new_chat_modal: Optional[NewChatModal] = None  # ⌘N 新對話 modal，單例
@@ -1273,7 +1274,8 @@ class MainWindow(QMainWindow):
         """開啟偏好設定視窗（單例：重複觸發只 raise/activate 既有視窗，不重建）。"""
         if self._settings_window is None:
             self._settings_window = SettingsWindow(
-                self.db, worker=getattr(self, 'worker', None), query_worker=getattr(self, 'query_worker', None)
+                self.db, worker=getattr(self, 'worker', None), query_worker=getattr(self, 'query_worker', None),
+                is_vip=self._is_vip,
             )
         self._settings_window.show()
         self._settings_window.raise_()
@@ -1454,6 +1456,11 @@ class MainWindow(QMainWindow):
         self.scan_setup_screen.reset()
         self.central_stack.setCurrentIndex(2)
 
+    def _window_title(self, suffix: str = "") -> str:
+        """組出標題列文字：uPtt - {帳號}[ · VIP][suffix]。VIP 標記依登入時判定的 self._is_vip。"""
+        vip_tag = " · VIP" if self._is_vip else ""
+        return f"uPtt - {self.ptt_service.ptt_id}{vip_tag}{suffix}"
+
     def on_login_result(self, success, message):
         if success:
             # 登入成功，解除固定大小並調整為聊天視窗大小
@@ -1467,7 +1474,8 @@ class MainWindow(QMainWindow):
                 theme.apply_theme(account_theme)
 
             corrected_id = self.ptt_service.ptt_id
-            self.setWindowTitle(f"uPtt - {corrected_id}")
+            self._is_vip = vip.is_vip_account(corrected_id)
+            self.setWindowTitle(self._window_title())
             self.user_id_label.setText(corrected_id)
             self._status_dot.show()
             self.menu_btn.show()
@@ -1508,7 +1516,7 @@ class MainWindow(QMainWindow):
         self._status_dot._conn_state = "connecting"
         _restyle_conn_status_dot(self._status_dot)
         self._status_dot.setToolTip("連線中斷，正在重新連線...")
-        self.setWindowTitle(f"uPtt - {self.ptt_service.ptt_id} (重新連線中...)")
+        self.setWindowTitle(self._window_title(" (重新連線中...)"))
 
     @Slot()
     def on_connection_restored(self):
@@ -1517,7 +1525,7 @@ class MainWindow(QMainWindow):
         self._status_dot._conn_state = "online"
         _restyle_conn_status_dot(self._status_dot)
         self._status_dot.setToolTip("")
-        self.setWindowTitle(f"uPtt - {self.ptt_service.ptt_id}")
+        self.setWindowTitle(self._window_title())
 
     @Slot()
     def on_query_session_degraded(self):
@@ -2404,7 +2412,7 @@ class MainWindow(QMainWindow):
                     self.current_chat_id = None
                     self.set_active_chat_requested.emit("")
                     self.refresh_chat_display()
-                    self.setWindowTitle(f"uPtt - {self.ptt_service.ptt_id}")
+                    self.setWindowTitle(self._window_title())
                 break
 
     def toggle_pin(self, ptt_id: str):
