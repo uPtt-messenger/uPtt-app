@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>404 找不到頁面 — uPtt</title>
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#050607">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<!-- Self-contained on purpose: GitHub Pages serves this file at any missing path, so relative assets would not resolve. -->
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root { --fg: #C7C9CC; --dim: #868C95; --y: #F4E36B; --c: #6FE3E3; --g: #7EE08B; --blue: #1F2FA8; }
+    html, body { height: 100%; }
+    body {
+        background: #050607;
+        color: var(--fg);
+        font: 15px/1.6 "JetBrains Mono", ui-monospace, "SF Mono", Consolas, "PingFang TC", "Microsoft JhengHei", monospace;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+    body::after {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        background:
+            repeating-linear-gradient(to bottom, rgba(255, 255, 255, .025) 0 1px, transparent 1px 3px),
+            radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, .6));
+    }
+    .bar { background: var(--blue); color: #fff; padding: 2px 16px; display: flex; justify-content: space-between; gap: 16px; white-space: nowrap; overflow: hidden; }
+    .bar b { color: var(--y); font-weight: 400; }
+    main { flex: 1; display: grid; place-items: center; padding: 24px 16px; }
+    .box { width: min(640px, 100%); }
+    .code {
+        font-size: clamp(64px, 18vw, 148px);
+        line-height: 1;
+        font-weight: 700;
+        color: var(--y);
+        letter-spacing: -.04em;
+        text-shadow: 0 0 24px rgba(244, 227, 107, .25);
+    }
+    h1 { font-size: clamp(20px, 4vw, 28px); color: #fff; font-weight: 700; margin: 24px 0 8px; }
+    p { color: var(--dim); }
+    p[lang="en"] { margin-top: 4px; font-size: 13px; }
+    .menu { list-style: none; margin-top: 32px; border-top: 1px solid rgba(255, 255, 255, .12); }
+    .menu a {
+        display: grid;
+        grid-template-columns: 3ch 1fr auto;
+        gap: 12px;
+        padding: 10px 8px;
+        color: var(--fg);
+        text-decoration: none;
+        border-bottom: 1px solid rgba(255, 255, 255, .06);
+    }
+    .menu a::before { content: "  "; white-space: pre; color: var(--y); }
+    .menu a:hover, .menu a:focus-visible { background: rgba(255, 255, 255, .1); color: #fff; outline: none; }
+    .menu a:hover::before, .menu a:focus-visible::before { content: "●"; }
+    .menu span { color: var(--dim); }
+    .foot { padding: 4px 16px; background: #3A3D42; color: #fff; white-space: nowrap; overflow: hidden; }
+    .foot .c { color: var(--c); }
+    .blink { animation: blink 1s steps(1) infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) { .blink { animation: none; } }
+</style>
+</head>
+<body>
+    <header class="bar"><span>【 系統訊息 】</span><b>批踢踢實業坊 ・ uPtt</b></header>
+    <main>
+        <div class="box">
+            <div class="code" aria-hidden="true">404</div>
+            <h1>這個頁面已經被刪除了。</h1>
+            <p>就像收下的 uPtt 訊息一樣，它不在信箱裡了。</p>
+            <p lang="en">This page doesn't exist — maybe it was delivered and cleaned up.</p>
+            <ul class="menu">
+                <li><a href="/"><span aria-hidden="true">1</span>回到 uPtt 首頁<span>Home</span></a></li>
+                <li><a href="/#download"><span aria-hidden="true">2</span>下載 uPtt<span>Download</span></a></li>
+                <li><a href="https://github.com/uPtt-messenger/uPtt-app/issues"><span aria-hidden="true">3</span>回報問題<span>Issues</span></a></li>
+            </ul>
+        </div>
+    </main>
+    <footer class="foot"><span class="c">[←]</span> 回首頁 <span class="c">[↑↓]</span> 選擇 <span class="c">[→]</span> 前往<span class="blink">_</span></footer>
+<script>
+    // PTT muscle memory: arrows move, → / Enter opens, ← goes home, 1-3 jump.
+    (function () {
+        var links = Array.prototype.slice.call(document.querySelectorAll('.menu a'));
+        var i = 0;
+        links[0].focus({ preventScroll: true });
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'ArrowDown') { i = (i + 1) % links.length; links[i].focus(); e.preventDefault(); }
+            else if (e.key === 'ArrowUp') { i = (i - 1 + links.length) % links.length; links[i].focus(); e.preventDefault(); }
+            else if (e.key === 'ArrowRight') { links[i].click(); }
+            else if (e.key === 'ArrowLeft') { location.href = '/'; }
+            else if (/^[1-3]$/.test(e.key)) { links[+e.key - 1].click(); }
+        });
+        links.forEach(function (a, k) { a.addEventListener('focus', function () { i = k; }); });
+    })();
+</script>
+</body>
+</html>

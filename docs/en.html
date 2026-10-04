@@ -1,501 +1,627 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="graphite">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script>
-        // Set the theme before first paint to avoid a flash of the wrong theme.
-        (function () {
-            try {
-                var stored = localStorage.getItem('uptt-theme');
-                var theme = (stored === 'light' || stored === 'dark')
-                    ? stored
-                    : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-                document.documentElement.setAttribute('data-theme', theme);
-            } catch (e) {}
-        })();
-    </script>
-    <title>uPtt — Open Source PTT Messenger</title>
-    <meta name="description" content="uPtt is a modern instant messaging desktop app built for PTT (Taiwan's largest BBS), transforming internal mail into a seamless chat experience.">
-    <meta name="keywords" content="uPtt, PTT, BBS, instant messaging, mail, open source, messenger, Taiwan">
-    <meta property="og:title" content="uPtt — Open Source PTT Messenger">
-    <meta property="og:description" content="Bringing the warmth of PTT back to life on modern desktops. A modern instant messaging client built for PTT.">
-    <meta property="og:type" content="website">
-    <meta property="og:image" content="https://raw.githubusercontent.com/uPtt-messenger/uPtt-app/main/src/uPtt/ui/assets/logo_icon.svg">
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg width='80' height='80' viewBox='0 0 80 80' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Crect x='2' y='2' width='76' height='76' rx='18' fill='%23161B22' stroke='%2330363D' stroke-width='2'/%3E%3Crect x='12' y='12' width='56' height='56' rx='12' fill='%230D1117' stroke='%2358A6FF' stroke-width='1.5' stroke-dasharray='2 2'/%3E%3Cpath d='M28 28V42C28 48.6274 33.3726 54 40 54C46.6274 54 52 48.6274 52 42V28' stroke='%23F0F6FC' stroke-width='6' stroke-linecap='round'/%3E%3Cpath d='M52 38V54' stroke='%23F0F6FC' stroke-width='6' stroke-linecap='round'/%3E%3Ccircle cx='28' cy='28' r='5' fill='%2358A6FF'/%3E%3Ccircle cx='52' cy='54' r='5' fill='%23E3B341'/%3E%3C/svg%3E">
-    <link rel="stylesheet" href="style.css">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script>
+    // Resolve the theme before first paint (no flash). Matches the app's three themes.
+    (function () {
+        var d = document.documentElement, t;
+        d.classList.add('js');
+        try { t = localStorage.getItem('uptt-theme'); } catch (e) {}
+        if (t === 'dark') t = 'graphite';
+        if (t === 'light') t = 'bone';
+        if (t !== 'graphite' && t !== 'bone' && t !== 'kraft') {
+            t = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'bone' : 'graphite';
+        }
+        d.setAttribute('data-theme', t);
+    })();
+</script>
+<title>uPtt — Turn PTT mail into real-time chat | Open-source PTT messenger</title>
+<meta name="description" content="uPtt is an open-source desktop messenger for PTT, Taiwan's largest BBS. It turns PTT mail into chat bubbles, with waterballs, presence and quoted replies. Connects straight to ptt.cc; your data stays on your computer.">
+<meta name="theme-color" content="#0E1114" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#F3F5F5" media="(prefers-color-scheme: light)">
+<link rel="canonical" href="https://uptt.cc/en.html">
+<link rel="alternate" hreflang="zh-Hant" href="https://uptt.cc/">
+<link rel="alternate" hreflang="en" href="https://uptt.cc/en.html">
+<link rel="alternate" hreflang="x-default" href="https://uptt.cc/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="uPtt">
+<meta property="og:locale" content="en_US">
+<meta property="og:url" content="https://uptt.cc/en.html">
+<meta property="og:title" content="uPtt — Turn PTT mail into real-time chat">
+<meta property="og:description" content="An open-source desktop messenger for PTT. Mail becomes chat, waterballs built in, direct to ptt.cc, data stays on your computer.">
+<meta property="og:image" content="https://uptt.cc/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="uPtt turning a PTT mailbox into a chat conversation">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://uptt.cc/og.png">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!-- Display serif is requested as a single subset of the glyphs the headings use (one file instead of ~100 CJK slices).
+     After changing heading copy, regenerate the text= list; missing glyphs fall back to the system serif. -->
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+<link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@700&amp;display=swap&amp;text=%21%22%23%24%25%26%27%28%29%2A%2B%2C-.%2F0123456789%3A%3B%3C%3D%3E%3F%40ABCDEFGHIJKLMNOPQRSTUVWXYZ%5B%5C%5D%5E_%60abcdefghijklmnopqrstuvwxyz%7B%7C%7D~%C2%B7%E2%80%93%E2%80%94%E2%80%98%E2%80%99%E2%80%9C%E2%80%9D%E2%80%A6" onload="this.onload=null;this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap"><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@700&amp;display=swap&amp;text=%21%22%23%24%25%26%27%28%29%2A%2B%2C-.%2F0123456789%3A%3B%3C%3D%3E%3F%40ABCDEFGHIJKLMNOPQRSTUVWXYZ%5B%5C%5D%5E_%60abcdefghijklmnopqrstuvwxyz%7B%7C%7D~%C2%B7%E2%80%93%E2%80%94%E2%80%98%E2%80%99%E2%80%9C%E2%80%9D%E2%80%A6"></noscript>
+<link rel="stylesheet" href="style.css">
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "uPtt",
+    "applicationCategory": "CommunicationApplication",
+    "operatingSystem": "macOS, Windows",
+    "description": "An open-source desktop messenger for PTT that turns PTT mail into chat conversations.",
+    "url": "https://uptt.cc/",
+    "downloadUrl": "https://github.com/uPtt-messenger/uPtt-app/releases",
+    "license": "https://www.gnu.org/licenses/gpl-3.0.html",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "TWD" }
+}
+</script>
 </head>
 <body>
 
-<!-- Navigation -->
-<nav>
-    <div class="nav-inner">
-        <a href="#" class="nav-logo">
-            <svg width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <rect x="2" y="2" width="76" height="76" rx="18" fill="#161B22" stroke="#30363D" stroke-width="2"/>
-                <rect x="12" y="12" width="56" height="56" rx="12" fill="#0D1117" stroke="#58A6FF" stroke-width="1.5" stroke-dasharray="2 2"/>
-                <path d="M28 28V42C28 48.6274 33.3726 54 40 54C46.6274 54 52 48.6274 52 42V28" stroke="#F0F6FC" stroke-width="6" stroke-linecap="round"/>
-                <path d="M52 38V54" stroke="#F0F6FC" stroke-width="6" stroke-linecap="round"/>
-                <circle cx="28" cy="28" r="5" fill="#58A6FF"/>
-                <circle cx="52" cy="54" r="5" fill="#E3B341"/>
-            </svg>
-            <span>uPtt</span>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="logo" viewBox="0 0 80 80">
+        <rect x="3" y="3" width="74" height="74" rx="20" fill="none" stroke="currentColor" stroke-opacity=".28" stroke-width="2"/>
+        <path d="M28 28V42C28 48.63 33.37 54 40 54C46.63 54 52 48.63 52 42V28" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+        <path d="M52 38V54" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+        <circle cx="28" cy="28" r="5" fill="var(--accent)"/>
+        <circle cx="52" cy="54" r="5" fill="#E3B341"/>
+    </symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 4v12M6 11l6 6 6-6M5 20h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-github" viewBox="0 0 24 24"><path fill="currentColor" d="M12 .5C5.65.5.5 5.65.5 12a11.5 11.5 0 0 0 7.86 10.92c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.25.73-1.54-2.56-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.69 5.39-5.25 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"/></symbol>
+    <symbol id="i-apple" viewBox="0 0 24 24"><path fill="currentColor" d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11Z"/></symbol>
+    <symbol id="i-windows" viewBox="0 0 24 24"><path fill="currentColor" d="M3 5.6 10.4 4.6v7H3V5.6Zm8.4-1.1L21 3v8.6h-9.6V4.5ZM3 12.4h7.4v7L3 18.4v-6Zm8.4 0H21V21l-9.6-1.4v-7.2Z"/></symbol>
+    <symbol id="i-python" viewBox="0 0 24 24"><path fill="currentColor" d="M11.9 2c-5.1 0-4.8 2.2-4.8 2.2v2.3h4.9v.7H5.2S2 6.8 2 12s2.8 5 2.8 5h1.7v-2.4s-.1-2.8 2.8-2.8h4.8s2.7 0 2.7-2.6V4.8S17.2 2 11.9 2ZM9.2 3.6a.9.9 0 1 1 0 1.8.9.9 0 0 1 0-1.8Zm2.9 18.4c5.1 0 4.8-2.2 4.8-2.2v-2.3H12v-.7h6.8S22 17.2 22 12s-2.8-5-2.8-5h-1.7v2.4s.1 2.8-2.8 2.8H9.9s-2.7 0-2.7 2.6v4.4S6.8 22 12.1 22Zm2.7-1.6a.9.9 0 1 1 0-1.8.9.9 0 0 1 0 1.8Z"/></symbol>
+</svg>
+
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="nav" id="nav">
+    <div class="wrap nav-inner">
+        <a class="brand" href="#top" aria-label="uPtt home">
+            <svg aria-hidden="true"><use href="#logo"/></svg>
+            uPtt
         </a>
-        <div class="nav-right">
-            <ul class="nav-links">
-                <li><a href="#features">Features</a></li>
-                <li><a href="#how-it-works">How It Works</a></li>
-                <li><a href="#security">Security</a></li>
-                <li><a href="#developer">Developer</a></li>
-                <li><a href="https://github.com/uPtt-messenger/uPtt-app" target="_blank" rel="noopener">Source Code</a></li>
-                <li><a href="index.html">繁體中文</a></li>
-                <li><a href="#download" class="btn-nav">Download</a></li>
-            </ul>
-            <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch to dark theme" aria-pressed="false">
-                <svg class="theme-icon theme-icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
-                <svg class="theme-icon theme-icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-            </button>
-            <button class="nav-hamburger" aria-label="Toggle menu" onclick="document.querySelector('.nav-links').classList.toggle('open')">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-            </button>
+        <ul class="nav-links" id="nav-links">
+            <li><a href="#story">How it works</a></li>
+            <li><a href="#types">Messages</a></li>
+            <li><a href="#features">Features</a></li>
+            <li><a href="#architecture">Architecture</a></li>
+            <li><a href="#privacy">Privacy</a></li>
+            <li><a href="#developers">Developers</a></li>
+        </ul>
+        <div class="nav-tools">
+            <a class="lang-link" href="./" hreflang="zh-Hant" lang="zh-Hant">中文</a>
+            <div class="theme-switch" role="radiogroup" aria-label="Site theme">
+                <button type="button" role="radio" data-theme-set="graphite" aria-checked="false" aria-label="Graphite (dark)" title="Graphite"><span class="swatch-graphite"></span></button>
+                <button type="button" role="radio" data-theme-set="bone" aria-checked="false" aria-label="Bone (light)" title="Bone"><span class="swatch-bone"></span></button>
+                <button type="button" role="radio" data-theme-set="kraft" aria-checked="false" aria-label="Kraft (paper)" title="Kraft"><span class="swatch-kraft"></span></button>
+            </div>
+            <a class="btn btn-primary nav-cta" href="#download">Download</a>
+            <button class="nav-burger" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="nav-links"><span></span><span></span><span></span></button>
         </div>
     </div>
-</nav>
+    <div class="progress" aria-hidden="true"></div>
+</header>
 
-<!-- Hero -->
-<section class="hero">
-    <div class="container">
-        <div class="hero-badge">
-            <span class="dot"></span>
-            Closed Beta &middot; <a href="https://github.com/uPtt-messenger/uPtt-app/issues" target="_blank" rel="noopener">Report Issues</a>
+<main id="main">
+
+<!-- ============================== HERO ============================== -->
+<section class="hero" id="top">
+    <canvas class="glyph-field" aria-hidden="true"></canvas>
+    <div class="wrap hero-grid">
+        <div class="hero-copy">
+            <a class="status-pill hero-fade" href="https://github.com/uPtt-messenger/uPtt-app/issues" target="_blank" rel="noopener">
+                <span class="dot" aria-hidden="true"></span>
+                Closed beta · Feedback welcome
+                <span class="arrow" aria-hidden="true">→</span>
+            </a>
+            <h1 class="hero-title display">
+                <span class="line"><span style="--d:.05s">The warmth of PTT,</span></span>
+                <span class="line"><span style="--d:.15s">reborn on the</span></span>
+                <span class="line"><span style="--d:.25s" class="accent">modern desktop<span class="cursor" aria-hidden="true"></span></span></span>
+            </h1>
+            <p class="hero-sub hero-fade" style="--d:.3s">
+                uPtt turns <strong>PTT mail into real conversations</strong>: waterballs, presence and quoted replies, all in one window. It talks to ptt.cc directly. No relay server, and your data stays on your computer.
+            </p>
+            <div class="hero-actions hero-fade" style="--d:.55s">
+                <a class="btn btn-primary" href="#download" data-os-cta>
+                    <svg aria-hidden="true"><use href="#i-down"/></svg>
+                    <span data-os-label>Download free</span>
+                </a>
+                <button class="copy-chip" type="button" data-copy="pip install uPtt" aria-label="Copy install command pip install uPtt">
+                    <span><span class="prompt">$</span> pip install uPtt</span>
+                    <span class="copy-icon" aria-hidden="true"><svg><use href="#i-copy"/></svg></span>
+                </button>
+            </div>
+            <ul class="hero-meta hero-fade" style="--d:.65s">
+                <li>macOS · Windows · Python 3.12+</li>
+                <li>GPL-3.0 open source</li>
+                <li>Code-signed via SignPath</li>
+            </ul>
         </div>
-        <div class="hero-logo">
-            <svg width="240" height="80" viewBox="0 0 240 80" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <rect x="10" y="20" width="40" height="40" rx="8" stroke="#58A6FF" stroke-width="3"/>
-                <path d="M22 35V42C22 45 25 48 30 48C35 48 38 45 38 42V35" stroke="#F0F6FC" stroke-width="3" stroke-linecap="round"/>
-                <circle cx="38" cy="48" r="3" fill="#E3B341"/>
-                <text x="65" y="52" fill="#F0F6FC" font-family="ui-monospace, monospace" font-weight="bold" font-size="32">uPtt</text>
-                <text x="65" y="68" fill="#8B949E" font-family="ui-monospace, monospace" font-size="12">Open Source PTT Messenger</text>
+
+        <div class="hero-visual hero-fade" style="--d:.35s" aria-hidden="true">
+            <div class="app">
+                <div class="app-bar"><i></i><i></i><i></i><span class="app-title">uPtt — diner_kai</span></div>
+                <div class="app-body">
+                    <div class="app-side">
+                        <div class="app-search"><span>Search</span><kbd>⌘K</kbd></div>
+                        <div class="app-label">PINNED</div>
+                        <div class="contact is-active"><span class="presence on"></span><span class="who"><span class="id">diner_kai</span><span class="nick">Midnight Diner</span></span><span class="pin">◆</span></div>
+                        <div class="contact"><span class="presence on"></span><span class="who"><span class="id">catmayor</span><span class="nick">Cat Mayor</span></span><span class="badge">2</span></div>
+                        <div class="app-label">CHATS</div>
+                        <div class="contact"><span class="presence"></span><span class="who"><span class="id">bcboss</span><span class="nick">Banqiao Boss</span></span></div>
+                        <div class="contact"><span class="presence unknown"></span><span class="who"><span class="id">csnerd87</span><span class="nick">CS Nerd</span></span></div>
+                        <div class="contact"><span class="presence on"></span><span class="who"><span class="id">MoonCake</span><span class="nick"></span></span></div>
+                    </div>
+                    <div class="app-chat">
+                        <div class="chat-head"><span class="presence on"></span><b>diner_kai</b><span>Midnight Diner · online</span></div>
+                        <div class="chat-log" data-script='[{"me": "Get me some popcorn chicken"}, {"them": "Sure, spicy?"}, {"me": "Mild, plus a bubble tea"}, {"them": "Got it, 10 min"}]'>
+                            <span class="day-sep">TODAY</span>
+                            <div class="bubble in">Gossiping board is on fire tonight, can't keep up<time>23:41</time></div>
+                            <div class="bubble out"><span class="quote"><b>@diner_kai</b> Gossiping board is on fire tonight…</span>So I'm chatting with you in uPtt instead :)<time>23:42</time></div>
+                            <div class="bubble wb">Grabbing a late-night snack, brb</div>
+                            <div class="typing"><i></i><i></i><i></i></div>
+                        </div>
+                        <div class="composer"><span class="typed" data-typer></span><span class="caret"></span><span class="send"><svg><use href="#i-arrow"/></svg></span></div>
+                    </div>
+                </div>
+            </div>
+            <div class="waterball-toast">
+                <span class="wb-icon"><svg viewBox="0 0 24 24"><path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11Z" fill="none" stroke="currentColor" stroke-width="2"/></svg></span>
+                <span><b>★catmayor</b> sent a waterball<small>Watch the stream together later?</small></span>
+            </div>
+        </div>
+    </div>
+    <a class="scroll-cue" href="#story"><i aria-hidden="true"></i>Scroll</a>
+</section>
+
+<div class="marquee" aria-hidden="true">
+    <div class="marquee-track">
+        <ul><li>Mail → chat bubbles</li><li>Quoted replies</li><li>Waterballs</li><li>Pin &amp; drag to sort</li><li>Presence</li><li>Tray notifications</li><li>Multi-account</li><li>⌘K search</li><li>Three themes</li><li>Local SQLite</li><li>GPL-3.0</li></ul>
+        <ul><li>Mail → chat bubbles</li><li>Quoted replies</li><li>Waterballs</li><li>Pin &amp; drag to sort</li><li>Presence</li><li>Tray notifications</li><li>Multi-account</li><li>⌘K search</li><li>Three themes</li><li>Local SQLite</li><li>GPL-3.0</li></ul>
+    </div>
+</div>
+
+<!-- ============================== STORY ============================== -->
+<section class="story" id="story" aria-labelledby="story-title">
+    <div class="story-pin">
+        <div class="wrap story-grid">
+            <div class="story-copy">
+                <span class="eyebrow"><b>01</b> How it works</span>
+                <h2 class="sr-only" id="story-title">How uPtt turns PTT mail into a conversation</h2>
+                <div class="story-year" aria-hidden="true" data-year>1995</div>
+                <div class="story-steps">
+                    <div class="story-step is-on" data-step="0">
+                        <h3>In a PTT mailbox, every message looks the same</h3>
+                        <p>Each one is a single line titled <code>你收到使用 uPtt 傳送的訊息</code>, “you received a message sent with uPtt”. To read one you open it; to answer you write a whole new letter.</p>
+                    </div>
+                    <div class="story-step" data-step="1">
+                        <h3>uPtt reads every one for you, in the background</h3>
+                        <p>Every 5 seconds it polls the mailbox, recognises uPtt’s format, restores the embedded <code>[uPtt-ts]</code> timestamp, then deletes the delivered message from PTT so the mailbox stays clean.</p>
+                    </div>
+                    <div class="story-step" data-step="2">
+                        <h3>And they become a real conversation</h3>
+                        <p>Grouped by sender, ordered by time, with unread counts by each contact. Regular PTT mail is never deleted; it stays in PTT untouched.</p>
+                    </div>
+                </div>
+                <ol class="story-dots" aria-hidden="true"><li></li><li></li><li></li></ol>
+            </div>
+
+            <div class="stage" aria-hidden="true">
+                <div class="term">
+                    <div class="term-screen">
+<span class="row bar"> 【郵件選單】                    <span class="y">批踢踢實業坊</span></span>
+<span class="row"> <span class="d">[←]</span>離開 <span class="d">[↑↓]</span>選擇 <span class="d">[→]</span>閱讀 <span class="d">[y]</span>回信 <span class="d">[x]</span>轉寄 <span class="d">[d]</span>刪除 <span class="d">[h]</span>說明</span>
+<span class="row inv">  編號 日 期 作  者        信  件  標  題</span>
+<span class="row old">   1   <span class="dt"><span class="d">09/12</span> </span>bcboss       □ [揪團] 週六板橋夜市</span>
+<span class="row old">   2   <span class="dt"><span class="d">09/21</span> </span>MoonCake     □ Re: 演唱會的票還有嗎</span>
+<span class="row old">   3   <span class="dt"><span class="d">09/30</span> </span>csnerd87     □ 作業的 repo 連結</span>
+<span class="row mail-row" data-row="0">   4 <span class="g">+</span> <span class="dt"><span class="w">10/04</span> </span><span class="w">SYSOP</span>      □ 系統維護預告：本週四凌晨 03:00</span>
+<span class="row mail-row" data-row="1">   5 <span class="g">+</span> <span class="dt"><span class="w">10/04</span> </span><span class="w">catmayor</span>   □ <span class="t" data-target="u there? waterballs keep failing QQ">你收到使用 uPtt 傳送的訊息</span><span class="tag c"></span></span>
+<span class="row mail-row" data-row="2">   6 <span class="g">+</span> <span class="dt"><span class="w">10/04</span> </span><span class="w">diner_kai</span>  □ <span class="t" data-target="Ramen this weekend?">你收到使用 uPtt 傳送的訊息</span><span class="tag c"></span></span>
+<span class="row mail-row" data-row="3">   7 <span class="g">+</span> <span class="dt"><span class="w">10/04</span> </span><span class="w">catmayor</span>   □ <span class="t" data-target="No way, what does it look like?">你收到使用 uPtt 傳送的訊息</span><span class="tag c"></span></span>
+<span class="row mail-row" data-row="4">   8 <span class="g">+</span> <span class="dt"><span class="w">10/04</span> </span><span class="w">catmayor</span>   □ <span class="t" data-target="Cool, installing it now">你收到使用 uPtt 傳送的訊息</span><span class="tag c"></span></span>
+<span class="row"> </span>
+<span class="row d"> ※ 信箱容量 <span data-mailcount>8</span>/200 封</span>
+<span class="row"> </span>
+<span class="row"> </span>
+<span class="row d status-row"> <span class="y">●</span> <span data-termstatus>uPtt 已連線 ptt.cc，等待新訊息</span><span class="blink">_</span></span>
+                    </div>
+                </div>
+
+                <div class="app story-app">
+                    <div class="app-bar"><i></i><i></i><i></i><span class="app-title">uPtt — catmayor</span></div>
+                    <div class="app-body">
+                        <div class="app-side">
+                            <div class="app-search"><span>Search</span><kbd>⌘K</kbd></div>
+                            <div class="contact is-active"><span class="presence on"></span><span class="who"><span class="id">catmayor</span><span class="nick">Cat Mayor</span></span></div>
+                            <div class="contact" data-bubble="2"><span class="presence on"></span><span class="who"><span class="id">diner_kai</span><span class="nick">Midnight Diner</span></span><span class="badge">1</span></div>
+                            <div class="contact"><span class="presence"></span><span class="who"><span class="id">SYSOP</span><span class="nick">Mail</span></span></div>
+                        </div>
+                        <div class="app-chat">
+                            <div class="chat-head"><span class="presence on"></span><b>catmayor</b><span>Cat Mayor · online</span></div>
+                            <div class="chat-log">
+                                <div class="bubble in" data-bubble="1">u there? waterballs keep failing QQ<time>20:58</time></div>
+                                <div class="bubble out local">I got uPtt, my PTT mail is a chat now<time>20:59</time></div>
+                                <div class="bubble in" data-bubble="3">No way, what does it look like?<time>21:00</time></div>
+                                <div class="bubble out local"><span class="quote"><b>@catmayor</b> No way, what does it look like?</span>Exactly what you’re looking at<time>21:00</time></div>
+                                <div class="bubble in" data-bubble="4">Cool, installing it now<time>21:01</time></div>
+                            </div>
+                            <div class="composer"><span class="caret"></span><span class="send"><svg><use href="#i-arrow"/></svg></span></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="morph-layer"></div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ============================== MESSAGE TYPES ============================== -->
+<section class="section" id="types" aria-labelledby="types-title">
+    <div class="wrap">
+        <div class="section-head reveal">
+            <span class="eyebrow"><b>02</b> Messages</span>
+            <h2 class="h2" id="types-title">Three kinds of message, <em>one interface</em></h2>
+            <p class="lede">Messages reach you on PTT in different ways. uPtt recognises each kind, shows it the way that suits it, and handles it as safely as it can.</p>
+        </div>
+        <div class="types">
+            <div class="type-tabs" role="tablist" aria-label="Message types" aria-orientation="vertical">
+                <button class="type-tab" type="button" role="tab" id="tab-uptt" aria-controls="panel-uptt" aria-selected="true">
+                    <span class="num">01</span>
+                    <span class="t">uPtt messages<span class="tag">uptt</span></span>
+                    <span class="s">Sent between uPtt users. Parsed and saved to the local database, then removed from the PTT mailbox automatically to keep it tidy.</span>
+                </button>
+                <button class="type-tab" type="button" role="tab" id="tab-mail" aria-controls="panel-mail" aria-selected="false" tabindex="-1">
+                    <span class="num">02</span>
+                    <span class="t">Regular PTT mail<span class="tag">mail</span></span>
+                    <span class="s">Ordinary mail from any PTT user. It shows up as a card in the conversation, expandable past five lines, and the original is never deleted.</span>
+                </button>
+                <button class="type-tab" type="button" role="tab" id="tab-wb" aria-controls="panel-wb" aria-selected="false" tabindex="-1">
+                    <span class="num">03</span>
+                    <span class="t">Waterballs<span class="tag">waterball</span></span>
+                    <span class="s">PTT’s instant pop-up messages. Captured and shown inline, de-duplicated by batch fingerprint so they never repeat even if PTT fails to clear them.</span>
+                </button>
+            </div>
+
+            <div class="type-panels">
+                <div class="type-panel" role="tabpanel" id="panel-uptt" aria-labelledby="tab-uptt">
+                    <div>
+                        <div class="panel-label"><span>In the PTT mailbox</span><span>raw</span></div>
+<pre class="raw"><span class="d">作者</span> <span class="w">catmayor</span>
+<span class="d">標題</span> <span class="w">你收到使用 uPtt 傳送的訊息</span>
+<span class="d">時間</span> Sun Oct  4 21:00:12 2026
+<span class="d">────────────────────────────────────────</span>
+<span class="w">[re:@you|I got uPtt, my PTT mail is a chat now]</span>
+No way, what does it look like?
+<span class="d">====================</span>
+<span class="hl">[uPtt-ts:2026-10-04T21:00:09+08:00]</span></pre>
+                    </div>
+                    <div class="flow-arrow">parsed · saved to SQLite · removed from PTT</div>
+                    <div class="render">
+                        <div class="bubble out"><span class="quote"><b>@you</b> I got uPtt, my PTT mail is a chat now</span>No way, what does it look like?<time>21:00</time></div>
+                    </div>
+                </div>
+
+                <div class="type-panel" role="tabpanel" id="panel-mail" aria-labelledby="tab-mail" hidden>
+                    <div>
+                        <div class="panel-label"><span>In the PTT mailbox</span><span>raw</span></div>
+<pre class="raw"><span class="d">作者</span> <span class="w">bcboss</span> (板橋大魔王)
+<span class="d">標題</span> <span class="w">[Meetup] Banqiao night market, Sat</span>
+<span class="d">時間</span> Sat Oct  3 18:22:40 2026
+<span class="d">────────────────────────────────────────</span>
+Saturday 7pm, Banqiao Station exit 2.
+So far: catmayor, diner_kai
+Reply if you’re coming~
+<span class="d">--</span>
+<span class="c">※ 發信站: 批踢踢實業坊(ptt.cc)</span></pre>
+                    </div>
+                    <div class="flow-arrow">shown as a mail card · original kept</div>
+                    <div class="render">
+                        <article class="mail-card">
+                            <header><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="m3 7 9 6 9-6" fill="none" stroke="currentColor" stroke-width="2"/></svg><b>[Meetup] Banqiao night market, Sat</b><span>· PTT mail</span></header>
+                            <div class="body"><p>Saturday 7pm, Banqiao Station exit 2.</p><p>So far: catmayor, diner_kai</p></div>
+                            <span class="more">Show full mail ↓</span>
+                        </article>
+                    </div>
+                </div>
+
+                <div class="type-panel" role="tabpanel" id="panel-wb" aria-labelledby="tab-wb" hidden>
+                    <div>
+                        <div class="panel-label"><span>PTT terminal</span><span>raw</span></div>
+<pre class="raw"><span class="y">★diner_kai</span><span class="w"> Grabbing a late-night snack, brb </span>
+<span class="d">                                    [Ctrl-R reply]</span>
+<span class="d">─ same batch shows up again? ─────────────</span>
+<span class="y">★diner_kai</span><span class="w"> Grabbing a late-night snack, brb </span>
+<span class="d">fingerprint = sha(batch) → same as last batch, skip</span></pre>
+                    </div>
+                    <div class="flow-arrow">captured · de-duplicated · shown inline</div>
+                    <div class="render">
+                        <div class="bubble in">Gossiping board is on fire tonight<time>23:41</time></div>
+                        <div class="bubble wb">Grabbing a late-night snack, brb</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ============================== FEATURES ============================== -->
+<section class="section" id="features" aria-labelledby="features-title" style="padding-top:0">
+    <div class="wrap">
+        <div class="section-head reveal">
+            <span class="eyebrow"><b>03</b> Features</span>
+            <h2 class="h2" id="features-title">Easy as any messenger,<br><em>PTT</em> at heart</h2>
+            <p class="lede">No more memorising telnet keystrokes. Every tile below is live, so go ahead and try it.</p>
+        </div>
+
+        <div class="bento">
+            <article class="cell w4 reveal">
+                <div class="k">Contacts</div>
+                <h3>Pin, drag, block. Sorted your way</h3>
+                <p>Keep the people who matter at the top. Pinned and regular chats sort independently; right-click to close, delete local history, or block.</p>
+                <div class="demo">
+                    <ul class="dnd" data-dnd aria-describedby="dnd-hint">
+                        <li tabindex="0"><span class="grip" aria-hidden="true">⋮⋮</span><span class="presence on"></span><span>diner_kai <span style="color:var(--muted)">Midnight Diner</span></span><span class="pinned">◆ pinned</span></li>
+                        <li tabindex="0"><span class="grip" aria-hidden="true">⋮⋮</span><span class="presence on"></span><span>catmayor <span style="color:var(--muted)">Cat Mayor</span></span><span class="pinned">◆ pinned</span></li>
+                        <li tabindex="0"><span class="grip" aria-hidden="true">⋮⋮</span><span class="presence"></span><span>bcboss <span style="color:var(--muted)">Banqiao Boss</span></span><span></span></li>
+                    </ul>
+                    <p class="dnd-hint" id="dnd-hint">↕ Drag to reorder (keyboard: focus, then ↑ ↓)</p>
+                </div>
+            </article>
+
+            <article class="cell w2 reveal" style="--d:.08s">
+                <div class="k">Presence</div>
+                <h3>See who’s online at a glance</h3>
+                <p>A dedicated query session keeps it fresh. When it can’t tell, it shows a grey “unknown” instead of guessing.</p>
+                <div class="demo presence-demo" data-presence>
+                    <div class="row"><span class="presence on"></span><span>catmayor</span><span class="state">online</span></div>
+                    <div class="row"><span class="presence"></span><span>bcboss</span><span class="state">offline</span></div>
+                    <div class="row"><span class="presence unknown"></span><span>csnerd87</span><span class="state">unknown</span></div>
+                </div>
+            </article>
+
+            <article class="cell w2 reveal">
+                <div class="k">⌘K Search</div>
+                <h3>Search messages and contacts</h3>
+                <p>Hit ⌘K / Ctrl+K anywhere and jump straight to the conversation.</p>
+                <div class="demo">
+                    <div class="palette">
+                        <div class="q"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>ramen</span><span class="caret"></span></div>
+                        <ul>
+                            <li class="on"><span><mark>Ramen</mark> this weekend?</span><small>diner_kai</small></li>
+                            <li><span>Queued an hour for that <mark>ramen</mark></span><small>catmayor</small></li>
+                        </ul>
+                    </div>
+                </div>
+            </article>
+
+            <article class="cell w2 reveal" style="--d:.08s">
+                <div class="k">Notifications</div>
+                <h3>Close the window, miss nothing</h3>
+                <p>uPtt keeps receiving from the system tray, and new messages pop up as desktop notifications when it’s in the background.</p>
+                <div class="demo notify-demo" data-notify>
+                    <div class="notify"><span class="ic"><svg aria-hidden="true"><use href="#logo"/></svg></span><span><b>catmayor</b><span>Cool, installing it now</span></span></div>
+                    <div class="notify"><span class="ic"><svg aria-hidden="true"><use href="#logo"/></svg></span><span><b>diner_kai</b><span>Ramen this weekend?</span></span></div>
+                    <div class="notify"><span class="ic"><svg aria-hidden="true"><use href="#logo"/></svg></span><span><b>★MoonCake waterball</b><span>Are you watching the game too?</span></span></div>
+                </div>
+            </article>
+
+            <article class="cell w2 reveal" style="--d:.16s">
+                <div class="k">Multi-account</div>
+                <h3>Several PTT accounts, fully separate</h3>
+                <p>Chats, settings and contacts are isolated per account at the database level, so switching never mixes them up.</p>
+                <div class="demo">
+                    <div class="accounts"><span class="acct on"><i>W</i>wonderslab</span><span class="acct"><i>N</i>night_owl</span></div>
+                    <div class="db-line">WHERE <b>account_id</b> = 'wonderslab'</div>
+                </div>
+            </article>
+
+            <article class="cell w3 reveal">
+                <div class="k">Themes</div>
+                <h3>Graphite, Bone, Kraft</h3>
+                <p>Same palettes as the app. Click one and this site switches too.</p>
+                <div class="demo mini-themes">
+                    <button type="button" class="mini-theme mt-graphite" data-theme-set="graphite" aria-pressed="false"><span class="mt-screen"><i></i><i></i><i></i></span><span class="mt-name"><span>Graphite</span><span></span></span></button>
+                    <button type="button" class="mini-theme mt-bone" data-theme-set="bone" aria-pressed="false"><span class="mt-screen"><i></i><i></i><i></i></span><span class="mt-name"><span>Bone</span><span></span></span></button>
+                    <button type="button" class="mini-theme mt-kraft" data-theme-set="kraft" aria-pressed="false"><span class="mt-screen"><i></i><i></i><i></i></span><span class="mt-name"><span>Kraft</span><span></span></span></button>
+                </div>
+            </article>
+
+            <article class="cell w3 reveal" style="--d:.08s">
+                <div class="k">Quoted replies</div>
+                <h3>Always clear what you’re replying to</h3>
+                <p>Right-click any message to quote it, with a preview above the input. It still reads fine for someone opening the mail in plain PTT.</p>
+                <div class="demo render" style="padding:16px">
+                    <div class="bubble in">Queued an hour for that ramen<time>12:30</time></div>
+                    <div class="bubble out"><span class="quote"><b>@catmayor</b> Queued an hour for that ramen</span>Worth it?<time>12:31</time></div>
+                </div>
+            </article>
+        </div>
+    </div>
+</section>
+
+<!-- ============================== ARCHITECTURE ============================== -->
+<section class="section arch" id="architecture" aria-labelledby="arch-title">
+    <div class="wrap arch-grid">
+        <div class="reveal">
+            <span class="eyebrow"><b>04</b> Architecture</span>
+            <h2 class="h2" id="arch-title">Two sessions,<br><em>never waiting</em></h2>
+            <p class="lede">With one PTT account, uPtt keeps two sessions open: one for sending and receiving, one for presence lookups. However slow a lookup gets, your messages never wait on it.</p>
+            <ul class="arch-points">
+                <li><span><strong>Main session</strong> Logs in, polls mail and waterballs every 5 seconds, sends messages.</span></li>
+                <li class="q"><span><strong>Query session</strong> Starts 10 seconds after the main login and takes the user lookups that can block for seconds. It never kicks the main session when it reconnects.</span></li>
+                <li class="t"><span><strong>Shared reconnect throttle</strong> If both drop at once, they reconnect in turn at least 5 seconds apart, avoiding PTT’s “logging in too often”.</span></li>
+            </ul>
+        </div>
+        <div class="arch-diagram reveal" style="--d:.1s">
+            <svg viewBox="0 0 560 420" role="img" aria-labelledby="arch-svg-title">
+                <title id="arch-svg-title">Architecture: the uPtt UI talks to ptt.cc through a PTTWorker main session and a QueryWorker query session.</title>
+                <path id="w1" class="wire" d="M150 196 C 185 196, 180 96, 214 96"/>
+                <path id="w2" class="wire" d="M150 224 C 185 224, 180 324, 214 324"/>
+                <path id="w3" class="wire" d="M364 96 C 395 96, 392 186, 420 186"/>
+                <path id="w4" class="wire dash" d="M364 324 C 395 324, 392 234, 420 234"/>
+                <text class="lbl" x="232" y="54">KICK_OTHER_SESSION = TRUE</text>
+                <text class="lbl" x="232" y="384">KICK_ON_RECONNECT = FALSE</text>
+                <text class="lbl" x="18" y="150">QT SIGNAL / SLOT</text>
+                <g class="node hot"><rect x="10" y="166" width="140" height="88" rx="12"/><text x="26" y="204">uPtt UI</text><text class="sub" x="26" y="226">Qt main thread</text></g>
+                <g class="node"><rect x="214" y="62" width="150" height="68" rx="12"/><text x="230" y="92">PTTWorker</text><text class="sub" x="230" y="112">main · messages</text></g>
+                <g class="node"><rect x="214" y="290" width="150" height="68" rx="12"/><text x="230" y="320">QueryWorker</text><text class="sub" x="230" y="340">query · presence</text></g>
+                <g class="node ptt"><rect x="420" y="150" width="130" height="120" rx="12"/><text x="438" y="200">ptt.cc</text><text class="sub" x="438" y="222">PTT BBS</text><text class="sub" x="438" y="244">telnet / ws</text></g>
+                <g class="node"><rect x="236" y="190" width="106" height="40" rx="20" style="stroke-dasharray:3 4"/><text class="sub" x="250" y="214">throttle 5s</text></g>
             </svg>
         </div>
-        <h1 class="hero-tagline">
-            Bringing the warmth of PTT<br>back to life on <span class="highlight">modern desktops</span>
-        </h1>
-        <p class="hero-subtitle">
-            An instant messaging app built for PTT (Taiwan's largest BBS).<br>
-            Transforming PTT into a seamless chat experience.
-        </p>
-        <div class="hero-buttons">
-            <a href="https://github.com/uPtt-messenger/uPtt-app/releases/latest" class="btn btn-primary" target="_blank" rel="noopener">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                Download Latest
-            </a>
-            <a href="https://github.com/uPtt-messenger/uPtt-app" class="btn btn-secondary" target="_blank" rel="noopener">
-                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
-                Source Code
-            </a>
-        </div>
-        <div class="hero-preview fade-in">
-            <div class="app-window" aria-hidden="true">
-                <div class="app-window-bar">
-                    <span class="win-dot win-dot-red"></span>
-                    <span class="win-dot win-dot-yellow"></span>
-                    <span class="win-dot win-dot-green"></span>
-                    <span class="app-window-title">uPtt</span>
-                </div>
-                <div class="app-window-body">
-                    <aside class="mock-contacts">
-                        <div class="mock-contact active">
-                            <span class="mock-online" data-status="online"></span>
-                            <div class="mock-contact-info">
-                                <span class="mock-contact-name">Cat Mayor</span>
-                                <span class="mock-contact-id">catmayor</span>
-                            </div>
-                        </div>
-                        <div class="mock-contact">
-                            <span class="mock-online" data-status="online"></span>
-                            <div class="mock-contact-info">
-                                <span class="mock-contact-name">Midnight Diner</span>
-                                <span class="mock-contact-id">diner_kai</span>
-                            </div>
-                        </div>
-                        <div class="mock-contact">
-                            <span class="mock-online" data-status="offline"></span>
-                            <div class="mock-contact-info">
-                                <span class="mock-contact-name">Bridge Boss</span>
-                                <span class="mock-contact-id">bcboss</span>
-                            </div>
-                        </div>
-                        <div class="mock-contact">
-                            <span class="mock-online" data-status="unknown"></span>
-                            <div class="mock-contact-info">
-                                <span class="mock-contact-name">CS Nerd</span>
-                                <span class="mock-contact-id">csnerd87</span>
-                            </div>
-                        </div>
-                    </aside>
-                    <section class="mock-chat">
-                        <div class="mock-bubble mock-bubble-in">
-                            <p>You there? My waterballs keep missing me :(</p>
-                            <span class="mock-time">20:58</span>
-                        </div>
-                        <div class="mock-bubble mock-bubble-out">
-                            <p>Query session's reconnecting, one sec</p>
-                            <span class="mock-time">20:59</span>
-                        </div>
-                        <div class="mock-bubble mock-bubble-in">
-                            <p>Got it, thanks for the fix</p>
-                            <span class="mock-time">20:59</span>
-                        </div>
-                        <div class="mock-input">
-                            <span>Type a message…</span><span class="mock-caret"></span>
-                        </div>
-                    </section>
-                </div>
+    </div>
+</section>
+
+<!-- ============================== PRIVACY ============================== -->
+<section class="section" id="privacy" aria-labelledby="privacy-title">
+    <div class="wrap">
+        <span class="eyebrow reveal"><b>05</b> Security &amp; privacy</span>
+        <h2 class="privacy-statement" id="privacy-title" data-lit>
+            <span class="w">Your conversations </span><span class="w">live only on </span><span class="w em">your computer. </span><span class="w">No relay server. </span><span class="w">No sign-up. </span><span class="w">No tracking.</span>
+        </h2>
+        <ul class="privacy-list">
+            <li class="reveal"><span class="n">01</span><h3>Local SQLite</h3><p>History and settings live in a database on your machine, with accounts fully isolated by account_id.</p></li>
+            <li class="reveal" style="--d:.06s"><span class="n">02</span><h3>Two connections, that’s all</h3><p>Straight to PTT’s own server, ptt.cc, plus the GitHub API to check for new versions.</p></li>
+            <li class="reveal" style="--d:.12s"><span class="n">03</span><h3>Code signing</h3><p>Releases are signed by <a href="https://signpath.io" target="_blank" rel="noopener">SignPath.io</a> and verified by the SignPath Foundation, so you know the download hasn’t been tampered with.</p></li>
+            <li class="reveal" style="--d:.18s"><span class="n">04</span><h3>Leak-proof CI</h3><p>TruffleHog secret scanning, Bandit static analysis, pip-audit, and canary tests that catch any password leak.</p></li>
+        </ul>
+        <div class="caution reveal" role="note">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 20h20L12 3Z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M12 10v4M12 17h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <div>
+                <strong>While using uPtt, don’t delete mailbox contents by hand from another PTT client.</strong>
+                <p>uPtt syncs by mail order, so manual deletions can cause sync errors or the wrong mail being removed. uPtt only ever deletes messages in its own format; if you’re still worried, turn on mailbox backup to external email in PTT’s settings.</p>
             </div>
         </div>
     </div>
 </section>
 
-<!-- Features -->
-<section class="features" id="features">
-    <div class="container">
-        <div class="section-label">Features</div>
-        <h2 class="section-title">Where Tradition Meets Innovation</h2>
-        <p class="section-desc">No complex Telnet keyboard commands needed — chat on PTT as naturally as breathing.</p>
-        <div class="features-grid">
-            <div class="feature-card fade-in">
-                <div class="feature-icon green">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                </div>
-                <h3>Mail to Conversations</h3>
-                <p>Automatically transforms PTT internal mail into intuitive conversations — no more fragmented communication. Supports quote-reply to keep conversation context clear.</p>
-            </div>
-            <div class="feature-card fade-in">
-                <div class="feature-icon green">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-                </div>
-                <h3>Contact Management</h3>
-                <p>Pin important conversations, drag-and-drop reordering, block or hide contacts. Right-click menu provides multi-level operations.</p>
-            </div>
-            <div class="feature-card fade-in">
-                <div class="feature-icon gold">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-                </div>
-                <h3>Waterball Integration</h3>
-                <p>PTT's instant waterball messages are also captured and displayed. Built-in batch deduplication ensures no duplicates or missed messages.</p>
-            </div>
+<!-- ============================== SHORTCUTS ============================== -->
+<section class="section" id="shortcuts" aria-labelledby="keys-title" style="padding-top:0">
+    <div class="wrap">
+        <div class="section-head reveal">
+            <span class="eyebrow"><b>06</b> Shortcuts</span>
+            <h2 class="h2" id="keys-title">Hands stay on the <em>keyboard</em></h2>
         </div>
+        <div class="keys-grid" data-keys>
+            <div class="key-card reveal" data-key="k"><span class="combo"><kbd class="cap" data-mod>⌘</kbd><kbd class="cap">K</kbd></span><span>Search messages &amp; contacts</span></div>
+            <div class="key-card reveal" style="--d:.05s" data-key="n"><span class="combo"><kbd class="cap" data-mod>⌘</kbd><kbd class="cap">N</kbd></span><span>New chat</span></div>
+            <div class="key-card reveal" style="--d:.1s" data-key="i"><span class="combo"><kbd class="cap" data-mod>⌘</kbd><kbd class="cap">I</kbd></span><span>Profile</span></div>
+            <div class="key-card reveal" data-key=","><span class="combo"><kbd class="cap" data-mod>⌘</kbd><kbd class="cap">,</kbd></span><span>Settings</span></div>
+            <div class="key-card reveal" style="--d:.05s" data-key="w"><span class="combo"><kbd class="cap" data-mod>⌘</kbd><kbd class="cap">W</kbd></span><span>Close current chat</span></div>
+            <div class="key-card reveal" style="--d:.1s" data-key="enter"><span class="combo"><kbd class="cap">⇧</kbd><kbd class="cap">↵</kbd></span><span>New line (↵ sends)</span></div>
+        </div>
+        <p class="keys-hint reveal">// Press K, N, I, W or comma on this page to try them.</p>
     </div>
 </section>
 
-<!-- How it works -->
-<section class="how-it-works" id="how-it-works">
-    <div class="container">
-        <div class="section-label">How It Works</div>
-        <h2 class="section-title">How It Works</h2>
-        <p class="section-desc">uPtt connects directly to PTT's official servers, using internal mail as the message transport layer — no third-party relay needed.</p>
-        
-        <div class="alert alert-danger fade-in">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M12 7a.75.75 0 0 1 .75.75v4.5a.75.75 0 0 1-1.5 0v-4.5A.75.75 0 0 1 12 7Zm0 9a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z"></path><path d="M1 12C1 5.925 5.925 1 12 1s11 4.925 11 11-4.925 11-11 11S1 18.075 1 12Zm11-9.5A8.5 8.5 0 0 0 3.5 12c0 4.694 3.806 8.5 8.5 8.5s8.5-3.806 8.5-8.5A8.5 8.5 0 0 0 12 2.5Z"></path></svg>
-            <strong>Warning:</strong> Please do not manually delete mailbox items while using uPtt to avoid accidental deletions.
-        </div>
-
-        <div class="flow-diagram">
-            <div class="flow-step fade-in">
-                <div class="flow-number">1</div>
-                <h3>Send Message</h3>
-                <p>Messages you type in uPtt are formatted and sent to PTT servers as internal mail via PyPtt, while simultaneously saved to the local database.</p>
-            </div>
-            <div class="flow-step fade-in">
-                <div class="flow-number">2</div>
-                <h3>Background Polling</h3>
-                <p>A worker thread polls internal mail every 5 seconds, identifying and parsing uPtt-format messages. Built-in timestamp synchronization ensures consistent ordering.</p>
-            </div>
-            <div class="flow-step fade-in">
-                <div class="flow-number">3</div>
-                <h3>Real-time Display</h3>
-                <p>Parsed messages are saved to the SQLite database and the UI thread is notified via Qt Signals to update in real time, displaying familiar chat bubbles.</p>
-            </div>
-        </div>
-    </div>
-</section>
-
-<!-- Message Types -->
-<section class="msg-types" id="message-types">
-    <div class="container">
-        <div class="section-label">Message Types</div>
-        <h2 class="section-title">Three Message Types, Unified Management</h2>
-        <p class="section-desc">uPtt intelligently identifies and handles different types of PTT messages.</p>
-        <div class="msg-grid">
-            <div class="msg-card type-uptt fade-in">
-                <span class="msg-tag">uPtt</span>
-                <h3>uPtt Messages</h3>
-                <p>uPtt-format messages are parsed, saved to the local database, and automatically deleted from PTT inbox to keep it clean.</p>
-            </div>
-            <div class="msg-card type-mail fade-in">
-                <span class="msg-tag">Mail</span>
-                <h3>Regular Mail</h3>
-                <p>Regular mail from other users is displayed as mail cards in conversations. Original mail is preserved in PTT inbox — never deleted.</p>
-            </div>
-            <div class="msg-card type-waterball fade-in">
-                <span class="msg-tag">Waterball</span>
-                <h3>Waterball Messages</h3>
-                <p>PTT's instant pop-up messages (waterball) are captured and displayed as inline bubbles, with batch fingerprint hashing for deduplication.</p>
-            </div>
-        </div>
-    </div>
-</section>
-
-<!-- App Showcase -->
-<section class="showcase" id="showcase">
-    <div class="container">
-        <div class="section-label">App Preview</div>
-        <h2 class="section-title">Inside the App</h2>
-        <p class="section-desc">From login to a fully synced dual session, every screen keeps the same terminal-inspired feel.</p>
-        <div class="showcase-grid">
-            <div class="showcase-card fade-in">
-                <div class="app-window" aria-hidden="true">
-                    <div class="app-window-bar">
-                        <span class="win-dot win-dot-red"></span>
-                        <span class="win-dot win-dot-yellow"></span>
-                        <span class="win-dot win-dot-green"></span>
-                        <span class="app-window-title">Login</span>
-                    </div>
-                    <div class="app-window-body app-window-body-solo">
-                        <div class="mock-login">
-                            <label>PTT ID</label>
-                            <div class="mock-field">wonderslab<span class="mock-caret"></span></div>
-                            <label>Password</label>
-                            <div class="mock-field">••••••••</div>
-                            <div class="mock-btn">Log In</div>
-                        </div>
-                    </div>
-                </div>
-                <p class="showcase-caption">Your credentials are only used to connect to PTT — never sent anywhere else.</p>
-            </div>
-            <div class="showcase-card fade-in">
-                <div class="app-window" aria-hidden="true">
-                    <div class="app-window-bar">
-                        <span class="win-dot win-dot-red"></span>
-                        <span class="win-dot win-dot-yellow"></span>
-                        <span class="win-dot win-dot-green"></span>
-                        <span class="app-window-title">Connecting</span>
-                    </div>
-                    <div class="app-window-body app-window-body-solo">
-                        <div class="mock-onboarding">
-                            <p class="mock-step done">✓ Main session logged in</p>
-                            <p class="mock-step active">… Establishing query session<span class="mock-caret"></span></p>
-                            <p class="mock-step">　Syncing message history</p>
-                        </div>
-                    </div>
-                </div>
-                <p class="showcase-caption">Dual-session design: the main session handles messages, the query session checks online status — neither blocks the other.</p>
-            </div>
-        </div>
-    </div>
-</section>
-
-<!-- Security -->
-<section class="security" id="security">
-    <div class="container">
-        <div class="section-label">Security &amp; Privacy</div>
-        <h2 class="section-title">Security & Privacy First</h2>
-        <p class="section-desc">Your data belongs only to you. uPtt collects no personal information and connects to no third-party servers.</p>
-        <div class="security-grid">
-            <div class="security-item fade-in">
-                <div class="security-icon">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                </div>
-                <div>
-                    <h4>Local-only Storage</h4>
-                    <p>All chat history and account data is stored exclusively in your local SQLite database — nothing is uploaded to third parties.</p>
-                </div>
-            </div>
-            <div class="security-item fade-in">
-                <div class="security-icon">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                </div>
-                <div>
-                    <h4>Native Protocol</h4>
-                    <p>Connects directly to PTT's official servers (ptt.cc). The only additional connection is to GitHub API for version checking — pure and secure.</p>
-                </div>
-            </div>
-            <div class="security-item fade-in">
-                <div class="security-icon">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-                </div>
-                <div>
-                    <h4>Automated Leak Prevention</h4>
-                    <p>CI integrates TruffleHog scanning, Bandit static analysis, and dynamic credential detection tests to ensure sensitive information never leaks.</p>
-                </div>
-            </div>
-            <div class="security-item fade-in">
-                <div class="security-icon">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-                </div>
-                <div>
-                    <h4>Code Signing</h4>
-                    <p>Release builds are signed by <a href="https://signpath.io" target="_blank" rel="noopener" style="color: var(--accent);">SignPath.io</a> and verified by the SignPath Foundation, ensuring downloaded binaries haven't been tampered with.</p>
-                </div>
-            </div>
-        </div>
-    </div>
-</section>
-
-<!-- Download -->
-<section class="download" id="download">
-    <div class="container">
-        <div class="section-label">Download</div>
-        <h2 class="section-title">Download Now</h2>
-        <p class="section-desc" style="margin: 0 auto;">No development environment needed — just download and run.</p>
-        <div class="download-cards">
-            <a href="https://github.com/uPtt-messenger/uPtt-app/releases/latest" class="download-card fade-in" target="_blank" rel="noopener">
-                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5C17.88 20.74 17 21.95 15.66 21.97C14.32 22 13.89 21.18 12.37 21.18C10.84 21.18 10.37 21.95 9.1 22C7.79 22.05 6.8 20.68 5.96 19.47C4.25 17 2.94 12.45 4.7 9.39C5.57 7.87 7.13 6.91 8.82 6.88C10.1 6.86 11.32 7.75 12.11 7.75C12.89 7.75 14.37 6.68 15.92 6.84C16.57 6.87 18.39 7.1 19.56 8.82C19.47 8.88 17.39 10.1 17.41 12.63C17.44 15.65 20.06 16.66 20.09 16.67C20.06 16.74 19.67 18.11 18.71 19.5ZM13 3.5C13.73 2.67 14.94 2.04 15.94 2C16.07 3.17 15.6 4.35 14.9 5.19C14.21 6.04 13.07 6.7 11.95 6.61C11.8 5.46 12.36 4.26 13 3.5Z"/></svg>
+<!-- ============================== DOWNLOAD ============================== -->
+<section class="section download" id="download" aria-labelledby="dl-title">
+    <div class="dl-orb" aria-hidden="true"></div>
+    <div class="wrap">
+        <span class="eyebrow reveal"><b>07</b> Download</span>
+        <h2 class="h2 display reveal" id="dl-title">Start <em>chatting</em></h2>
+        <p class="lede reveal">Free and open source. Download it and sign in with your PTT account.</p>
+        <div class="dl-cards">
+            <a class="dl-card reveal" data-os="mac" data-yours="Your OS" href="https://github.com/uPtt-messenger/uPtt-app/releases" target="_blank" rel="noopener">
+                <svg aria-hidden="true"><use href="#i-apple"/></svg>
                 <h3>macOS</h3>
-                <p>.dmg image</p>
+                <p>.app · zip archive</p>
+                <span class="go" aria-hidden="true"><svg><use href="#i-arrow"/></svg></span>
             </a>
-            <a href="https://github.com/uPtt-messenger/uPtt-app/releases/latest" class="download-card fade-in" target="_blank" rel="noopener">
-                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 12V6.75L9 5.43V11.91L3 12M20 3V11.75L10 11.9V5.21L20 3M3 13L9 13.09V19.9L3 18.75V13M10 13.15L20 13V22L10 20.09V13.15Z"/></svg>
+            <a class="dl-card reveal" style="--d:.06s" data-os="win" data-yours="Your OS" href="https://github.com/uPtt-messenger/uPtt-app/releases" target="_blank" rel="noopener">
+                <svg aria-hidden="true"><use href="#i-windows"/></svg>
                 <h3>Windows</h3>
-                <p>.exe installer</p>
+                <p>Installer · zip archive</p>
+                <span class="go" aria-hidden="true"><svg><use href="#i-arrow"/></svg></span>
             </a>
+            <button class="dl-card reveal" style="--d:.12s" type="button" data-os="pip" data-yours="Your OS" data-copy="pip install uPtt" aria-label="Copy the pip install command">
+                <svg aria-hidden="true"><use href="#i-python"/></svg>
+                <span class="dl-h">pip</span>
+                <span class="dl-p">Python 3.12+ · any platform</span>
+                <span class="cmd">pip install uPtt</span>
+                <span class="go" aria-hidden="true"><svg><use href="#i-copy"/></svg></span>
+            </button>
         </div>
+        <p class="release-line reveal" data-release>Every version and changelog lives on <a href="https://github.com/uPtt-messenger/uPtt-app/releases" target="_blank" rel="noopener">GitHub Releases</a>. Preview builds: <code>pip install --pre uPtt</code></p>
+    </div>
+</section>
 
-        <h3 style="font-family: var(--font-mono); margin-top: 56px; margin-bottom: 12px; font-size: 1.1rem;">Or install via pip (Python 3.12+)</h3>
-        <p class="section-desc" style="margin: 0 auto 20px;">
-            Stable builds on <a href="https://pypi.org/project/uPtt/" target="_blank" rel="noopener" style="color: var(--accent);">PyPI</a>,
-            preview builds (Beta / RC) are also auto-published.
-        </p>
-        <div class="code-block fade-in" style="max-width: 720px; margin: 0 auto; text-align: left;">
-            <code>
-                <span class="comment"># Stable</span><br>
-                <span class="prompt">$ </span><span class="cmd">pip install uPtt</span><br>
-                <span class="prompt">$ </span><span class="cmd">uptt</span><br>
-                <br>
-                <span class="comment"># Preview (Beta / RC)</span><br>
-                <span class="prompt">$ </span><span class="cmd">pip install --pre uPtt</span><br>
-                <span class="prompt">$ </span><span class="cmd">uptt</span>
-            </code>
+<!-- ============================== DEVELOPERS ============================== -->
+<section class="section" id="developers" aria-labelledby="dev-title" style="padding-top:0">
+    <div class="wrap dev-grid">
+        <div class="reveal">
+            <span class="eyebrow"><b>08</b> Developers</span>
+            <h2 class="h2" id="dev-title">Help make it<br><em>better</em></h2>
+            <p class="lede">uPtt is built with Python 3.12 and PySide6 (Qt 6), and talks to PTT through PyPtt. Bug reports, ideas and pull requests are all welcome.</p>
+            <div class="dev-links">
+                <a class="btn" href="https://github.com/uPtt-messenger/uPtt-app" target="_blank" rel="noopener"><svg aria-hidden="true"><use href="#i-github"/></svg>GitHub</a>
+                <a class="btn btn-ghost" href="https://github.com/uPtt-messenger/uPtt-app/issues" target="_blank" rel="noopener">Report an issue<svg aria-hidden="true"><use href="#i-arrow"/></svg></a>
+            </div>
+        </div>
+        <div class="shell reveal" style="--d:.1s">
+            <div class="shell-bar"><span>~/uPtt-app — zsh</span><button type="button" data-copy-from="dev-cmds">Copy</button></div>
+<pre id="dev-cmds" tabindex="0"><span class="cm"># get the source</span>
+<span class="p">❯ </span>git clone https://github.com/uPtt-messenger/uPtt-app.git
+<span class="p">❯ </span>cd uPtt-app
+
+<span class="cm"># install and run (--debug turns on logging)</span>
+<span class="p">❯ </span>pip install -r requirements.txt
+<span class="p">❯ </span>python src/run_app.py --debug
+
+<span class="cm"># run the tests</span>
+<span class="p">❯ </span>pip install -r requirements-dev.txt
+<span class="p">❯ </span>pytest
+<span class="ok">✓ passed</span></pre>
         </div>
     </div>
 </section>
 
-<!-- Developer -->
-<section class="developer" id="developer">
-    <div class="container">
-        <div class="section-label">Developer</div>
-        <h2 class="section-title">Developer Quick Start</h2>
-        <p class="section-desc">uPtt is built with Python 3.12 and PySide6. Contributions welcome.</p>
-        <div class="code-block fade-in">
-            <code>
-                <span class="comment"># Clone the project</span><br>
-                <span class="prompt">$ </span><span class="cmd">git clone git@github.com:uPtt-messenger/uPtt-app.git</span><br>
-                <span class="prompt">$ </span><span class="cmd">cd uPtt-app</span><br>
-                <br>
-                <span class="comment"># Install dependencies</span><br>
-                <span class="prompt">$ </span><span class="cmd">pip install -r requirements.txt</span><br>
-                <br>
-                <span class="comment"># Run</span><br>
-                <span class="prompt">$ </span><span class="cmd">python src/run_app.py</span><br>
-                <br>
-                <span class="comment"># Test</span><br>
-                <span class="prompt">$ </span><span class="cmd">pytest --cov=src/uPtt tests/</span>
-            </code>
-        </div>
-        <div class="dev-links">
-            <a href="https://github.com/uPtt-messenger/uPtt-app" class="btn btn-secondary" target="_blank" rel="noopener">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
-                GitHub Repository
-            </a>
-            <a href="https://github.com/uPtt-messenger/uPtt-app/issues" class="btn btn-secondary" target="_blank" rel="noopener">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                Report Issues
-            </a>
-        </div>
+</main>
 
-        <h3 style="font-family: var(--font-mono); margin-top: 48px; margin-bottom: 12px; font-size: 1.1rem;">Keyboard Shortcuts</h3>
-        <table class="shortcuts-table">
-            <thead>
-                <tr><th>Key</th><th>Action</th></tr>
-            </thead>
-            <tbody>
-                <tr><td><kbd>Ctrl+N</kbd></td><td>Focus new conversation input</td></tr>
-                <tr><td><kbd>Ctrl+W</kbd></td><td>Close current conversation</td></tr>
-                <tr><td><kbd>Ctrl+Q</kbd></td><td>Quit the application</td></tr>
-                <tr><td><kbd>Enter</kbd></td><td>Send message</td></tr>
-            </tbody>
-        </table>
-    </div>
-</section>
-
-<!-- Footer -->
-<footer>
-    <div class="footer-inner">
-        <div class="footer-links">
-            <a href="https://github.com/uPtt-messenger/uPtt-app" target="_blank" rel="noopener">GitHub</a>
-            <a href="https://github.com/uPtt-messenger/uPtt-app/releases" target="_blank" rel="noopener">Releases</a>
-            <a href="https://github.com/uPtt-messenger/uPtt-app/issues" target="_blank" rel="noopener">Issues</a>
-            <a href="https://github.com/uPtt-messenger/uPtt-app/blob/main/LICENSE" target="_blank" rel="noopener">License</a>
-            <a href="https://github.com/uPtt-messenger/uPtt-app/blob/main/CODE_SIGNING_POLICY.md" target="_blank" rel="noopener">Code Signing</a>
+<footer class="footer">
+    <div class="wrap">
+        <div class="footer-top">
+            <p class="footer-quote">For everyone who ever sent a waterball after midnight.<small>PTT has kept generations company since 1995. uPtt just wants to make it a little kinder.</small></p>
+            <div>
+                <h2 class="footer-h">Project</h2>
+                <ul>
+                    <li><a href="https://github.com/uPtt-messenger/uPtt-app" target="_blank" rel="noopener">GitHub</a></li>
+                    <li><a href="https://github.com/uPtt-messenger/uPtt-app/releases" target="_blank" rel="noopener">Releases</a></li>
+                    <li><a href="https://github.com/uPtt-messenger/uPtt-app/issues" target="_blank" rel="noopener">Issues</a></li>
+                    <li><a href="https://pypi.org/project/uPtt/" target="_blank" rel="noopener">PyPI</a></li>
+                </ul>
+            </div>
+            <div>
+                <h2 class="footer-h">About</h2>
+                <ul>
+                    <li><a href="https://github.com/uPtt-messenger/uPtt-app/blob/main/LICENSE" target="_blank" rel="noopener">License GPL-3.0</a></li>
+                    <li><a href="https://github.com/uPtt-messenger/uPtt-app/blob/main/CODE_SIGNING_POLICY.md" target="_blank" rel="noopener">Code signing policy</a></li>
+                    <li><a href="https://github.com/PyPtt/PyPtt" target="_blank" rel="noopener">PyPtt</a></li>
+                    <li><a href="./" hreflang="zh-Hant" lang="zh-Hant">中文</a></li>
+                </ul>
+            </div>
         </div>
-        <p class="footer-copy">
-            &copy; 2024&ndash;2026 uPtt Project &middot; Licensed under <a href="https://github.com/uPtt-messenger/uPtt-app/blob/main/LICENSE" target="_blank" rel="noopener">GPL-3.0</a><br>
-            Powered by <a href="https://github.com/PyPtt/PyPtt" target="_blank" rel="noopener">PyPtt</a> for PTT server communication<br>
-            Code signing by <a href="https://signpath.io" target="_blank" rel="noopener">SignPath.io</a>, verified by <a href="https://signpath.org" target="_blank" rel="noopener">SignPath Foundation</a>
-        </p>
+        <div class="wordmark" aria-hidden="true" data-wordmark>uPtt</div>
+        <div class="footer-bottom">
+            <span>© 2024–2026 uPtt Project · GPL-3.0</span>
+            <span>Thanks to <a href="https://github.com/PyPtt/PyPtt" target="_blank" rel="noopener">PyPtt</a> · Free code signing by <a href="https://signpath.io" target="_blank" rel="noopener">SignPath.io</a>, certificate by <a href="https://signpath.org" target="_blank" rel="noopener">SignPath Foundation</a></span>
+        </div>
     </div>
 </footer>
 
-<script>
-    // Intersection Observer for fade-in animations
-    if ('IntersectionObserver' in window) {
-        const observer = new IntersectionObserver((entries) => {
-            entries.forEach(entry => {
-                if (entry.isIntersecting) {
-                    entry.target.classList.add('visible');
-                    observer.unobserve(entry.target);
-                }
-            });
-        }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
-
-        document.querySelectorAll('.fade-in').forEach(el => observer.observe(el));
-    } else {
-        document.querySelectorAll('.fade-in').forEach(el => el.classList.add('visible'));
-    }
-
-    // Close mobile menu on link click
-    document.querySelectorAll('.nav-links a').forEach(link => {
-        link.addEventListener('click', () => {
-            document.querySelector('.nav-links').classList.remove('open');
-        });
-    });
-
-    // Theme toggle
-    (function () {
-        const toggle = document.getElementById('theme-toggle');
-        if (!toggle) return;
-
-        function currentTheme() {
-            return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
-        }
-
-        function updateLabel() {
-            const isDark = currentTheme() === 'dark';
-            toggle.setAttribute('aria-pressed', String(isDark));
-            toggle.setAttribute('aria-label', isDark ? 'Switch to light theme' : 'Switch to dark theme');
-        }
-
-        updateLabel();
-
-        toggle.addEventListener('click', () => {
-            const next = currentTheme() === 'dark' ? 'light' : 'dark';
-            document.documentElement.setAttribute('data-theme', next);
-            try { localStorage.setItem('uptt-theme', next); } catch (e) {}
-            updateLabel();
-        });
-    })();
-</script>
-
+<script src="main.js" defer></script>
 </body>
 </html>
