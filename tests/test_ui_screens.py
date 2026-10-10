@@ -109,6 +109,33 @@ def test_on_login_result_failure(mock_qthread, mock_worker, mock_query_worker, m
 @patch('src.uPtt.ui.screens.QueryWorker')
 @patch('src.uPtt.ui.screens.PTTWorker')
 @patch('src.uPtt.ui.screens.QThread')
+def test_on_login_result_title_has_no_vip_tag_for_regular_account(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        window.on_login_result(True, "Login Success")
+        assert window._is_vip is False
+        assert window.windowTitle() == "uPtt - MyID"
+
+
+@patch('src.uPtt.ui.screens.vip.is_vip_account', return_value=True)
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.QueryWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
+def test_on_login_result_title_shows_vip_tag_for_vip_account(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, mock_is_vip, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
+    with patch('os.path.exists', return_value=True):
+        window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)
+        qtbot.addWidget(window)
+        window.on_login_result(True, "Login Success")
+        assert window._is_vip is True
+        assert window.windowTitle() == "uPtt - MyID · VIP"
+
+
+@patch('src.uPtt.ui.screens.VersionCheckWorker')
+@patch('src.uPtt.ui.screens.QueryWorker')
+@patch('src.uPtt.ui.screens.PTTWorker')
+@patch('src.uPtt.ui.screens.QThread')
 def test_first_time_login_shows_scan_screen(mock_qthread, mock_worker, mock_query_worker, mock_ver_worker, qtbot, ptt_service_mock, ptt_query_service_mock, db_mock):
     with patch('os.path.exists', return_value=True):
         window = MainWindow(ptt_service_mock, ptt_query_service_mock, db_mock)

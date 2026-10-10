@@ -101,12 +101,42 @@ def test_click_theme_card_applies_and_persists_theme(qtbot, db_mock):
     win = SettingsWindow(db_mock)
     qtbot.addWidget(win)
 
+    qtbot.mouseClick(win._theme_cards["bone"], Qt.LeftButton)
+
+    assert theme.current_theme() == "bone"
+    db_mock.set_config.assert_any_call(config.SETTING_THEME, "bone")
+    assert win._theme_cards["bone"]._selected is True
+    assert win._theme_cards["graphite"]._selected is False
+
+
+# --- Kraft 主題為 VIP 專屬 ---
+
+def test_kraft_theme_locked_for_non_vip(qtbot, db_mock):
+    win = SettingsWindow(db_mock, is_vip=False)
+    qtbot.addWidget(win)
+
+    assert win._theme_cards["kraft"].locked is True
+
+    qtbot.mouseClick(win._theme_cards["kraft"], Qt.LeftButton)
+
+    # 鎖定卡片點擊不套用、不落 DB
+    assert theme.current_theme() != "kraft"
+    assert win._theme_cards["kraft"]._selected is False
+    for call in db_mock.set_config.call_args_list:
+        assert call.args != (config.SETTING_THEME, "kraft")
+
+
+def test_kraft_theme_unlocked_for_vip(qtbot, db_mock):
+    win = SettingsWindow(db_mock, is_vip=True)
+    qtbot.addWidget(win)
+
+    assert win._theme_cards["kraft"].locked is False
+
     qtbot.mouseClick(win._theme_cards["kraft"], Qt.LeftButton)
 
     assert theme.current_theme() == "kraft"
     db_mock.set_config.assert_any_call(config.SETTING_THEME, "kraft")
     assert win._theme_cards["kraft"]._selected is True
-    assert win._theme_cards["graphite"]._selected is False
 
 
 # --- 桌面通知開關：落 DB ---

@@ -9,8 +9,8 @@ import logging
 from PySide6.QtCore import Qt, QMetaObject, Signal
 from PySide6.QtGui import QFont, QColor, QPainter, QPen
 from PySide6.QtWidgets import (
-    QCheckBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QSpinBox, QTabWidget,
-    QVBoxLayout, QWidget,
+    QCheckBox, QFrame, QGraphicsOpacityEffect, QGridLayout, QHBoxLayout, QLabel,
+    QSpinBox, QTabWidget, QToolTip, QVBoxLayout, QWidget,
 )
 
 from uPtt import __version__, config, contant
@@ -25,7 +25,7 @@ logger = logging.getLogger("uPtt.settings")
 _THEME_META = {
     'graphite': {'name': 'Graphite', 'tag': '深色 · 冷灰中性 + 鼠尾草綠'},
     'bone': {'name': 'Bone', 'tag': '淺色 · 冷灰白'},
-    'kraft': {'name': '再生紙', 'tag': '暖色 · 再生紙感'},
+    'kraft': {'name': '再生紙', 'tag': 'VIP 專屬 · 暖色 · 再生紙感', 'vip_only': True},
 }
 
 
@@ -131,16 +131,24 @@ class ToggleSwitch(QCheckBox):
 
 class ThemeCard(QFrame):
     """單張主題預覽卡：name + tag + bg/surface/accent 色票，選中時套 accent 邊框。
-    點擊發射 clicked(theme_id)；選中狀態由外層容器（SettingsWindow）透過 set_selected() 控制。"""
+    點擊發射 clicked(theme_id)；選中狀態由外層容器（SettingsWindow）透過 set_selected() 控制。
+    locked=True（VIP 專屬主題但帳號非 VIP）時：卡片半透明、游標變禁止圖示、點擊不會
+    emit clicked，只彈出提示文字，不會套用/儲存該主題。"""
 
     clicked = Signal(str)
 
-    def __init__(self, theme_id: str, theme_dict: dict, parent=None):
+    def __init__(self, theme_id: str, theme_dict: dict, locked: bool = False, parent=None):
         super().__init__(parent)
         self.theme_id = theme_id
+        self.locked = locked
         self._selected = False
-        self.setCursor(Qt.PointingHandCursor)
+        self.setCursor(Qt.ForbiddenCursor if locked else Qt.PointingHandCursor)
         self.setFixedSize(116, 116)  # tag 最長兩行需要的高度（如 graphite 的「深色‧冷灰中性 + 鼠尾草綠」）
+
+        if locked:
+            opacity = QGraphicsOpacityEffect(self)
+            opacity.setOpacity(0.5)
+            self.setGraphicsEffect(opacity)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 8)
@@ -166,7 +174,8 @@ class ThemeCard(QFrame):
         layout.addWidget(swatch)
 
         meta = _THEME_META.get(theme_id, {'name': theme_id, 'tag': ''})
-        self._name_label = QLabel(meta['name'])
+        name_text = f"{meta['name']} 🔒" if locked else meta['name']
+        self._name_label = QLabel(name_text)
         layout.addWidget(self._name_label)
 
         self._tag_label = QLabel(meta['tag'])
@@ -176,6 +185,9 @@ class ThemeCard(QFrame):
         theme.register_restyle(self, _restyle_theme_card)
 
     def mousePressEvent(self, event):
+        if self.locked:
+            QToolTip.showText(event.globalPosition().toPoint(), "VIP 專屬主題", self)
+            return
         self.clicked.emit(self.theme_id)
         super().mousePressEvent(event)
 
@@ -308,11 +320,12 @@ class SettingsWindow(QWidget):
         通知對應 worker 的 apply_poll_intervals() 立即套用到執行中的計時器。
     """
 
-    def __init__(self, db, worker=None, query_worker=None, parent=None):
+    def __init__(self, db, worker=None, query_worker=None, is_vip: bool = False, parent=None):
         super().__init__(parent)
         self.db = db
         self.worker = worker
         self.query_worker = query_worker
+        self.is_vip = is_vip
 
         self.setWindowTitle("設定")
         self.setAttribute(Qt.WA_StyledBackground, True)
@@ -358,7 +371,9 @@ class SettingsWindow(QWidget):
         cards_layout = QHBoxLayout()
         cards_layout.setSpacing(10)
         for theme_id, theme_dict in theme.THEMES.items():
-            tcard = ThemeCard(theme_id, theme_dict)
+            meta = _THEME_META.get(theme_id, {})
+            locked = meta.get('vip_only', False) and not self.is_vip
+            tcard = ThemeCard(theme_id, theme_dict, locked=locked)
             tcard.set_selected(theme_id == self._selected_theme)
             tcard.clicked.connect(self._on_theme_card_clicked)
             self._theme_cards[theme_id] = tcard
